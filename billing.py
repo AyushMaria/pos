@@ -15,10 +15,28 @@ load_dotenv()
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "YOUR_SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY", "YOUR_SUPABASE_KEY")
 TABLE_NAME = "products"
+ADD_PRODUCT_TRIGGER = "SYS_ADD_PRODUCT"
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 bill: list[dict] = []
 
+
+adding_product_mode = False
+
+def insert_product(barcode: str, name: str, mrp: float, main_group: str = "", sub_group: str = "") -> bool:
+    try:
+        supabase.table(TABLE_NAME).insert({
+            "upc_ean_code": barcode,
+            "item_name": name,
+            "mrp": mrp,
+            "main_group": main_group,
+            "sub_group": sub_group,
+        }).execute()
+        print(f"✓ Product added -> {name} (₹{mrp}) [{barcode}]")
+        return True
+    except Exception as e:
+        print(f"✗ Failed to add product: {e}")
+        return False
 
 def lookup_barcode(barcode: str) -> dict | None:
     barcode = barcode.strip()
@@ -97,8 +115,32 @@ def main() -> None:
         if not raw:
             continue
 
-        cmd = raw.upper()
+        if raw == ADD_PRODUCT_TRIGGER:
+            global adding_product_mode
+            adding_product_mode = True
+            print("\n>>> ADD PRODUCT MODE — scan the new product's barcode now <<<\n")
+            continue
 
+        if adding_product_mode:
+            new_barcode = raw
+            existing = lookup_barcode(new_barcode)
+            if existing:
+                print(f"⚠ Barcode already exists as '{existing['item_name']}'. Use edit mode instead.")
+                adding_product_mode = False
+                continue
+            name = input("Product name: ").strip()
+            try:
+                mrp = float(input("MRP: ").strip())
+            except ValueError:
+                print("Invalid price, cancelling add.")
+                adding_product_mode = False
+                continue
+            main_group = input("Category (optional): ").strip()
+            insert_product(new_barcode, name, mrp, main_group)
+            adding_product_mode = False
+            continue
+
+        cmd = raw.upper()
         if cmd == "Q":
             print("Exiting.")
             break
