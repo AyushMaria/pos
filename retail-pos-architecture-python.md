@@ -633,6 +633,8 @@ Both slot into `PaymentProvider` without touching the register:
 - **PSP-verified UPI** — the webhook lands in the cloud, not on the terminal (which is behind NAT and often offline). An Edge Function writes a confirmation row; the terminal picks it up through the existing sync pull and flips `verified = 1`. Offline still falls back to attestation.
 - **A payment terminal — Pine Labs or equivalent — is the intended path**, and it collapses both problems into one device: the terminal takes card *and* UPI and reports back what it actually settled, so attestation stops being a cashier's word and the missing `tr` (§13.3) stops mattering. It is also where PCI scope returns (SAQ-C-VT/P2PE) and where the vendor's SDK shape starts to matter. Get those docs before building it, not before building the rest.
 
+A dynamic QR was dropped for want of a surface to show it on, not for want of effort: it needs a second screen, a printer, or a terminal with its own display, and v1 has none of the three. Note that a payment terminal **presents its own amount**, so arriving at one does not bring QR rendering back — the deep-link path returns only if a shop somehow acquires a customer display without a terminal, which is the less likely order to buy things in.
+
 This is the whole reason every method goes through `PaymentProvider` from day one. Attestation is an MVP answer with a known weakness, and replacing it should be a new provider and a settlement reconciler — not a change to the register.
 
 ---
