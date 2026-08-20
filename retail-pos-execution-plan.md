@@ -20,6 +20,7 @@ Stated so you can correct them — several materially change the schedule.
 | Single store, single terminal for v1; multi-store is a later concern | Multi-store from day one adds ~2 weeks across phases 1, 7 and 8 |
 | Windows-only deployment | Cross-platform adds ~1 week in phase 9 (signing, packaging) |
 | Cash + UPI only; no card | Card adds 3–4 weeks, returns PCI scope, and would reintroduce hardware |
+| UPI is received against the shop's existing printed counter QR, and confirmed by the cashier | If a shop has no standee, or wants the till to present the QR, QR rendering and a way to show it to the customer come back — roughly a week |
 | GST-inclusive pricing (India retail) | Tax-added-at-tender changes the pricing engine and invoice layout |
 | Digital receipts are acceptable to the store and to GST invoice rules | If a printed invoice is legally or practically required, peripherals come back and add ~3 weeks |
 | A USB HID scanner is on the counter (Helett HT20 Pro — confirmed, not assumed) | If a store has no scanner, entry falls back to the keyboard and the week-8 speed risk returns in full |
@@ -48,7 +49,7 @@ Nothing here is optional and almost none of it is coding.
 - [x] Single vs. multi-store — determines `store_id` scoping everywhere — single store
 - [x] Tax model: GST-inclusive vs. added at tender — GST-inclusive
 - [x] Cash rounding to nearest ₹1, or exact with coins — nearest ₹1, applied at tender only, never on line items or the GST base
-- [x] UPI VPA per terminal or per store (per terminal makes settlement matching far easier) — per terminal
+- [x] UPI VPA per terminal or per store (per terminal makes settlement matching far easier) — per terminal *where the counter's printed QR allows it*. The shops pay into an existing standee QR rather than one the till generates, so in practice this is settled by whatever is already stuck to the counter, not by configuration (architecture §13.3).
 - [x] Target OS and Python version floor (3.14+ gives stdlib `uuid7`) — Windows; **runs on 3.10+ in practice**. 3.14 was not available when phase 1 was built, so `domain/ids.py` carries an RFC 9562 `uuid7()` that the stdlib call simply replaces when the floor moves. CI runs 3.12 and 3.14.
 - [x] Receipt delivery: on-screen only, PDF, or share by link/WhatsApp — decides the renderer and whether customer contact details are captured — **on-screen, with PDF on demand.** Built in phase 3 from a single receipt document model.
   - WhatsApp sharing is wanted and is *not* built. It needs a customer phone number captured at the till, which is a separate decision about what the shop stores about its customers and where — not a rendering question. The PDF is the prerequisite for it either way, so none of the phase 3 work becomes rework.
@@ -113,15 +114,20 @@ The open question going in was the no-barcode tail — 38% of the migrated catal
 
 One thing the decision does not settle, and it belongs to phase 6 rather than here: **an internal code that is never printed cannot be scanned.** Assigning `21…` to loose potatoes makes the catalogue complete; it does not put a code on the potatoes. Whatever is sold loose or by weight still has to be *selected* somehow — a shelf label the cashier scans, a quick-key grid, or the search — and which of those it is decides how much the weighed-item flow (architecture §10.3) needs at the counter.
 
-### Phase 4 — UPI tender (weeks 9–10)
+### Phase 4 — UPI tender (weeks 9–10, now smaller)
 
-- `UpiQrProvider`, deep-link construction, `qrcode` rendering to the screen
-- QR presentation on the register screen, sized and contrasted to scan reliably from a phone
-- Manual attestation with audit row, attempt expiry and auto-cancel
+**The shops already have a printed UPI QR on the counter, and there is no customer-facing screen.** So the till never renders a QR: no deep-link construction, no `qrcode` dependency, no second window, no scan-from-arm's-length test. The customer pays the standee; the POS records that it happened.
+
+- `UpiProvider` — attestation-only, no QR surface
+- Manual attestation with audit row, capturing the UTR and **the amount actually paid**, attempt expiry and auto-cancel
 - `requires_review` queue and supervisor resolution
 - Split cash + UPI flow end to end, including where rounding lands when only part of the basket is paid in cash
 
-**Exit criteria:** all three tender combinations complete correctly; a QR displayed on screen scans first time from an arm's length away; an expired QR releases the cart cleanly; an attested UPI sale is visibly distinct from a verified one in the data; a UPI-only sale carries no cash rounding adjustment.
+**One consequence of the static QR, and it is the reason to read §13.3 before building this:** the payment carries no `tr`, so nothing in the bank statement points back at a sale. Reconciliation is by amount and time, and the customer types the amount themselves — so a UPI payment can arrive short or over. The attested amount is an input defaulting to the outstanding balance, never an assumption.
+
+**Exit criteria:** all three tender combinations complete correctly; a short UPI payment leaves a balance the cashier can settle in cash without leaving the sale; an expired attempt releases the cart cleanly; an attested UPI sale is visibly distinct from a verified one in the data; a UPI-only sale carries no cash rounding adjustment.
+
+*The MVP answer to “did the money arrive?” is a cashier tapping Received. That is how these shops already work, and it is deliberately temporary — a payment terminal (Pine Labs or equivalent) is the intended replacement and brings card with it. Everything routes through `PaymentProvider` so that swap is a new provider, not a rewrite.*
 
 ### Phase 5 — Sync engine (weeks 11–13)
 

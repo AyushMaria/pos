@@ -25,7 +25,7 @@ This document describes the whole system. Roughly a third of it is now running c
 | 10 | Barcode subsystem | Built, plus a weighed-item *generator* (§10.3) that the original design did not anticipate. |
 | 11 | RBAC | The matrix is built and generated from one source into Postgres, Python and TypeScript. Manager override is phase 7. |
 | 12 | Peripherals | Scanner only — and it needs no code. |
-| 13 | Payments | Lifecycle, state machine and split-tender balance loop built; `CashProvider` is the only registered provider. UPI is phase 4. |
+| 13 | Payments | Lifecycle, state machine and split-tender balance loop built; `CashProvider` is the only registered provider. UPI is phase 4, and smaller than first scoped — the shops' QR is already printed on the counter, so there is nothing to render (§13.3). |
 | 14 | Packaging | Not started. The code-signing certificate is the long-lead item and is still unstarted. |
 | 15 | Testing | 513 Python tests (+27 skipped without the Postgres extra), 27 RLS tests against a real Postgres, 17 UI tests. |
 
@@ -552,7 +552,7 @@ Every row above except the scanner is deferred past v1 (execution plan §8). The
 
 `python-escpos` covering five transports out of the box is the strongest single argument for this stack — it is the hardest part of the Rust variant, largely solved, and it is what makes the deferral cheap to reverse.
 
-**Customer-facing QR display:** the second pywebview window doubles as the UPI QR surface, so no additional hardware is needed. Thermal printers also render QR natively via ESC/POS `GS ( k`, which is the fallback when there is no second screen.
+**No customer-facing display, and no QR surface of any kind.** The shops already have a printed UPI QR standing on the counter, so the till never generates or shows one (§13.3). A second pywebview window remains available if a customer display is ever wanted for line items, but nothing in v1 needs it.
 
 Payment handling is in §13. **No card reader in v1 means no PCI scope at all** — the application never sees card data because there is no card path.
 
@@ -598,21 +598,23 @@ while balance > 0:
 post sale when balance ≤ 0;  change due = −balance  (cash only)
 ```
 
-Because UPI amounts are embedded in the QR, only cash can overpay — so change is computed only for a cash-final tender. A UPI attempt is always for the exact outstanding balance.
+With a **dynamic** QR the amount is embedded, so only cash can overpay. **The shops use a static printed QR** (§13.3), and the customer types the amount into their own app — so a UPI payment can arrive short, or over, and the till must not assume otherwise.
 
-### 13.3 UPI QR flow
+The attested amount is therefore an input, defaulting to the outstanding balance rather than being fixed to it. A short payment leaves a balance and the loop simply continues, which is the split-tender machinery already doing its job. An overpayment is the case worth naming: change against a UPI tender has to be handed over in cash, and the till records it as exactly that.
 
-The QR is generated locally from a UPI deep link; no PSP, no internet, no vendor account beyond a VPA:
+### 13.3 UPI flow — static counter QR
 
-```
-upi://pay?pa={vpa}&pn={payee}&am={amount}&cu=INR&tn={note}&tr={txn_ref}
-```
+**The till generates no QR.** The shops already have a printed UPI QR standing on the counter; the customer scans that, types the amount into their own app, and pays. So there is no deep link to build, no `qrcode` dependency, no customer-facing window and no ESC/POS QR fallback. The UPI provider's `begin()` displays an instruction, not an image.
 
-Rendered with `qrcode` to the customer-facing window, or printed via ESC/POS. `txn_ref` is the `payment_attempts.id`, which is what makes later settlement reconciliation possible.
+This is the cheapest possible integration and it costs one specific thing, which is worth stating plainly rather than discovering at a shift close:
 
-**Confirmation in v1 is manual attestation.** The cashier sees the notification on the merchant phone or soundbox and taps "Received"; optionally captures the UTR. Recorded as `confirmation_method='manual_attestation'` with `confirmed_by`, `verified = 0`, and an audit row. This is how most small shops already operate, and it works fully offline — UPI needs the *customer's* connectivity, not the terminal's.
+> **There is no `tr` on the payment.** A dynamic QR would carry `tr={payment_attempts.id}`, tying each payment to the attempt that expected it. A printed standee carries only the VPA, so the bank statement shows an amount and a time and nothing that points back at a sale.
 
-QR attempts expire (default 5 min) and auto-cancel, so an abandoned scan cannot leave a cart wedged.
+Reconciliation is therefore by **amount and timestamp**, with the UTR captured at attestation when the cashier can be bothered to read it off the customer's phone — which makes the UTR field more valuable here than it was in the original design, not less. Two sales for the same amount within a minute are indistinguishable in the statement. That is acceptable for an MVP and it is the main thing verified UPI later buys back.
+
+**Confirmation is manual attestation.** The cashier hears the soundbox or sees the notification on the merchant phone and taps "Received", optionally capturing the UTR and the amount actually paid. Recorded as `confirmation_method='manual_attestation'` with `confirmed_by`, `verified = 0`, and an audit row. This is how these shops already operate, and it works fully offline — UPI needs the *customer's* connectivity, not the terminal's.
+
+Attempts still expire (default 5 min) and auto-cancel, so a customer who wanders off cannot leave a cart wedged.
 
 ### 13.4 Rounding is tender-dependent
 
@@ -629,7 +631,9 @@ If you don't stock coins, a ₹123.40 total is collected as ₹123 in cash but �
 Both slot into `PaymentProvider` without touching the register:
 
 - **PSP-verified UPI** — the webhook lands in the cloud, not on the terminal (which is behind NAT and often offline). An Edge Function writes a confirmation row; the terminal picks it up through the existing sync pull and flips `verified = 1`. Offline still falls back to attestation.
-- **Card** — a semi-integrated terminal, at which point PCI scope returns (SAQ-C-VT/P2PE) and the vendor's SDK shape matters. Get those docs before building it, not before building the rest.
+- **A payment terminal — Pine Labs or equivalent — is the intended path**, and it collapses both problems into one device: the terminal takes card *and* UPI and reports back what it actually settled, so attestation stops being a cashier's word and the missing `tr` (§13.3) stops mattering. It is also where PCI scope returns (SAQ-C-VT/P2PE) and where the vendor's SDK shape starts to matter. Get those docs before building it, not before building the rest.
+
+This is the whole reason every method goes through `PaymentProvider` from day one. Attestation is an MVP answer with a known weakness, and replacing it should be a new provider and a settlement reconciler — not a change to the register.
 
 ---
 
@@ -737,10 +741,10 @@ Phases 1–4 give a sellable single-terminal till taking cash and UPI. Phase 5 i
 - **Receipt delivery: on screen, with PDF on demand.** Both render from one document model. WhatsApp sharing is wanted but unbuilt — it needs a customer phone number captured at the till, which is a question about what the shop stores, not about rendering.
 - **Windows**, running on Python 3.10+ (§7).
 - **The scanner is in scope** and in use; every other peripheral is deferred (§12).
+- **No customer-facing screen, and no QR rendering.** The counter already has a printed UPI QR, so the till confirms payments rather than presenting them (§13.3).
 
 **Still open:**
 
-- **Whether a customer-facing screen exists** — if not, the UPI QR needs a printer instead, which changes the tender flow. Blocks part of phase 4.
-- **PSP for verified UPI later** — not needed for v1, but the choice determines the webhook payload the Edge Function will parse.
+- **How UPI gets verified later** — a payment terminal (Pine Labs or equivalent) is the current intent rather than a PSP webhook, since it also brings card. Not needed for v1; the choice shapes the settlement reconciler, not the register (§13.6).
 - **Real per-product GST rates.** The development catalogue's tax codes are *inferred* from `main_group`, with 19,614 products defaulted to 18%. This is a development convenience and must not reach a pilot; the owner has to review them during the week-18 catalogue migration.
 - **The code-signing certificate**, unstarted. Pure calendar time, and it blocks phase 9 rather than being blocked by anything.
