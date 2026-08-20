@@ -53,6 +53,8 @@ Nothing here is optional and almost none of it is coding.
 - [x] Receipt delivery: on-screen only, PDF, or share by link/WhatsApp — decides the renderer and whether customer contact details are captured — **on-screen, with PDF on demand.** Built in phase 3 from a single receipt document model.
   - WhatsApp sharing is wanted and is *not* built. It needs a customer phone number captured at the till, which is a separate decision about what the shop stores about its customers and where — not a rendering question. The PDF is the prerequisite for it either way, so none of the phase 3 work becomes rework.
 
+- [x] **Every product carries a barcode — no exceptions.** Decided after M1. A product with no code cannot be created and cannot be sold: the catalogue import assigns an internal `21…` code to anything the manufacturer did not code, and weighed goods get a generated `22…` code at the counter. This makes name search a fallback rather than a daily path, and it is the reason the no-barcode tail is no longer treated as a risk (§6, §9).
+
 **Stand up the skeleton:**
 
 - Repo with the module layout from architecture §3, minus `app/peripherals/`
@@ -105,9 +107,11 @@ Nothing here is optional and almost none of it is coding.
 
 **Exit criteria:** enter 10 items by barcode and by search, void a line, take cash, produce a legible receipt with a correct GST breakdown and a visible rounding line, sale lands in SQLite with balanced totals. Kill the process mid-sale and confirm no partial sale exists. Scan ten items with the real scanner, including one scanned while the tender dialog is open, and confirm each lands exactly once.
 
-**Milestone M1: first complete sale.** Get someone who isn't a developer to run 20 transactions and watch where they hesitate. Time them.
+**Milestone M1: first complete sale. ✅ Done.** A non-developer ran the register with the scanner.
 
-With a scanner on the counter, the speed of a *scanned* basket is no longer the question worth asking. What M1 now measures is the rest of it: the items with no barcode at all — 38% of the migrated catalogue (§6) — which are still found by typing a name. **Time a mixed basket, not an all-scanned one**, or the number will flatter the design and the real bottleneck will surface at the pilot instead.
+The open question going in was the no-barcode tail — 38% of the migrated catalogue, findable only by typing a name. **That is now closed by a product decision rather than by a UI change:** every product will carry a barcode, so name search becomes a fallback for when a code will not read, not a path anyone walks twenty times a shift. The 38% is a migration job (§6), not a counter workflow.
+
+One thing the decision does not settle, and it belongs to phase 6 rather than here: **an internal code that is never printed cannot be scanned.** Assigning `21…` to loose potatoes makes the catalogue complete; it does not put a code on the potatoes. Whatever is sold loose or by weight still has to be *selected* somehow — a shelf label the cashier scans, a quick-key grid, or the search — and which of those it is decides how much the weighed-item flow (architecture §10.3) needs at the counter.
 
 ### Phase 4 — UPI tender (weeks 9–10)
 
@@ -219,7 +223,9 @@ Usually underestimated, and it blocks the pilot rather than the build. Start at 
 2. **Clean:** duplicate barcodes (the most common problem — the same code on two products), missing check digits, prices as text, products with no barcode at all.
 3. **Map** to the schema: categories, tax codes, UOM, `is_weighed` flags.
 4. **Dry-run import** into a scratch SQLite; produce an exceptions report for the owner to resolve by hand.
-5. **Assign internal codes** to everything with no manufacturer barcode — 38% of the current export, and the largest single finding from profiling it. Without label printing, an internal code cannot be scanned, so these products can only be found by name. The scanner makes this gap *wider*, not narrower: name search is now the only slow path left at the counter. So the search has to be good and the names have to be sane. Budget time for renaming, not for labelling.
+5. **Assign internal codes** to everything with no manufacturer barcode — 38% of the current export, and the largest single finding from profiling it. This is now **mandatory rather than advisable** (§2): a product without a code cannot be created or sold, so the import must leave nothing uncoded and the exceptions report in step 4 must be empty before go-live, not merely short.
+
+   An internal code makes the product *sellable*; it does not make it *scannable*, because nothing prints these labels yet. Decide per product which of the two it needs: a packaged good that simply lacks a manufacturer code needs a printed shelf or product label; something sold loose or by weight needs the weighed-item flow instead. Budget time for that triage, and for renaming — the names are still what the fallback search matches on.
 6. **Opening stock count** the day before go-live; it seeds the ledger and it cannot be rushed.
 
 Write the importer as a repeatable script, never a one-off. You will run it more than once.
@@ -271,7 +277,8 @@ Write this list somewhere the owner can see it, and revisit it only after the pi
 | 1 | Signing certificate applied for | Long lead time; slipping it delays phase 9 |
 | 5 | GST breakdown and ₹1 rounding correct on a mixed-rate basket, verified against a real invoice | Tax and rounding errors found at pilot are the most expensive class of defect here |
 | 6 | The store's own scanner drives the register end to end | Cleared early — a Helett HT20 Pro scans into the till today. **Recheck on the pilot machine**: the terminator suffix is configurable, and a scanner set to send Tab instead of Enter never completes a scan at all |
-| 8 | M1 demo — a 20-item **mixed** basket at realistic speed: scanned items *and* items with no barcode | The scanner removes most of the entry-speed risk. What is left is the no-barcode tail — 38% of the catalogue — findable only by name. If that path is slow, redesign the search now, not at pilot |
+| 8 | M1 demo — a 20-item basket at realistic speed | ✅ Passed. Entry speed is no longer the live risk: the scanner covers it, and every product will carry a barcode by policy (§2) |
+| 15 | Every product in the imported catalogue has a code, and everything sold loose has a way to be *selected* at the counter | A complete catalogue is not the same as a scannable shelf. If loose goods have no answer by the end of phase 6, the gap surfaces during the shadow week, which is the worst place to find it |
 | 8 | Owner confirms a digital receipt is acceptable in practice | If customers or GST rules demand paper, peripherals return and the schedule moves by ~3 weeks |
 | 13 | M2 chaos test passes | Sync defects found after go-live mean lost sales and lost trust |
 | 18 | Catalog export obtained and profiled | Bad source data is the most common cause of pilot slippage |

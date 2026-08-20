@@ -35,7 +35,10 @@ python scripts/run_rls_tests.py  # 27 passed, against bundled Postgres
 npm test          (in ui-src/)   # 17 passed
 ```
 
-Two things known to be wrong in the data rather than the code, and both must be fixed before a pilot: **GST rates in the development catalogue are inferred** from `main_group`, with 19,614 products defaulted to 18% — nobody has reviewed them; and **38% of the catalogue has no barcode at all**, so those products are findable only by name.
+Two things known to be wrong in the **data** rather than the code, both to be fixed during the catalogue migration and neither of them a pilot-ready state:
+
+* **GST rates are inferred** from `main_group`, with 19,614 products defaulted to 18%. Nobody has reviewed them.
+* **38% of the catalogue has no barcode at all.** Every product must carry one — see §10.4 — so the import has to code them, and the till has to refuse to create a product without one.
 
 ---
 
@@ -435,6 +438,19 @@ Grams fall out for free: quantities are already stored as integer thousandths of
 **Built in the domain, not yet exposed.** There is no weigh-and-generate screen and nothing prints these — both are deferred with the rest of the peripheral work (execution plan §8). The rule is settled and tested, which is what matters: `parse()` already reads a `22…` code back into a product and a quantity, so the counter flow can be added later without revisiting the format.
 
 **Labels, when printing arrives:** `python-barcode` + `reportlab` to Avery-style PDF sheets, or ZPL for Zebra printers.
+
+### 10.4 Every product carries a code
+
+A product with no barcode cannot be created and cannot be sold. Decided after M1, and it is a constraint on the whole system rather than a validation rule on one form:
+
+* **Catalogue import** assigns an internal `21…` code to anything the manufacturer did not code, and finishes with nothing uncoded.
+* **Quick-create** at the counter mints a code as part of creating the product, rather than offering a code-less row to be tidied up later. There is no "add without barcode" path to leave one behind.
+* **Weighed goods** get a generated `22…` code (§10.3), which is the same rule applied to items whose quantity is not known until the counter.
+* **Name search stays**, as a fallback for a label that will not read — not as a daily path. It is why product names still have to be sane, but it is no longer what the design is optimised around.
+
+The reason to state it here rather than in the catalogue screens is that it is what makes the rest of the subsystem coherent: `unknown_scans` becomes a genuine exception queue instead of a parking space, stock movements always have something to reference, and the register has one way in rather than two.
+
+**What it does not settle.** A code makes a product *sellable*; a printed label makes it *scannable*, and printing is deferred. Anything sold loose or by weight therefore still needs a way to be selected at the counter — a scannable shelf label, a quick-key grid, or the search — and that choice is what decides how much of §10.3 has to surface in the UI. Phase 6 work, and open.
 
 ---
 
