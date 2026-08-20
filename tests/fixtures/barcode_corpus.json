@@ -1,0 +1,2063 @@
+{
+  "source": "legacy billing Supabase, table 'products'",
+  "note": "Real barcodes from actual stock, sampled to cover every branch rather than every row. Classification here is a profiling heuristic; app/domain/barcode.py is authoritative.",
+  "catalogue_rows": 32165,
+  "catalogue_without_barcode": 12431,
+  "count": 308,
+  "barcodes": [
+    {
+      "barcode": "1070965182454",
+      "symbology": "EAN13",
+      "valid": true,
+      "kind": "manufacturer"
+    },
+    {
+      "barcode": "1300002714013",
+      "symbology": "EAN13",
+      "valid": false,
+      "note": "check digit is 3, should be 1",
+      "kind": "malformed"
+    },
+    {
+      "barcode": "1302199910777",
+      "symbology": "EAN13",
+      "valid": false,
+      "note": "check digit is 7, should be 1",
+      "kind": "malformed"
+    },
+    {
+      "barcode": "1609196310777",
+      "symbology": "EAN13",
+      "valid": false,
+      "note": "check digit is 7, should be 2",
+      "kind": "malformed"
+    },
+    {
+      "barcode": "1989251189305",
+      "symbology": "EAN13",
+      "valid": false,
+      "note": "check digit is 5, should be 8",
+      "kind": "malformed"
+    },
+    {
+      "barcode": "1989251189306",
+      "symbology": "EAN13",
+      "valid": false,
+      "note": "check digit is 6, should be 8",
+      "kind": "malformed"
+    },
+    {
+      "barcode": "2211198810777",
+      "symbology": "EAN13",
+      "valid": false,
+      "note": "check digit is 7, should be 9",
+      "kind": "malformed"
+    },
+    {
+      "barcode": "3300003170174",
+      "symbology": "EAN13",
+      "valid": false,
+      "note": "check digit is 4, should be 3",
+      "kind": "malformed"
+    },
+    {
+      "barcode": "3300003170185",
+      "symbology": "EAN13",
+      "valid": false,
+      "note": "check digit is 5, should be 0",
+      "kind": "malformed"
+    },
+    {
+      "barcode": "3907639863807",
+      "symbology": "EAN13",
+      "valid": false,
+      "note": "check digit is 7, should be 8",
+      "kind": "malformed"
+    },
+    {
+      "barcode": "4005808679829",
+      "symbology": "EAN13",
+      "valid": true,
+      "kind": "manufacturer"
+    },
+    {
+      "barcode": "4005900848352",
+      "symbology": "EAN13",
+      "valid": true,
+      "kind": "manufacturer"
+    },
+    {
+      "barcode": "4902430538794",
+      "symbology": "EAN13",
+      "valid": true,
+      "kind": "manufacturer"
+    },
+    {
+      "barcode": "4902430752299",
+      "symbology": "EAN13",
+      "valid": true,
+      "kind": "manufacturer"
+    },
+    {
+      "barcode": "4902430818834",
+      "symbology": "EAN13",
+      "valid": true,
+      "kind": "manufacturer"
+    },
+    {
+      "barcode": "4902430882187",
+      "symbology": "EAN13",
+      "valid": true,
+      "kind": "manufacturer"
+    },
+    {
+      "barcode": "4902430918558",
+      "symbology": "EAN13",
+      "valid": true,
+      "kind": "manufacturer"
+    },
+    {
+      "barcode": "4987176030108",
+      "symbology": "EAN13",
+      "valid": true,
+      "kind": "manufacturer"
+    },
+    {
+      "barcode": "4987176077714",
+      "symbology": "EAN13",
+      "valid": true,
+      "kind": "manufacturer"
+    },
+    {
+      "barcode": "4987176137562",
+      "symbology": "EAN13",
+      "valid": true,
+      "kind": "manufacturer"
+    },
+    {
+      "barcode": "4987176192226",
+      "symbology": "EAN13",
+      "valid": true,
+      "kind": "manufacturer"
+    },
+    {
+      "barcode": "4987176254399",
+      "symbology": "EAN13",
+      "valid": true,
+      "kind": "manufacturer"
+    },
+    {
+      "barcode": "4987176303844",
+      "symbology": "EAN13",
+      "valid": true,
+      "kind": "manufacturer"
+    },
+    {
+      "barcode": "5012035998288",
+      "symbology": "EAN13",
+      "valid": true,
+      "kind": "manufacturer"
+    },
+    {
+      "barcode": "6922927214794",
+      "symbology": "EAN13",
+      "valid": true,
+      "kind": "manufacturer"
+    },
+    {
+      "barcode": "6952196105172",
+      "symbology": "EAN13",
+      "valid": true,
+      "kind": "manufacturer"
+    },
+    {
+      "barcode": "7622201150440",
+      "symbology": "EAN13",
+      "valid": true,
+      "kind": "manufacturer"
+    },
+    {
+      "barcode": "7622201798260",
+      "symbology": "EAN13",
+      "valid": true,
+      "kind": "manufacturer"
+    },
+    {
+      "barcode": "7622202335488",
+      "symbology": "EAN13",
+      "valid": true,
+      "kind": "manufacturer"
+    },
+    {
+      "barcode": "8058664170210",
+      "symbology": "EAN13",
+      "valid": true,
+      "kind": "manufacturer"
+    },
+    {
+      "barcode": "8801055724611",
+      "symbology": "EAN13",
+      "valid": true,
+      "kind": "manufacturer"
+    },
+    {
+      "barcode": "8900019951367",
+      "symbology": "EAN13",
+      "valid": true,
+      "kind": "india_gs1"
+    },
+    {
+      "barcode": "8901030713002",
+      "symbology": "EAN13",
+      "valid": true,
+      "kind": "india_gs1"
+    },
+    {
+      "barcode": "8901030876783",
+      "symbology": "EAN13",
+      "valid": true,
+      "kind": "india_gs1"
+    },
+    {
+      "barcode": "8901058872200",
+      "symbology": "EAN13",
+      "valid": true,
+      "kind": "india_gs1"
+    },
+    {
+      "barcode": "8901138822248",
+      "symbology": "EAN13",
+      "valid": true,
+      "kind": "india_gs1"
+    },
+    {
+      "barcode": "8901248253635",
+      "symbology": "EAN13",
+      "valid": true,
+      "kind": "india_gs1"
+    },
+    {
+      "barcode": "8901309005374",
+      "symbology": "EAN13",
+      "valid": false,
+      "note": "check digit is 4, should be 1",
+      "kind": "malformed"
+    },
+    {
+      "barcode": "8901309233224",
+      "symbology": "EAN13",
+      "valid": true,
+      "kind": "india_gs1"
+    },
+    {
+      "barcode": "8901372158788",
+      "symbology": "EAN13",
+      "valid": false,
+      "note": "check digit is 8, should be 3",
+      "kind": "malformed"
+    },
+    {
+      "barcode": "8901372169253",
+      "symbology": "EAN13",
+      "valid": true,
+      "kind": "india_gs1"
+    },
+    {
+      "barcode": "8901425000434",
+      "symbology": "EAN13",
+      "valid": true,
+      "kind": "india_gs1"
+    },
+    {
+      "barcode": "8901548146767",
+      "symbology": "EAN13",
+      "valid": true,
+      "kind": "india_gs1"
+    },
+    {
+      "barcode": "8901719127595",
+      "symbology": "EAN13",
+      "valid": true,
+      "kind": "india_gs1"
+    },
+    {
+      "barcode": "8901860621034",
+      "symbology": "EAN13",
+      "valid": true,
+      "kind": "india_gs1"
+    },
+    {
+      "barcode": "8902978023047",
+      "symbology": "EAN13",
+      "valid": false,
+      "note": "check digit is 7, should be 8",
+      "kind": "malformed"
+    },
+    {
+      "barcode": "8903105032247",
+      "symbology": "EAN13",
+      "valid": true,
+      "kind": "india_gs1"
+    },
+    {
+      "barcode": "8904009603618",
+      "symbology": "EAN13",
+      "valid": true,
+      "kind": "india_gs1"
+    },
+    {
+      "barcode": "8904082780565",
+      "symbology": "EAN13",
+      "valid": true,
+      "kind": "india_gs1"
+    },
+    {
+      "barcode": "8904098810826",
+      "symbology": "EAN13",
+      "valid": false,
+      "note": "check digit is 6, should be 9",
+      "kind": "malformed"
+    },
+    {
+      "barcode": "8904098900290",
+      "symbology": "EAN13",
+      "valid": false,
+      "note": "check digit is 0, should be 2",
+      "kind": "malformed"
+    },
+    {
+      "barcode": "8904109451102",
+      "symbology": "EAN13",
+      "valid": true,
+      "kind": "india_gs1"
+    },
+    {
+      "barcode": "8904232112642",
+      "symbology": "EAN13",
+      "valid": true,
+      "kind": "india_gs1"
+    },
+    {
+      "barcode": "8904422700956",
+      "symbology": "EAN13",
+      "valid": true,
+      "kind": "india_gs1"
+    },
+    {
+      "barcode": "8906004620188",
+      "symbology": "EAN13",
+      "valid": true,
+      "kind": "india_gs1"
+    },
+    {
+      "barcode": "8906016100913",
+      "symbology": "EAN13",
+      "valid": true,
+      "kind": "india_gs1"
+    },
+    {
+      "barcode": "8906040480012",
+      "symbology": "EAN13",
+      "valid": true,
+      "kind": "india_gs1"
+    },
+    {
+      "barcode": "8906055130177",
+      "symbology": "EAN13",
+      "valid": false,
+      "note": "check digit is 7, should be 9",
+      "kind": "malformed"
+    },
+    {
+      "barcode": "8906070390000",
+      "symbology": "EAN13",
+      "valid": false,
+      "note": "check digit is 0, should be 8",
+      "kind": "malformed"
+    },
+    {
+      "barcode": "8906079820032",
+      "symbology": "EAN13",
+      "valid": true,
+      "kind": "india_gs1"
+    },
+    {
+      "barcode": "8906081110764",
+      "symbology": "EAN13",
+      "valid": false,
+      "note": "check digit is 4, should be 3",
+      "kind": "malformed"
+    },
+    {
+      "barcode": "8906109110911",
+      "symbology": "EAN13",
+      "valid": true,
+      "kind": "india_gs1"
+    },
+    {
+      "barcode": "8906185101830",
+      "symbology": "EAN13",
+      "valid": false,
+      "note": "check digit is 0, should be 4",
+      "kind": "malformed"
+    },
+    {
+      "barcode": "8907065053083",
+      "symbology": "EAN13",
+      "valid": true,
+      "kind": "india_gs1"
+    },
+    {
+      "barcode": "8908009501097",
+      "symbology": "EAN13",
+      "valid": true,
+      "kind": "india_gs1"
+    },
+    {
+      "barcode": "8908097531097",
+      "symbology": "EAN13",
+      "valid": false,
+      "note": "check digit is 7, should be 9",
+      "kind": "malformed"
+    },
+    {
+      "barcode": "8908389054412",
+      "symbology": "EAN13",
+      "valid": false,
+      "note": "check digit is 2, should be 1",
+      "kind": "malformed"
+    },
+    {
+      "barcode": "8908389054421",
+      "symbology": "EAN13",
+      "valid": false,
+      "note": "check digit is 1, should be 8",
+      "kind": "malformed"
+    },
+    {
+      "barcode": "8908389054424",
+      "symbology": "EAN13",
+      "valid": false,
+      "note": "check digit is 4, should be 8",
+      "kind": "malformed"
+    },
+    {
+      "barcode": "8908389054426",
+      "symbology": "EAN13",
+      "valid": false,
+      "note": "check digit is 6, should be 8",
+      "kind": "malformed"
+    },
+    {
+      "barcode": "8924018042005",
+      "symbology": "EAN13",
+      "valid": false,
+      "note": "check digit is 5, should be 0",
+      "kind": "malformed"
+    },
+    {
+      "barcode": "8927681602021",
+      "symbology": "EAN13",
+      "valid": true,
+      "kind": "manufacturer"
+    },
+    {
+      "barcode": "8931406260589",
+      "symbology": "EAN13",
+      "valid": false,
+      "note": "check digit is 9, should be 8",
+      "kind": "malformed"
+    },
+    {
+      "barcode": "8934406261197",
+      "symbology": "EAN13",
+      "valid": true,
+      "kind": "manufacturer"
+    },
+    {
+      "barcode": "8996001354223",
+      "symbology": "EAN13",
+      "valid": true,
+      "kind": "manufacturer"
+    },
+    {
+      "barcode": "12060090",
+      "symbology": "EAN8",
+      "valid": false,
+      "note": "check digit is 0, should be 2",
+      "kind": "malformed"
+    },
+    {
+      "barcode": "12060402",
+      "symbology": "EAN8",
+      "valid": false,
+      "note": "check digit is 2, should be 5",
+      "kind": "malformed"
+    },
+    {
+      "barcode": "12060658",
+      "symbology": "EAN8",
+      "valid": true,
+      "kind": "other"
+    },
+    {
+      "barcode": "12345678",
+      "symbology": "EAN8",
+      "valid": false,
+      "note": "check digit is 8, should be 0",
+      "kind": "malformed"
+    },
+    {
+      "barcode": "20473028",
+      "symbology": "EAN8",
+      "valid": false,
+      "note": "check digit is 8, should be 0",
+      "kind": "malformed"
+    },
+    {
+      "barcode": "20473029",
+      "symbology": "EAN8",
+      "valid": false,
+      "note": "check digit is 9, should be 0",
+      "kind": "malformed"
+    },
+    {
+      "barcode": "20473066",
+      "symbology": "EAN8",
+      "valid": false,
+      "note": "check digit is 6, should be 8",
+      "kind": "malformed"
+    },
+    {
+      "barcode": "20473083",
+      "symbology": "EAN8",
+      "valid": false,
+      "note": "check digit is 3, should be 2",
+      "kind": "malformed"
+    },
+    {
+      "barcode": "20473084",
+      "symbology": "EAN8",
+      "valid": false,
+      "note": "check digit is 4, should be 2",
+      "kind": "malformed"
+    },
+    {
+      "barcode": "20473085",
+      "symbology": "EAN8",
+      "valid": false,
+      "note": "check digit is 5, should be 2",
+      "kind": "malformed"
+    },
+    {
+      "barcode": "20473090",
+      "symbology": "EAN8",
+      "valid": false,
+      "note": "check digit is 0, should be 9",
+      "kind": "malformed"
+    },
+    {
+      "barcode": "20473149",
+      "symbology": "EAN8",
+      "valid": false,
+      "note": "check digit is 9, should be 3",
+      "kind": "malformed"
+    },
+    {
+      "barcode": "25121971",
+      "symbology": "EAN8",
+      "valid": true,
+      "kind": "other"
+    },
+    {
+      "barcode": "38078063",
+      "symbology": "EAN8",
+      "valid": false,
+      "note": "check digit is 3, should be 4",
+      "kind": "malformed"
+    },
+    {
+      "barcode": "38841931",
+      "symbology": "EAN8",
+      "valid": false,
+      "note": "check digit is 1, should be 4",
+      "kind": "malformed"
+    },
+    {
+      "barcode": "40062341",
+      "symbology": "EAN8",
+      "valid": true,
+      "kind": "other"
+    },
+    {
+      "barcode": "40062976",
+      "symbology": "EAN8",
+      "valid": true,
+      "kind": "other"
+    },
+    {
+      "barcode": "42204251",
+      "symbology": "EAN8",
+      "valid": true,
+      "kind": "other"
+    },
+    {
+      "barcode": "42289197",
+      "symbology": "EAN8",
+      "valid": true,
+      "kind": "other"
+    },
+    {
+      "barcode": "42332992",
+      "symbology": "EAN8",
+      "valid": true,
+      "kind": "other"
+    },
+    {
+      "barcode": "42397359",
+      "symbology": "EAN8",
+      "valid": true,
+      "kind": "other"
+    },
+    {
+      "barcode": "42420002",
+      "symbology": "EAN8",
+      "valid": true,
+      "kind": "other"
+    },
+    {
+      "barcode": "42467243",
+      "symbology": "EAN8",
+      "valid": true,
+      "kind": "other"
+    },
+    {
+      "barcode": "48964315",
+      "symbology": "EAN8",
+      "valid": false,
+      "note": "check digit is 5, should be 9",
+      "kind": "malformed"
+    },
+    {
+      "barcode": "50166367",
+      "symbology": "EAN8",
+      "valid": true,
+      "kind": "other"
+    },
+    {
+      "barcode": "64409398",
+      "symbology": "EAN8",
+      "valid": false,
+      "note": "check digit is 8, should be 9",
+      "kind": "malformed"
+    },
+    {
+      "barcode": "67369664",
+      "symbology": "EAN8",
+      "valid": false,
+      "note": "check digit is 4, should be 9",
+      "kind": "malformed"
+    },
+    {
+      "barcode": "71105395",
+      "symbology": "EAN8",
+      "valid": false,
+      "note": "check digit is 5, should be 0",
+      "kind": "malformed"
+    },
+    {
+      "barcode": "71504500",
+      "symbology": "EAN8",
+      "valid": false,
+      "note": "check digit is 0, should be 6",
+      "kind": "malformed"
+    },
+    {
+      "barcode": "73375486",
+      "symbology": "EAN8",
+      "valid": false,
+      "note": "check digit is 6, should be 7",
+      "kind": "malformed"
+    },
+    {
+      "barcode": "75741717",
+      "symbology": "EAN8",
+      "valid": false,
+      "note": "check digit is 7, should be 6",
+      "kind": "malformed"
+    },
+    {
+      "barcode": "79032341",
+      "symbology": "EAN8",
+      "valid": false,
+      "note": "check digit is 1, should be 6",
+      "kind": "malformed"
+    },
+    {
+      "barcode": "79835940",
+      "symbology": "EAN8",
+      "valid": false,
+      "note": "check digit is 0, should be 7",
+      "kind": "malformed"
+    },
+    {
+      "barcode": "80177425",
+      "symbology": "EAN8",
+      "valid": true,
+      "kind": "other"
+    },
+    {
+      "barcode": "80804029",
+      "symbology": "EAN8",
+      "valid": false,
+      "note": "check digit is 9, should be 4",
+      "kind": "malformed"
+    },
+    {
+      "barcode": "88716188",
+      "symbology": "EAN8",
+      "valid": false,
+      "note": "check digit is 8, should be 3",
+      "kind": "malformed"
+    },
+    {
+      "barcode": "89000014",
+      "symbology": "EAN8",
+      "valid": true,
+      "kind": "other"
+    },
+    {
+      "barcode": "89002681",
+      "symbology": "EAN8",
+      "valid": true,
+      "kind": "other"
+    },
+    {
+      "barcode": "89005583",
+      "symbology": "EAN8",
+      "valid": true,
+      "kind": "other"
+    },
+    {
+      "barcode": "89006511",
+      "symbology": "EAN8",
+      "valid": true,
+      "kind": "other"
+    },
+    {
+      "barcode": "89008201",
+      "symbology": "EAN8",
+      "valid": true,
+      "kind": "other"
+    },
+    {
+      "barcode": "89008430",
+      "symbology": "EAN8",
+      "valid": true,
+      "kind": "other"
+    },
+    {
+      "barcode": "89008850",
+      "symbology": "EAN8",
+      "valid": true,
+      "kind": "other"
+    },
+    {
+      "barcode": "89009376",
+      "symbology": "EAN8",
+      "valid": true,
+      "kind": "other"
+    },
+    {
+      "barcode": "89009796",
+      "symbology": "EAN8",
+      "valid": true,
+      "kind": "other"
+    },
+    {
+      "barcode": "89080450",
+      "symbology": "EAN8",
+      "valid": true,
+      "kind": "other"
+    },
+    {
+      "barcode": "89080597",
+      "symbology": "EAN8",
+      "valid": true,
+      "kind": "other"
+    },
+    {
+      "barcode": "90111280",
+      "symbology": "EAN8",
+      "valid": true,
+      "kind": "other"
+    },
+    {
+      "barcode": "90448249",
+      "symbology": "EAN8",
+      "valid": true,
+      "kind": "other"
+    },
+    {
+      "barcode": "95040672",
+      "symbology": "EAN8",
+      "valid": false,
+      "note": "check digit is 2, should be 7",
+      "kind": "malformed"
+    },
+    {
+      "barcode": "26976056201587",
+      "symbology": "ITF14",
+      "valid": true,
+      "kind": "case_code"
+    },
+    {
+      "barcode": "83344405261500",
+      "symbology": "ITF14",
+      "valid": false,
+      "note": "check digit is 0, should be 9",
+      "kind": "malformed"
+    },
+    {
+      "barcode": "89020610209692",
+      "symbology": "ITF14",
+      "valid": false,
+      "note": "check digit is 2, should be 0",
+      "kind": "malformed"
+    },
+    {
+      "barcode": "89060447116938",
+      "symbology": "ITF14",
+      "valid": true,
+      "kind": "case_code"
+    },
+    {
+      "barcode": "89080087630167",
+      "symbology": "ITF14",
+      "valid": false,
+      "note": "check digit is 7, should be 8",
+      "kind": "malformed"
+    },
+    {
+      "barcode": "1",
+      "symbology": "LEN_1",
+      "valid": false,
+      "kind": "other",
+      "note": "not a GTIN length \u2014 internal or supplier code"
+    },
+    {
+      "barcode": "2",
+      "symbology": "LEN_1",
+      "valid": false,
+      "kind": "other",
+      "note": "not a GTIN length \u2014 internal or supplier code"
+    },
+    {
+      "barcode": "2",
+      "symbology": "LEN_1",
+      "valid": false,
+      "kind": "other",
+      "note": "not a GTIN length \u2014 internal or supplier code"
+    },
+    {
+      "barcode": "1002449088",
+      "symbology": "LEN_10",
+      "valid": false,
+      "kind": "other",
+      "note": "not a GTIN length \u2014 internal or supplier code"
+    },
+    {
+      "barcode": "1003422820",
+      "symbology": "LEN_10",
+      "valid": false,
+      "kind": "other",
+      "note": "not a GTIN length \u2014 internal or supplier code"
+    },
+    {
+      "barcode": "1003750176",
+      "symbology": "LEN_10",
+      "valid": false,
+      "kind": "other",
+      "note": "not a GTIN length \u2014 internal or supplier code"
+    },
+    {
+      "barcode": "1292525935",
+      "symbology": "LEN_10",
+      "valid": false,
+      "kind": "other",
+      "note": "not a GTIN length \u2014 internal or supplier code"
+    },
+    {
+      "barcode": "1624010820",
+      "symbology": "LEN_10",
+      "valid": false,
+      "kind": "other",
+      "note": "not a GTIN length \u2014 internal or supplier code"
+    },
+    {
+      "barcode": "1890010620",
+      "symbology": "LEN_10",
+      "valid": false,
+      "kind": "other",
+      "note": "not a GTIN length \u2014 internal or supplier code"
+    },
+    {
+      "barcode": "6186011120",
+      "symbology": "LEN_10",
+      "valid": false,
+      "kind": "other",
+      "note": "not a GTIN length \u2014 internal or supplier code"
+    },
+    {
+      "barcode": "6187011120",
+      "symbology": "LEN_10",
+      "valid": false,
+      "kind": "other",
+      "note": "not a GTIN length \u2014 internal or supplier code"
+    },
+    {
+      "barcode": "7010131062",
+      "symbology": "LEN_10",
+      "valid": false,
+      "kind": "other",
+      "note": "not a GTIN length \u2014 internal or supplier code"
+    },
+    {
+      "barcode": "7889513588",
+      "symbology": "LEN_10",
+      "valid": false,
+      "kind": "other",
+      "note": "not a GTIN length \u2014 internal or supplier code"
+    },
+    {
+      "barcode": "8308851001",
+      "symbology": "LEN_10",
+      "valid": false,
+      "kind": "other",
+      "note": "not a GTIN length \u2014 internal or supplier code"
+    },
+    {
+      "barcode": "9926872000",
+      "symbology": "LEN_10",
+      "valid": false,
+      "kind": "other",
+      "note": "not a GTIN length \u2014 internal or supplier code"
+    },
+    {
+      "barcode": "11210000018",
+      "symbology": "LEN_11",
+      "valid": false,
+      "kind": "other",
+      "note": "not a GTIN length \u2014 internal or supplier code"
+    },
+    {
+      "barcode": "11210000872",
+      "symbology": "LEN_11",
+      "valid": false,
+      "kind": "other",
+      "note": "not a GTIN length \u2014 internal or supplier code"
+    },
+    {
+      "barcode": "21723758887",
+      "symbology": "LEN_11",
+      "valid": false,
+      "kind": "other",
+      "note": "not a GTIN length \u2014 internal or supplier code"
+    },
+    {
+      "barcode": "23985010100",
+      "symbology": "LEN_11",
+      "valid": false,
+      "kind": "other",
+      "note": "not a GTIN length \u2014 internal or supplier code"
+    },
+    {
+      "barcode": "23993010100",
+      "symbology": "LEN_11",
+      "valid": false,
+      "kind": "other",
+      "note": "not a GTIN length \u2014 internal or supplier code"
+    },
+    {
+      "barcode": "26102140604",
+      "symbology": "LEN_11",
+      "valid": false,
+      "kind": "other",
+      "note": "not a GTIN length \u2014 internal or supplier code"
+    },
+    {
+      "barcode": "26702876286",
+      "symbology": "LEN_11",
+      "valid": false,
+      "kind": "other",
+      "note": "not a GTIN length \u2014 internal or supplier code"
+    },
+    {
+      "barcode": "27281010100",
+      "symbology": "LEN_11",
+      "valid": false,
+      "kind": "other",
+      "note": "not a GTIN length \u2014 internal or supplier code"
+    },
+    {
+      "barcode": "28181010100",
+      "symbology": "LEN_11",
+      "valid": false,
+      "kind": "other",
+      "note": "not a GTIN length \u2014 internal or supplier code"
+    },
+    {
+      "barcode": "28235010100",
+      "symbology": "LEN_11",
+      "valid": false,
+      "kind": "other",
+      "note": "not a GTIN length \u2014 internal or supplier code"
+    },
+    {
+      "barcode": "28294010100",
+      "symbology": "LEN_11",
+      "valid": false,
+      "kind": "other",
+      "note": "not a GTIN length \u2014 internal or supplier code"
+    },
+    {
+      "barcode": "28359010100",
+      "symbology": "LEN_11",
+      "valid": false,
+      "kind": "other",
+      "note": "not a GTIN length \u2014 internal or supplier code"
+    },
+    {
+      "barcode": "28442010100",
+      "symbology": "LEN_11",
+      "valid": false,
+      "kind": "other",
+      "note": "not a GTIN length \u2014 internal or supplier code"
+    },
+    {
+      "barcode": "28443010100",
+      "symbology": "LEN_11",
+      "valid": false,
+      "kind": "other",
+      "note": "not a GTIN length \u2014 internal or supplier code"
+    },
+    {
+      "barcode": "51116004014",
+      "symbology": "LEN_11",
+      "valid": false,
+      "kind": "other",
+      "note": "not a GTIN length \u2014 internal or supplier code"
+    },
+    {
+      "barcode": "64758748993",
+      "symbology": "LEN_11",
+      "valid": false,
+      "kind": "other",
+      "note": "not a GTIN length \u2014 internal or supplier code"
+    },
+    {
+      "barcode": "70177010799",
+      "symbology": "LEN_11",
+      "valid": false,
+      "kind": "other",
+      "note": "not a GTIN length \u2014 internal or supplier code"
+    },
+    {
+      "barcode": "71727350255",
+      "symbology": "LEN_11",
+      "valid": false,
+      "kind": "other",
+      "note": "not a GTIN length \u2014 internal or supplier code"
+    },
+    {
+      "barcode": "78895100822",
+      "symbology": "LEN_11",
+      "valid": false,
+      "kind": "other",
+      "note": "not a GTIN length \u2014 internal or supplier code"
+    },
+    {
+      "barcode": "78895120509",
+      "symbology": "LEN_11",
+      "valid": false,
+      "kind": "other",
+      "note": "not a GTIN length \u2014 internal or supplier code"
+    },
+    {
+      "barcode": "78895128895",
+      "symbology": "LEN_11",
+      "valid": false,
+      "kind": "other",
+      "note": "not a GTIN length \u2014 internal or supplier code"
+    },
+    {
+      "barcode": "78895300048",
+      "symbology": "LEN_11",
+      "valid": false,
+      "kind": "other",
+      "note": "not a GTIN length \u2014 internal or supplier code"
+    },
+    {
+      "barcode": "78895700015",
+      "symbology": "LEN_11",
+      "valid": false,
+      "kind": "other",
+      "note": "not a GTIN length \u2014 internal or supplier code"
+    },
+    {
+      "barcode": "78895770018",
+      "symbology": "LEN_11",
+      "valid": false,
+      "kind": "other",
+      "note": "not a GTIN length \u2014 internal or supplier code"
+    },
+    {
+      "barcode": "89080007992",
+      "symbology": "LEN_11",
+      "valid": false,
+      "kind": "other",
+      "note": "not a GTIN length \u2014 internal or supplier code"
+    },
+    {
+      "barcode": "890172518126012",
+      "symbology": "LEN_15",
+      "valid": false,
+      "kind": "other",
+      "note": "not a GTIN length \u2014 internal or supplier code"
+    },
+    {
+      "barcode": "111416721101202384",
+      "symbology": "LEN_18",
+      "valid": false,
+      "kind": "other",
+      "note": "not a GTIN length \u2014 internal or supplier code"
+    },
+    {
+      "barcode": "111416741101202384",
+      "symbology": "LEN_18",
+      "valid": false,
+      "kind": "other",
+      "note": "not a GTIN length \u2014 internal or supplier code"
+    },
+    {
+      "barcode": "1120748111012023424",
+      "symbology": "LEN_19",
+      "valid": false,
+      "kind": "other",
+      "note": "not a GTIN length \u2014 internal or supplier code"
+    },
+    {
+      "barcode": "1120748611012023424",
+      "symbology": "LEN_19",
+      "valid": false,
+      "kind": "other",
+      "note": "not a GTIN length \u2014 internal or supplier code"
+    },
+    {
+      "barcode": "1120748711012023424",
+      "symbology": "LEN_19",
+      "valid": false,
+      "kind": "other",
+      "note": "not a GTIN length \u2014 internal or supplier code"
+    },
+    {
+      "barcode": "1120748811012023424",
+      "symbology": "LEN_19",
+      "valid": false,
+      "kind": "other",
+      "note": "not a GTIN length \u2014 internal or supplier code"
+    },
+    {
+      "barcode": "39",
+      "symbology": "LEN_2",
+      "valid": false,
+      "kind": "other",
+      "note": "not a GTIN length \u2014 internal or supplier code"
+    },
+    {
+      "barcode": "70",
+      "symbology": "LEN_2",
+      "valid": false,
+      "kind": "other",
+      "note": "not a GTIN length \u2014 internal or supplier code"
+    },
+    {
+      "barcode": "99",
+      "symbology": "LEN_2",
+      "valid": false,
+      "kind": "other",
+      "note": "not a GTIN length \u2014 internal or supplier code"
+    },
+    {
+      "barcode": "100",
+      "symbology": "LEN_3",
+      "valid": false,
+      "kind": "other",
+      "note": "not a GTIN length \u2014 internal or supplier code"
+    },
+    {
+      "barcode": "140",
+      "symbology": "LEN_3",
+      "valid": false,
+      "kind": "other",
+      "note": "not a GTIN length \u2014 internal or supplier code"
+    },
+    {
+      "barcode": "188",
+      "symbology": "LEN_3",
+      "valid": false,
+      "kind": "other",
+      "note": "not a GTIN length \u2014 internal or supplier code"
+    },
+    {
+      "barcode": "194",
+      "symbology": "LEN_3",
+      "valid": false,
+      "kind": "other",
+      "note": "not a GTIN length \u2014 internal or supplier code"
+    },
+    {
+      "barcode": "200",
+      "symbology": "LEN_3",
+      "valid": false,
+      "kind": "other",
+      "note": "not a GTIN length \u2014 internal or supplier code"
+    },
+    {
+      "barcode": "200",
+      "symbology": "LEN_3",
+      "valid": false,
+      "kind": "other",
+      "note": "not a GTIN length \u2014 internal or supplier code"
+    },
+    {
+      "barcode": "200",
+      "symbology": "LEN_3",
+      "valid": false,
+      "kind": "other",
+      "note": "not a GTIN length \u2014 internal or supplier code"
+    },
+    {
+      "barcode": "200",
+      "symbology": "LEN_3",
+      "valid": false,
+      "kind": "other",
+      "note": "not a GTIN length \u2014 internal or supplier code"
+    },
+    {
+      "barcode": "200",
+      "symbology": "LEN_3",
+      "valid": false,
+      "kind": "other",
+      "note": "not a GTIN length \u2014 internal or supplier code"
+    },
+    {
+      "barcode": "232",
+      "symbology": "LEN_3",
+      "valid": false,
+      "kind": "other",
+      "note": "not a GTIN length \u2014 internal or supplier code"
+    },
+    {
+      "barcode": "264",
+      "symbology": "LEN_3",
+      "valid": false,
+      "kind": "other",
+      "note": "not a GTIN length \u2014 internal or supplier code"
+    },
+    {
+      "barcode": "274",
+      "symbology": "LEN_3",
+      "valid": false,
+      "kind": "other",
+      "note": "not a GTIN length \u2014 internal or supplier code"
+    },
+    {
+      "barcode": "276",
+      "symbology": "LEN_3",
+      "valid": false,
+      "kind": "other",
+      "note": "not a GTIN length \u2014 internal or supplier code"
+    },
+    {
+      "barcode": "277",
+      "symbology": "LEN_3",
+      "valid": false,
+      "kind": "other",
+      "note": "not a GTIN length \u2014 internal or supplier code"
+    },
+    {
+      "barcode": "450",
+      "symbology": "LEN_3",
+      "valid": false,
+      "kind": "other",
+      "note": "not a GTIN length \u2014 internal or supplier code"
+    },
+    {
+      "barcode": "450",
+      "symbology": "LEN_3",
+      "valid": false,
+      "kind": "other",
+      "note": "not a GTIN length \u2014 internal or supplier code"
+    },
+    {
+      "barcode": "450",
+      "symbology": "LEN_3",
+      "valid": false,
+      "kind": "other",
+      "note": "not a GTIN length \u2014 internal or supplier code"
+    },
+    {
+      "barcode": "450",
+      "symbology": "LEN_3",
+      "valid": false,
+      "kind": "other",
+      "note": "not a GTIN length \u2014 internal or supplier code"
+    },
+    {
+      "barcode": "450",
+      "symbology": "LEN_3",
+      "valid": false,
+      "kind": "other",
+      "note": "not a GTIN length \u2014 internal or supplier code"
+    },
+    {
+      "barcode": "450",
+      "symbology": "LEN_3",
+      "valid": false,
+      "kind": "other",
+      "note": "not a GTIN length \u2014 internal or supplier code"
+    },
+    {
+      "barcode": "560",
+      "symbology": "LEN_3",
+      "valid": false,
+      "kind": "other",
+      "note": "not a GTIN length \u2014 internal or supplier code"
+    },
+    {
+      "barcode": "730",
+      "symbology": "LEN_3",
+      "valid": false,
+      "kind": "other",
+      "note": "not a GTIN length \u2014 internal or supplier code"
+    },
+    {
+      "barcode": "900",
+      "symbology": "LEN_3",
+      "valid": false,
+      "kind": "other",
+      "note": "not a GTIN length \u2014 internal or supplier code"
+    },
+    {
+      "barcode": "900",
+      "symbology": "LEN_3",
+      "valid": false,
+      "kind": "other",
+      "note": "not a GTIN length \u2014 internal or supplier code"
+    },
+    {
+      "barcode": "900",
+      "symbology": "LEN_3",
+      "valid": false,
+      "kind": "other",
+      "note": "not a GTIN length \u2014 internal or supplier code"
+    },
+    {
+      "barcode": "1234",
+      "symbology": "LEN_4",
+      "valid": false,
+      "kind": "other",
+      "note": "not a GTIN length \u2014 internal or supplier code"
+    },
+    {
+      "barcode": "2042",
+      "symbology": "LEN_4",
+      "valid": false,
+      "kind": "other",
+      "note": "not a GTIN length \u2014 internal or supplier code"
+    },
+    {
+      "barcode": "2043",
+      "symbology": "LEN_4",
+      "valid": false,
+      "kind": "other",
+      "note": "not a GTIN length \u2014 internal or supplier code"
+    },
+    {
+      "barcode": "2044",
+      "symbology": "LEN_4",
+      "valid": false,
+      "kind": "other",
+      "note": "not a GTIN length \u2014 internal or supplier code"
+    },
+    {
+      "barcode": "2045",
+      "symbology": "LEN_4",
+      "valid": false,
+      "kind": "other",
+      "note": "not a GTIN length \u2014 internal or supplier code"
+    },
+    {
+      "barcode": "2047",
+      "symbology": "LEN_4",
+      "valid": false,
+      "kind": "other",
+      "note": "not a GTIN length \u2014 internal or supplier code"
+    },
+    {
+      "barcode": "26478",
+      "symbology": "LEN_5",
+      "valid": false,
+      "kind": "other",
+      "note": "not a GTIN length \u2014 internal or supplier code"
+    },
+    {
+      "barcode": "105740",
+      "symbology": "LEN_6",
+      "valid": false,
+      "kind": "other",
+      "note": "not a GTIN length \u2014 internal or supplier code"
+    },
+    {
+      "barcode": "105741",
+      "symbology": "LEN_6",
+      "valid": false,
+      "kind": "other",
+      "note": "not a GTIN length \u2014 internal or supplier code"
+    },
+    {
+      "barcode": "112218",
+      "symbology": "LEN_6",
+      "valid": false,
+      "kind": "other",
+      "note": "not a GTIN length \u2014 internal or supplier code"
+    },
+    {
+      "barcode": "123456",
+      "symbology": "LEN_6",
+      "valid": false,
+      "kind": "other",
+      "note": "not a GTIN length \u2014 internal or supplier code"
+    },
+    {
+      "barcode": "202204",
+      "symbology": "LEN_6",
+      "valid": false,
+      "kind": "other",
+      "note": "not a GTIN length \u2014 internal or supplier code"
+    },
+    {
+      "barcode": "202215",
+      "symbology": "LEN_6",
+      "valid": false,
+      "kind": "other",
+      "note": "not a GTIN length \u2014 internal or supplier code"
+    },
+    {
+      "barcode": "281006",
+      "symbology": "LEN_6",
+      "valid": false,
+      "kind": "other",
+      "note": "not a GTIN length \u2014 internal or supplier code"
+    },
+    {
+      "barcode": "281102",
+      "symbology": "LEN_6",
+      "valid": false,
+      "kind": "other",
+      "note": "not a GTIN length \u2014 internal or supplier code"
+    },
+    {
+      "barcode": "311006",
+      "symbology": "LEN_6",
+      "valid": false,
+      "kind": "other",
+      "note": "not a GTIN length \u2014 internal or supplier code"
+    },
+    {
+      "barcode": "381004",
+      "symbology": "LEN_6",
+      "valid": false,
+      "kind": "other",
+      "note": "not a GTIN length \u2014 internal or supplier code"
+    },
+    {
+      "barcode": "881543",
+      "symbology": "LEN_6",
+      "valid": false,
+      "kind": "other",
+      "note": "not a GTIN length \u2014 internal or supplier code"
+    },
+    {
+      "barcode": "882741",
+      "symbology": "LEN_6",
+      "valid": false,
+      "kind": "other",
+      "note": "not a GTIN length \u2014 internal or supplier code"
+    },
+    {
+      "barcode": "883657",
+      "symbology": "LEN_6",
+      "valid": false,
+      "kind": "other",
+      "note": "not a GTIN length \u2014 internal or supplier code"
+    },
+    {
+      "barcode": "883681",
+      "symbology": "LEN_6",
+      "valid": false,
+      "kind": "other",
+      "note": "not a GTIN length \u2014 internal or supplier code"
+    },
+    {
+      "barcode": "883689",
+      "symbology": "LEN_6",
+      "valid": false,
+      "kind": "other",
+      "note": "not a GTIN length \u2014 internal or supplier code"
+    },
+    {
+      "barcode": "883701",
+      "symbology": "LEN_6",
+      "valid": false,
+      "kind": "other",
+      "note": "not a GTIN length \u2014 internal or supplier code"
+    },
+    {
+      "barcode": "883708",
+      "symbology": "LEN_6",
+      "valid": false,
+      "kind": "other",
+      "note": "not a GTIN length \u2014 internal or supplier code"
+    },
+    {
+      "barcode": "898989",
+      "symbology": "LEN_6",
+      "valid": false,
+      "kind": "other",
+      "note": "not a GTIN length \u2014 internal or supplier code"
+    },
+    {
+      "barcode": "950757",
+      "symbology": "LEN_6",
+      "valid": false,
+      "kind": "other",
+      "note": "not a GTIN length \u2014 internal or supplier code"
+    },
+    {
+      "barcode": "953656",
+      "symbology": "LEN_6",
+      "valid": false,
+      "kind": "other",
+      "note": "not a GTIN length \u2014 internal or supplier code"
+    },
+    {
+      "barcode": "2433490",
+      "symbology": "LEN_7",
+      "valid": false,
+      "kind": "other",
+      "note": "not a GTIN length \u2014 internal or supplier code"
+    },
+    {
+      "barcode": "9518026",
+      "symbology": "LEN_7",
+      "valid": false,
+      "kind": "other",
+      "note": "not a GTIN length \u2014 internal or supplier code"
+    },
+    {
+      "barcode": "9518052",
+      "symbology": "LEN_7",
+      "valid": false,
+      "kind": "other",
+      "note": "not a GTIN length \u2014 internal or supplier code"
+    },
+    {
+      "barcode": "9520015",
+      "symbology": "LEN_7",
+      "valid": false,
+      "kind": "other",
+      "note": "not a GTIN length \u2014 internal or supplier code"
+    },
+    {
+      "barcode": "9520016",
+      "symbology": "LEN_7",
+      "valid": false,
+      "kind": "other",
+      "note": "not a GTIN length \u2014 internal or supplier code"
+    },
+    {
+      "barcode": "9520024",
+      "symbology": "LEN_7",
+      "valid": false,
+      "kind": "other",
+      "note": "not a GTIN length \u2014 internal or supplier code"
+    },
+    {
+      "barcode": "9520026",
+      "symbology": "LEN_7",
+      "valid": false,
+      "kind": "other",
+      "note": "not a GTIN length \u2014 internal or supplier code"
+    },
+    {
+      "barcode": "9520030",
+      "symbology": "LEN_7",
+      "valid": false,
+      "kind": "other",
+      "note": "not a GTIN length \u2014 internal or supplier code"
+    },
+    {
+      "barcode": "9520033",
+      "symbology": "LEN_7",
+      "valid": false,
+      "kind": "other",
+      "note": "not a GTIN length \u2014 internal or supplier code"
+    },
+    {
+      "barcode": "9520038",
+      "symbology": "LEN_7",
+      "valid": false,
+      "kind": "other",
+      "note": "not a GTIN length \u2014 internal or supplier code"
+    },
+    {
+      "barcode": "9590002",
+      "symbology": "LEN_7",
+      "valid": false,
+      "kind": "other",
+      "note": "not a GTIN length \u2014 internal or supplier code"
+    },
+    {
+      "barcode": "100631965",
+      "symbology": "LEN_9",
+      "valid": false,
+      "kind": "other",
+      "note": "not a GTIN length \u2014 internal or supplier code"
+    },
+    {
+      "barcode": "102017014",
+      "symbology": "LEN_9",
+      "valid": false,
+      "kind": "other",
+      "note": "not a GTIN length \u2014 internal or supplier code"
+    },
+    {
+      "barcode": "111560041",
+      "symbology": "LEN_9",
+      "valid": false,
+      "kind": "other",
+      "note": "not a GTIN length \u2014 internal or supplier code"
+    },
+    {
+      "barcode": "154884967",
+      "symbology": "LEN_9",
+      "valid": false,
+      "kind": "other",
+      "note": "not a GTIN length \u2014 internal or supplier code"
+    },
+    {
+      "barcode": "230419621",
+      "symbology": "LEN_9",
+      "valid": false,
+      "kind": "other",
+      "note": "not a GTIN length \u2014 internal or supplier code"
+    },
+    {
+      "barcode": "500100100",
+      "symbology": "LEN_9",
+      "valid": false,
+      "kind": "other",
+      "note": "not a GTIN length \u2014 internal or supplier code"
+    },
+    {
+      "barcode": "672112172",
+      "symbology": "LEN_9",
+      "valid": false,
+      "kind": "other",
+      "note": "not a GTIN length \u2014 internal or supplier code"
+    },
+    {
+      "barcode": "770000050",
+      "symbology": "LEN_9",
+      "valid": false,
+      "kind": "other",
+      "note": "not a GTIN length \u2014 internal or supplier code"
+    },
+    {
+      "barcode": "806010920",
+      "symbology": "LEN_9",
+      "valid": false,
+      "kind": "other",
+      "note": "not a GTIN length \u2014 internal or supplier code"
+    },
+    {
+      "barcode": "877310172",
+      "symbology": "LEN_9",
+      "valid": false,
+      "kind": "other",
+      "note": "not a GTIN length \u2014 internal or supplier code"
+    },
+    {
+      "barcode": "959000201",
+      "symbology": "LEN_9",
+      "valid": false,
+      "kind": "other",
+      "note": "not a GTIN length \u2014 internal or supplier code"
+    },
+    {
+      "barcode": "959000245",
+      "symbology": "LEN_9",
+      "valid": false,
+      "kind": "other",
+      "note": "not a GTIN length \u2014 internal or supplier code"
+    },
+    {
+      "barcode": "959510025",
+      "symbology": "LEN_9",
+      "valid": false,
+      "kind": "other",
+      "note": "not a GTIN length \u2014 internal or supplier code"
+    },
+    {
+      "barcode": "959520018",
+      "symbology": "LEN_9",
+      "valid": false,
+      "kind": "other",
+      "note": "not a GTIN length \u2014 internal or supplier code"
+    },
+    {
+      "barcode": "959520027",
+      "symbology": "LEN_9",
+      "valid": false,
+      "kind": "other",
+      "note": "not a GTIN length \u2014 internal or supplier code"
+    },
+    {
+      "barcode": "114614400802",
+      "symbology": "UPC_A",
+      "valid": false,
+      "note": "check digit is 2, should be 1",
+      "kind": "malformed"
+    },
+    {
+      "barcode": "124192103492",
+      "symbology": "UPC_A",
+      "valid": false,
+      "note": "check digit is 2, should be 0",
+      "kind": "malformed"
+    },
+    {
+      "barcode": "135221800545",
+      "symbology": "UPC_A",
+      "valid": false,
+      "note": "check digit is 5, should be 9",
+      "kind": "malformed"
+    },
+    {
+      "barcode": "248520988123",
+      "symbology": "UPC_A",
+      "valid": false,
+      "note": "check digit is 3, should be 9",
+      "kind": "malformed"
+    },
+    {
+      "barcode": "318519351420",
+      "symbology": "UPC_A",
+      "valid": false,
+      "note": "check digit is 0, should be 2",
+      "kind": "malformed"
+    },
+    {
+      "barcode": "588902001047",
+      "symbology": "UPC_A",
+      "valid": true,
+      "kind": "other"
+    },
+    {
+      "barcode": "690225304252",
+      "symbology": "UPC_A",
+      "valid": true,
+      "kind": "other"
+    },
+    {
+      "barcode": "710067670005",
+      "symbology": "UPC_A",
+      "valid": false,
+      "note": "check digit is 5, should be 8",
+      "kind": "malformed"
+    },
+    {
+      "barcode": "712096866360",
+      "symbology": "UPC_A",
+      "valid": true,
+      "kind": "other"
+    },
+    {
+      "barcode": "715067670006",
+      "symbology": "UPC_A",
+      "valid": false,
+      "note": "check digit is 6, should be 3",
+      "kind": "malformed"
+    },
+    {
+      "barcode": "715067670012",
+      "symbology": "UPC_A",
+      "valid": false,
+      "note": "check digit is 2, should be 0",
+      "kind": "malformed"
+    },
+    {
+      "barcode": "739394632060",
+      "symbology": "UPC_A",
+      "valid": true,
+      "kind": "other"
+    },
+    {
+      "barcode": "739394650736",
+      "symbology": "UPC_A",
+      "valid": true,
+      "kind": "other"
+    },
+    {
+      "barcode": "739394651535",
+      "symbology": "UPC_A",
+      "valid": true,
+      "kind": "other"
+    },
+    {
+      "barcode": "757953884224",
+      "symbology": "UPC_A",
+      "valid": true,
+      "kind": "other"
+    },
+    {
+      "barcode": "793591862460",
+      "symbology": "UPC_A",
+      "valid": true,
+      "kind": "other"
+    },
+    {
+      "barcode": "801372271727",
+      "symbology": "UPC_A",
+      "valid": false,
+      "note": "check digit is 7, should be 8",
+      "kind": "malformed"
+    },
+    {
+      "barcode": "801541512812",
+      "symbology": "UPC_A",
+      "valid": true,
+      "kind": "other"
+    },
+    {
+      "barcode": "802061021289",
+      "symbology": "UPC_A",
+      "valid": false,
+      "note": "check digit is 9, should be 0",
+      "kind": "malformed"
+    },
+    {
+      "barcode": "806360005781",
+      "symbology": "UPC_A",
+      "valid": true,
+      "kind": "other"
+    },
+    {
+      "barcode": "806360013717",
+      "symbology": "UPC_A",
+      "valid": true,
+      "kind": "other"
+    },
+    {
+      "barcode": "806360550809",
+      "symbology": "UPC_A",
+      "valid": true,
+      "kind": "other"
+    },
+    {
+      "barcode": "808042000138",
+      "symbology": "UPC_A",
+      "valid": true,
+      "kind": "other"
+    },
+    {
+      "barcode": "808042002132",
+      "symbology": "UPC_A",
+      "valid": true,
+      "kind": "other"
+    },
+    {
+      "barcode": "810103154445",
+      "symbology": "UPC_A",
+      "valid": true,
+      "kind": "other"
+    },
+    {
+      "barcode": "825419115530",
+      "symbology": "UPC_A",
+      "valid": true,
+      "kind": "other"
+    },
+    {
+      "barcode": "825419251290",
+      "symbology": "UPC_A",
+      "valid": true,
+      "kind": "other"
+    },
+    {
+      "barcode": "825419501135",
+      "symbology": "UPC_A",
+      "valid": true,
+      "kind": "other"
+    },
+    {
+      "barcode": "825419601064",
+      "symbology": "UPC_A",
+      "valid": true,
+      "kind": "other"
+    },
+    {
+      "barcode": "825419806353",
+      "symbology": "UPC_A",
+      "valid": true,
+      "kind": "other"
+    },
+    {
+      "barcode": "825419811791",
+      "symbology": "UPC_A",
+      "valid": true,
+      "kind": "other"
+    },
+    {
+      "barcode": "827418474718",
+      "symbology": "UPC_A",
+      "valid": false,
+      "note": "check digit is 8, should be 7",
+      "kind": "malformed"
+    },
+    {
+      "barcode": "846203000375",
+      "symbology": "UPC_A",
+      "valid": true,
+      "kind": "other"
+    },
+    {
+      "barcode": "880001238110",
+      "symbology": "UPC_A",
+      "valid": true,
+      "kind": "other"
+    },
+    {
+      "barcode": "890105000420",
+      "symbology": "UPC_A",
+      "valid": false,
+      "note": "check digit is 0, should be 1",
+      "kind": "malformed"
+    },
+    {
+      "barcode": "890113837068",
+      "symbology": "UPC_A",
+      "valid": false,
+      "note": "check digit is 8, should be 4",
+      "kind": "malformed"
+    },
+    {
+      "barcode": "890139334006",
+      "symbology": "UPC_A",
+      "valid": false,
+      "note": "check digit is 6, should be 4",
+      "kind": "malformed"
+    },
+    {
+      "barcode": "890223110019",
+      "symbology": "UPC_A",
+      "valid": true,
+      "kind": "other"
+    },
+    {
+      "barcode": "890253300015",
+      "symbology": "UPC_A",
+      "valid": true,
+      "kind": "other"
+    },
+    {
+      "barcode": "890422731730",
+      "symbology": "UPC_A",
+      "valid": false,
+      "note": "check digit is 0, should be 2",
+      "kind": "malformed"
+    },
+    {
+      "barcode": "890428373399",
+      "symbology": "UPC_A",
+      "valid": false,
+      "note": "check digit is 9, should be 4",
+      "kind": "malformed"
+    },
+    {
+      "barcode": "890600220297",
+      "symbology": "UPC_A",
+      "valid": false,
+      "note": "check digit is 7, should be 4",
+      "kind": "malformed"
+    },
+    {
+      "barcode": "890600778109",
+      "symbology": "UPC_A",
+      "valid": false,
+      "note": "check digit is 9, should be 8",
+      "kind": "malformed"
+    },
+    {
+      "barcode": "890601853472",
+      "symbology": "UPC_A",
+      "valid": false,
+      "note": "check digit is 2, should be 7",
+      "kind": "malformed"
+    },
+    {
+      "barcode": "890602945137",
+      "symbology": "UPC_A",
+      "valid": false,
+      "note": "check digit is 7, should be 3",
+      "kind": "malformed"
+    },
+    {
+      "barcode": "890602945166",
+      "symbology": "UPC_A",
+      "valid": false,
+      "note": "check digit is 6, should be 4",
+      "kind": "malformed"
+    },
+    {
+      "barcode": "890602945313",
+      "symbology": "UPC_A",
+      "valid": false,
+      "note": "check digit is 3, should be 7",
+      "kind": "malformed"
+    },
+    {
+      "barcode": "890800175906",
+      "symbology": "UPC_A",
+      "valid": false,
+      "note": "check digit is 6, should be 5",
+      "kind": "malformed"
+    },
+    {
+      "barcode": "890802410208",
+      "symbology": "UPC_A",
+      "valid": false,
+      "note": "check digit is 8, should be 2",
+      "kind": "malformed"
+    },
+    {
+      "barcode": "890838954526",
+      "symbology": "UPC_A",
+      "valid": false,
+      "note": "check digit is 6, should be 7",
+      "kind": "malformed"
+    }
+  ]
+}
