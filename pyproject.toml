@@ -1,0 +1,115 @@
+[project]
+name = "pos"
+version = "0.1.0"
+description = "Desktop retail POS — pywebview shell, FastAPI local service, SQLite local store, Supabase cloud"
+requires-python = ">=3.10"
+
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "pydantic>=2.9",
+    "pydantic-settings>=2.6",
+    "pywebview>=5.3",
+    "argon2-cffi>=23.1",
+    "keyring>=25.4",
+    "httpx>=0.27",
+    "pyjwt>=2.9",
+    # Receipt PDFs, drawn from the document model rather than converted
+    # from HTML, so no headless browser goes in the bundle.
+    "reportlab>=4.2",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3",
+    "pytest-asyncio>=0.24",
+    "respx>=0.21",
+    "hypothesis>=6.112",
+    "ruff>=0.7",
+    "mypy>=1.13",
+    "import-linter>=2.1",
+    "psycopg[binary]>=3.2",
+]
+# A bundled Postgres, so the RLS suite runs without Docker Desktop.
+pg = ["pgserver>=0.1.4"]
+
+[project.scripts]
+pos = "app.main:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["app*"]
+
+# ── Lint ────────────────────────────────────────────────────────────────────
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "TID", "RUF"]
+
+[tool.ruff.lint.per-file-ignores]
+# SIM300 would rewrite `assert SNAPSHOT_TTL == timedelta(days=14)` with the
+# constant first, which reads backwards for an assertion about a constant.
+"tests/*" = ["S101", "SIM300"]
+
+# Architecture §6 / §17: float must never reach a money path. Ruff has no
+# rule for "this package may not use a builtin type", so the quarantine on
+# `domain/` lives in scripts/check_no_float.py and runs as its own CI step.
+
+# ── Types ───────────────────────────────────────────────────────────────────
+[tool.mypy]
+python_version = "3.10"
+warn_unused_configs = true
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "app.domain.*"
+strict = true
+disallow_any_explicit = true
+
+# ── Tests ───────────────────────────────────────────────────────────────────
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+markers = [
+    "postgres: requires a local Postgres/Supabase (set POS_TEST_PG_DSN)",
+    "slow: measures real argon2id cost; excluded with -m 'not slow'",
+]
+
+# ── Dependency rule (architecture §3) ───────────────────────────────────────
+[tool.importlinter]
+root_package = "app"
+# Needed so the "domain is pure" contract can name third-party modules
+# (sqlite3, httpx, fastapi) as forbidden, not just internal packages.
+include_external_packages = true
+
+[[tool.importlinter.contracts]]
+name = "Layered architecture: api -> services -> {domain, data}"
+type = "layers"
+layers = [
+    "app.main",
+    "app.api",
+    "app.services",
+    "app.data | app.security",
+    "app.domain",
+]
+
+[[tool.importlinter.contracts]]
+name = "domain is pure (no I/O, no other app packages)"
+type = "forbidden"
+source_modules = ["app.domain"]
+forbidden_modules = [
+    "app.api",
+    "app.services",
+    "app.data",
+    "app.security",
+    "app.sync",
+    "sqlite3",
+    "httpx",
+    "fastapi",
+    "keyring",
+]

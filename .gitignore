@@ -1,1 +1,25 @@
 .env
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+build/
+dist/
+
+# Local terminal state (never committed — see architecture §14)
+*.sqlite3
+*.sqlite3-wal
+*.sqlite3-shm
+pos.lock
+
+# UI build output is generated into the Python package
+app/ui/
+ui-src/node_modules/
+ui-src/dist/
+
+# TypeScript build cache
+ui-src/*.tsbuildinfo
