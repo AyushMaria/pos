@@ -1,0 +1,1431 @@
+{
+  "components": {
+    "schemas": {
+      "AddLineRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "barcode": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Barcode"
+          },
+          "product_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Product Id"
+          },
+          "qty_milli": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Integer thousandths; 1.250 kg is 1250",
+            "title": "Qty Milli"
+          }
+        },
+        "title": "AddLineRequest",
+        "type": "object"
+      },
+      "CartLineOut": {
+        "additionalProperties": false,
+        "properties": {
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "discount": {
+            "$ref": "#/components/schemas/MoneyOut"
+          },
+          "line_no": {
+            "title": "Line No",
+            "type": "integer"
+          },
+          "line_total": {
+            "$ref": "#/components/schemas/MoneyOut"
+          },
+          "product_id": {
+            "title": "Product Id",
+            "type": "string"
+          },
+          "qty_milli": {
+            "title": "Qty Milli",
+            "type": "integer"
+          },
+          "quantity_text": {
+            "title": "Quantity Text",
+            "type": "string"
+          },
+          "tax_amount": {
+            "$ref": "#/components/schemas/MoneyOut"
+          },
+          "unit_price": {
+            "$ref": "#/components/schemas/MoneyOut"
+          }
+        },
+        "required": [
+          "line_no",
+          "product_id",
+          "description",
+          "qty_milli",
+          "quantity_text",
+          "unit_price",
+          "discount",
+          "tax_amount",
+          "line_total"
+        ],
+        "title": "CartLineOut",
+        "type": "object"
+      },
+      "CartOut": {
+        "additionalProperties": false,
+        "properties": {
+          "cart_id": {
+            "title": "Cart Id",
+            "type": "string"
+          },
+          "discount_total": {
+            "$ref": "#/components/schemas/MoneyOut"
+          },
+          "item_count": {
+            "title": "Item Count",
+            "type": "integer"
+          },
+          "lines": {
+            "items": {
+              "$ref": "#/components/schemas/CartLineOut"
+            },
+            "title": "Lines",
+            "type": "array"
+          },
+          "locked": {
+            "default": false,
+            "description": "True once a payment is approved; the basket cannot change",
+            "title": "Locked",
+            "type": "boolean"
+          },
+          "outstanding": {
+            "$ref": "#/components/schemas/MoneyOut"
+          },
+          "paid": {
+            "$ref": "#/components/schemas/MoneyOut"
+          },
+          "rounding_adjustment": {
+            "$ref": "#/components/schemas/MoneyOut"
+          },
+          "settled": {
+            "title": "Settled",
+            "type": "boolean"
+          },
+          "subtotal": {
+            "$ref": "#/components/schemas/MoneyOut"
+          },
+          "tax_breakdown": {
+            "items": {
+              "$ref": "#/components/schemas/TaxComponentOut"
+            },
+            "title": "Tax Breakdown",
+            "type": "array"
+          },
+          "tax_total": {
+            "$ref": "#/components/schemas/MoneyOut"
+          },
+          "total_before_rounding": {
+            "$ref": "#/components/schemas/MoneyOut"
+          }
+        },
+        "required": [
+          "cart_id",
+          "lines",
+          "item_count",
+          "subtotal",
+          "discount_total",
+          "tax_total",
+          "total_before_rounding",
+          "tax_breakdown",
+          "paid",
+          "outstanding",
+          "rounding_adjustment",
+          "settled"
+        ],
+        "title": "CartOut",
+        "type": "object"
+      },
+      "ChangeQuantityRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "qty_milli": {
+            "title": "Qty Milli",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "qty_milli"
+        ],
+        "title": "ChangeQuantityRequest",
+        "type": "object"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "title": "Detail",
+            "type": "array"
+          }
+        },
+        "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "HealthResponse": {
+        "additionalProperties": false,
+        "description": "The startup gate the splash polls. Unauthenticated by design.",
+        "properties": {
+          "cloud_configured": {
+            "description": "False when no Supabase project is configured (offline dev)",
+            "title": "Cloud Configured",
+            "type": "boolean"
+          },
+          "expected_schema_version": {
+            "description": "Schema version this build ships",
+            "title": "Expected Schema Version",
+            "type": "integer"
+          },
+          "migrations_pending": {
+            "title": "Migrations Pending",
+            "type": "boolean"
+          },
+          "schema_version": {
+            "description": "Applied SQLite user_version",
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "status": {
+            "description": "'ready' once migrations have been applied",
+            "title": "Status",
+            "type": "string"
+          },
+          "store_code": {
+            "title": "Store Code",
+            "type": "string"
+          },
+          "terminal_code": {
+            "title": "Terminal Code",
+            "type": "string"
+          },
+          "version": {
+            "description": "Application version",
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "version",
+          "schema_version",
+          "expected_schema_version",
+          "migrations_pending",
+          "store_code",
+          "terminal_code",
+          "cloud_configured"
+        ],
+        "title": "HealthResponse",
+        "type": "object"
+      },
+      "LoginRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "employee_code": {
+            "maxLength": 32,
+            "minLength": 1,
+            "title": "Employee Code",
+            "type": "string"
+          },
+          "pin": {
+            "maxLength": 12,
+            "minLength": 4,
+            "title": "Pin",
+            "type": "string"
+          }
+        },
+        "required": [
+          "employee_code",
+          "pin"
+        ],
+        "title": "LoginRequest",
+        "type": "object"
+      },
+      "LookupResponse": {
+        "additionalProperties": false,
+        "description": "A parsed scan. `product` is null when the code resolved to nothing.",
+        "properties": {
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "is_case": {
+            "default": false,
+            "title": "Is Case",
+            "type": "boolean"
+          },
+          "product": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ProductOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "qty_milli": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Qty Milli"
+          },
+          "raw": {
+            "title": "Raw",
+            "type": "string"
+          },
+          "resolved": {
+            "title": "Resolved",
+            "type": "boolean"
+          },
+          "symbology": {
+            "title": "Symbology",
+            "type": "string"
+          }
+        },
+        "required": [
+          "raw",
+          "symbology",
+          "resolved"
+        ],
+        "title": "LookupResponse",
+        "type": "object"
+      },
+      "MoneyOut": {
+        "additionalProperties": false,
+        "description": "An amount, as both the canonical integer and something to display.\n\n`paise` is the truth; `text` is pre-formatted so the UI never reimplements\ncurrency formatting and cannot drift from what the receipt prints.\nFormatting is presentation, not math \u2014 React still does no arithmetic\n(architecture \u00a71.2).",
+        "properties": {
+          "paise": {
+            "title": "Paise",
+            "type": "integer"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "paise",
+          "text"
+        ],
+        "title": "MoneyOut",
+        "type": "object"
+      },
+      "PostSaleResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "change_due": {
+            "$ref": "#/components/schemas/MoneyOut"
+          },
+          "grand_total": {
+            "$ref": "#/components/schemas/MoneyOut"
+          },
+          "receipt_html": {
+            "title": "Receipt Html",
+            "type": "string"
+          },
+          "receipt_no": {
+            "title": "Receipt No",
+            "type": "string"
+          },
+          "receipt_text": {
+            "title": "Receipt Text",
+            "type": "string"
+          },
+          "rounding_adjustment": {
+            "$ref": "#/components/schemas/MoneyOut"
+          },
+          "sale_id": {
+            "title": "Sale Id",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "sale_id",
+          "receipt_no",
+          "status",
+          "grand_total",
+          "rounding_adjustment",
+          "change_due",
+          "receipt_html",
+          "receipt_text"
+        ],
+        "title": "PostSaleResponse",
+        "type": "object"
+      },
+      "ProductOut": {
+        "additionalProperties": false,
+        "properties": {
+          "barcode": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Barcode"
+          },
+          "is_weighed": {
+            "title": "Is Weighed",
+            "type": "boolean"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "pack_size": {
+            "default": 1,
+            "title": "Pack Size",
+            "type": "integer"
+          },
+          "product_id": {
+            "title": "Product Id",
+            "type": "string"
+          },
+          "rate_bp": {
+            "title": "Rate Bp",
+            "type": "integer"
+          },
+          "short_name": {
+            "title": "Short Name",
+            "type": "string"
+          },
+          "sku": {
+            "title": "Sku",
+            "type": "string"
+          },
+          "tax_code": {
+            "title": "Tax Code",
+            "type": "string"
+          },
+          "unit_price": {
+            "$ref": "#/components/schemas/MoneyOut"
+          },
+          "uom": {
+            "title": "Uom",
+            "type": "string"
+          }
+        },
+        "required": [
+          "product_id",
+          "sku",
+          "name",
+          "short_name",
+          "uom",
+          "is_weighed",
+          "tax_code",
+          "rate_bp",
+          "unit_price"
+        ],
+        "title": "ProductOut",
+        "type": "object"
+      },
+      "ReceiptPdfResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "path": {
+            "title": "Path",
+            "type": "string"
+          },
+          "receipt_no": {
+            "title": "Receipt No",
+            "type": "string"
+          },
+          "sale_id": {
+            "title": "Sale Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "sale_id",
+          "receipt_no",
+          "path"
+        ],
+        "title": "ReceiptPdfResponse",
+        "type": "object"
+      },
+      "SearchResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "query": {
+            "title": "Query",
+            "type": "string"
+          },
+          "results": {
+            "items": {
+              "$ref": "#/components/schemas/ProductOut"
+            },
+            "title": "Results",
+            "type": "array"
+          }
+        },
+        "required": [
+          "query",
+          "results"
+        ],
+        "title": "SearchResponse",
+        "type": "object"
+      },
+      "SessionResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "authenticated_at": {
+            "format": "date-time",
+            "title": "Authenticated At",
+            "type": "string"
+          },
+          "employee_code": {
+            "title": "Employee Code",
+            "type": "string"
+          },
+          "full_name": {
+            "title": "Full Name",
+            "type": "string"
+          },
+          "offline": {
+            "description": "True when authenticated against the local cache",
+            "title": "Offline",
+            "type": "boolean"
+          },
+          "permissions": {
+            "description": "Advisory. Postgres RLS is the security boundary.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Permissions",
+            "type": "array"
+          },
+          "roles": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Roles",
+            "type": "array"
+          },
+          "store_id": {
+            "title": "Store Id",
+            "type": "string"
+          },
+          "user_id": {
+            "title": "User Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "user_id",
+          "employee_code",
+          "full_name",
+          "store_id",
+          "roles",
+          "permissions",
+          "authenticated_at",
+          "offline"
+        ],
+        "title": "SessionResponse",
+        "type": "object"
+      },
+      "TaxComponentOut": {
+        "additionalProperties": false,
+        "properties": {
+          "cgst": {
+            "$ref": "#/components/schemas/MoneyOut"
+          },
+          "rate_bp": {
+            "title": "Rate Bp",
+            "type": "integer"
+          },
+          "sgst": {
+            "$ref": "#/components/schemas/MoneyOut"
+          },
+          "tax_amount": {
+            "$ref": "#/components/schemas/MoneyOut"
+          },
+          "tax_code": {
+            "title": "Tax Code",
+            "type": "string"
+          },
+          "taxable_base": {
+            "$ref": "#/components/schemas/MoneyOut"
+          }
+        },
+        "required": [
+          "tax_code",
+          "rate_bp",
+          "taxable_base",
+          "tax_amount",
+          "cgst",
+          "sgst"
+        ],
+        "title": "TaxComponentOut",
+        "type": "object"
+      },
+      "TenderQuote": {
+        "additionalProperties": false,
+        "description": "What a method would collect, before the cashier commits to it.",
+        "properties": {
+          "collected": {
+            "$ref": "#/components/schemas/MoneyOut"
+          },
+          "method": {
+            "title": "Method",
+            "type": "string"
+          },
+          "outstanding": {
+            "$ref": "#/components/schemas/MoneyOut"
+          },
+          "rounding_adjustment": {
+            "$ref": "#/components/schemas/MoneyOut"
+          }
+        },
+        "required": [
+          "method",
+          "outstanding",
+          "collected",
+          "rounding_adjustment"
+        ],
+        "title": "TenderQuote",
+        "type": "object"
+      },
+      "TenderRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "method": {
+            "description": "cash (phase 3); upi arrives in phase 4",
+            "title": "Method",
+            "type": "string"
+          },
+          "tendered_paise": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Cash handed over, when more than is owed",
+            "title": "Tendered Paise"
+          }
+        },
+        "required": [
+          "method"
+        ],
+        "title": "TenderRequest",
+        "type": "object"
+      },
+      "TenderResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "attempt_id": {
+            "title": "Attempt Id",
+            "type": "string"
+          },
+          "cart": {
+            "$ref": "#/components/schemas/CartOut"
+          },
+          "change_due": {
+            "$ref": "#/components/schemas/MoneyOut"
+          },
+          "state": {
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "attempt_id",
+          "state",
+          "cart",
+          "change_due"
+        ],
+        "title": "TenderResponse",
+        "type": "object"
+      },
+      "ValidationError": {
+        "properties": {
+          "ctx": {
+            "title": "Context",
+            "type": "object"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "title": "Location",
+            "type": "array"
+          },
+          "msg": {
+            "title": "Message",
+            "type": "string"
+          },
+          "type": {
+            "title": "Error Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError",
+        "type": "object"
+      }
+    }
+  },
+  "info": {
+    "title": "Retail POS \u2014 local service",
+    "version": "0.1.0"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/auth/login": {
+      "post": {
+        "operationId": "login_auth_login_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LoginRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Login",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/auth/logout": {
+      "post": {
+        "operationId": "logout_auth_logout_post",
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Logout",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/auth/session": {
+      "get": {
+        "operationId": "read_session_auth_session_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Read Session",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/catalog/lookup": {
+      "get": {
+        "description": "Parse a code and resolve it, in one round trip.\n\nParsing is pure and shared with receiving (architecture \u00a710.1); resolution\nneeds the catalogue. Both happen here so the register makes one call per\nscan and stays inside the 150 ms budget.",
+        "operationId": "lookup_catalog_lookup_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "barcode",
+            "required": true,
+            "schema": {
+              "title": "Barcode",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LookupResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Lookup",
+        "tags": [
+          "catalog"
+        ]
+      }
+    },
+    "/catalog/search": {
+      "get": {
+        "operationId": "search_catalog_search_get",
+        "parameters": [
+          {
+            "description": "Name or SKU fragment",
+            "in": "query",
+            "name": "q",
+            "required": true,
+            "schema": {
+              "description": "Name or SKU fragment",
+              "minLength": 1,
+              "title": "Q",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 25,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SearchResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Search",
+        "tags": [
+          "catalog"
+        ]
+      }
+    },
+    "/catalog/size": {
+      "get": {
+        "description": "How many products this terminal can sell. Used by the diagnostics view.",
+        "operationId": "catalog_size_catalog_size_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "integer"
+                  },
+                  "title": "Response Catalog Size Catalog Size Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Catalog Size",
+        "tags": [
+          "catalog"
+        ]
+      }
+    },
+    "/health": {
+      "get": {
+        "operationId": "health_health_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Health",
+        "tags": [
+          "health"
+        ]
+      }
+    },
+    "/register/carts": {
+      "post": {
+        "operationId": "open_cart_register_carts_post",
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CartOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Open Cart",
+        "tags": [
+          "register"
+        ]
+      }
+    },
+    "/register/carts/{cart_id}": {
+      "delete": {
+        "operationId": "abandon_cart_register_carts__cart_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "cart_id",
+            "required": true,
+            "schema": {
+              "title": "Cart Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Abandon Cart",
+        "tags": [
+          "register"
+        ]
+      },
+      "get": {
+        "operationId": "read_cart_register_carts__cart_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "cart_id",
+            "required": true,
+            "schema": {
+              "title": "Cart Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CartOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Read Cart",
+        "tags": [
+          "register"
+        ]
+      }
+    },
+    "/register/carts/{cart_id}/lines": {
+      "post": {
+        "operationId": "add_line_register_carts__cart_id__lines_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "cart_id",
+            "required": true,
+            "schema": {
+              "title": "Cart Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddLineRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CartOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Add Line",
+        "tags": [
+          "register"
+        ]
+      }
+    },
+    "/register/carts/{cart_id}/lines/{line_no}": {
+      "delete": {
+        "description": "Void a line from an *open* basket.\n\nDeliberately gated on `sale.create`, not `sale.void`: removing a line\nbefore the sale exists is ordinary cashier work. `sale.void` governs\nreversing a sale that has already been posted and taken money, which is a\ndifferent act with a different audit trail.",
+        "operationId": "void_line_register_carts__cart_id__lines__line_no__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "cart_id",
+            "required": true,
+            "schema": {
+              "title": "Cart Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "line_no",
+            "required": true,
+            "schema": {
+              "title": "Line No",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CartOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Void Line",
+        "tags": [
+          "register"
+        ]
+      },
+      "patch": {
+        "operationId": "change_quantity_register_carts__cart_id__lines__line_no__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "cart_id",
+            "required": true,
+            "schema": {
+              "title": "Cart Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "line_no",
+            "required": true,
+            "schema": {
+              "title": "Line No",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChangeQuantityRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CartOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Change Quantity",
+        "tags": [
+          "register"
+        ]
+      }
+    },
+    "/register/carts/{cart_id}/payments": {
+      "post": {
+        "operationId": "take_payment_register_carts__cart_id__payments_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "cart_id",
+            "required": true,
+            "schema": {
+              "title": "Cart Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TenderRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TenderResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Take Payment",
+        "tags": [
+          "register"
+        ]
+      }
+    },
+    "/register/carts/{cart_id}/post": {
+      "post": {
+        "description": "Commit the sale, then render its receipt.\n\nOrder matters: the sale is durable before anything is rendered. Printing\nis a side effect and is retryable; the sale is not (architecture \u00a78).",
+        "operationId": "post_sale_register_carts__cart_id__post_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "cart_id",
+            "required": true,
+            "schema": {
+              "title": "Cart Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PostSaleResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Post Sale",
+        "tags": [
+          "register"
+        ]
+      }
+    },
+    "/register/carts/{cart_id}/tender-quote": {
+      "get": {
+        "description": "What this method would collect \u2014 shown before the money is taken.\n\nCash rounds to the rupee; UPI does not. The cashier sees the difference\nbefore committing, which is the whole point of \u00a713.4.",
+        "operationId": "tender_quote_register_carts__cart_id__tender_quote_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "cart_id",
+            "required": true,
+            "schema": {
+              "title": "Cart Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "method",
+            "required": true,
+            "schema": {
+              "title": "Method",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TenderQuote"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Tender Quote",
+        "tags": [
+          "register"
+        ]
+      }
+    },
+    "/register/sales/{sale_id}/receipt.pdf": {
+      "post": {
+        "description": "Write the PDF for a posted sale. On demand, never automatically.",
+        "operationId": "write_receipt_pdf_register_sales__sale_id__receipt_pdf_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "sale_id",
+            "required": true,
+            "schema": {
+              "title": "Sale Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReceiptPdfResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Write Receipt Pdf",
+        "tags": [
+          "register"
+        ]
+      }
+    },
+    "/reports/margin": {
+      "get": {
+        "operationId": "margin_report_reports_margin_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Margin Report",
+        "tags": [
+          "reports"
+        ]
+      }
+    }
+  }
+}

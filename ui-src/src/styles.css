@@ -1,0 +1,418 @@
+/*
+ * Till styling, not web styling. Type is large because the screen is read at
+ * arm's length across a counter, targets are big because they are hit in a
+ * hurry, and both themes are defined because the machine's setting is not
+ * ours to predict.
+ */
+:root {
+  color-scheme: light dark;
+  --bg: #f4f5f7;
+  --fg: #16181d;
+  --card: #fff;
+  --line: #d8dbe0;
+  --accent: #1b6ef3;
+  --bad: #c0392b;
+  --muted: #6b7280;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #111318;
+    --fg: #e8eaed;
+    --card: #191c22;
+    --line: #2b2f38;
+    --muted: #9aa1ad;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  background: var(--bg);
+  color: var(--fg);
+  font: 16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+.card {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 32px;
+  width: min(460px, 92vw);
+}
+
+h1 {
+  margin: 0 0 4px;
+  font-size: 20px;
+}
+
+.sub {
+  margin: 0 0 24px;
+  color: var(--muted);
+  font-size: 14px;
+  min-height: 1.5em;
+}
+
+label {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+  margin: 16px 0 6px;
+}
+
+input {
+  width: 100%;
+  padding: 12px 14px;
+  font-size: 18px;
+  border-radius: 9px;
+  border: 1px solid var(--line);
+  background: var(--bg);
+  color: var(--fg);
+}
+
+input:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+button {
+  width: 100%;
+  margin-top: 24px;
+  padding: 13px;
+  font-size: 16px;
+  font-weight: 600;
+  border: 0;
+  border-radius: 9px;
+  background: var(--accent);
+  color: #fff;
+  cursor: pointer;
+}
+
+button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+button.secondary {
+  background: transparent;
+  color: var(--muted);
+  border: 1px solid var(--line);
+}
+
+.msg {
+  margin-top: 18px;
+  padding: 12px 14px;
+  border-radius: 9px;
+  font-size: 14px;
+}
+
+.msg.error {
+  background: #c0392b1a;
+  color: var(--bad);
+  border: 1px solid #c0392b55;
+}
+
+.note {
+  font-size: 14px;
+  margin: 12px 0;
+}
+
+.note.muted {
+  color: var(--muted);
+}
+
+details {
+  margin-top: 16px;
+  font-size: 13px;
+}
+
+details ul {
+  columns: 2;
+  padding-left: 18px;
+  color: var(--muted);
+}
+
+code {
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 12px;
+}
+
+/* ── Register ────────────────────────────────────────────────────────────
+   Till styling: big targets, big type, and the running total always visible
+   without scrolling. The barcode field is the largest thing on screen
+   because it is where every transaction starts. */
+
+body:has(.register),
+body:has(.done) {
+  display: block;
+  place-items: unset;
+  padding: 16px;
+}
+
+.register,
+.done {
+  max-width: 780px;
+  margin: 0 auto;
+}
+
+.bar {
+  display: flex;
+  justify-content: space-between;
+  font-size: 13px;
+  color: var(--muted);
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--line);
+}
+
+.entry {
+  display: flex;
+  gap: 10px;
+  margin: 16px 0;
+}
+
+.entry input {
+  font-size: 22px;
+  padding: 16px;
+}
+
+.entry button {
+  width: auto;
+  margin: 0;
+  padding: 0 26px;
+}
+
+.results {
+  list-style: none;
+  margin: 0 0 16px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  overflow: hidden;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.results li + li {
+  border-top: 1px solid var(--line);
+}
+
+.results button {
+  width: 100%;
+  margin: 0;
+  border-radius: 0;
+  background: var(--card);
+  color: var(--fg);
+  display: flex;
+  justify-content: space-between;
+  font-weight: 500;
+  padding: 14px 16px;
+  text-align: left;
+}
+
+.results button:hover {
+  background: var(--bg);
+}
+
+.lines {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 15px;
+}
+
+.lines td {
+  padding: 10px 6px;
+  border-bottom: 1px solid var(--line);
+  vertical-align: baseline;
+}
+
+.lines .no {
+  color: var(--muted);
+  width: 2ch;
+  font-variant-numeric: tabular-nums;
+}
+
+.lines .qty {
+  color: var(--muted);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.lines .amt {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.lines .void {
+  width: auto;
+  margin: 0;
+  padding: 2px 10px;
+  background: transparent;
+  color: var(--bad);
+  font-size: 20px;
+  line-height: 1;
+}
+
+.lines .void:disabled {
+  color: var(--muted);
+}
+
+.empty {
+  color: var(--muted);
+  padding: 28px 0;
+  text-align: center;
+}
+
+.totals {
+  margin-top: 14px;
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
+}
+
+.totals p {
+  display: flex;
+  justify-content: space-between;
+  margin: 4px 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.totals .tax {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.totals .grand {
+  font-size: 26px;
+  font-weight: 700;
+  margin-top: 10px;
+}
+
+.tender {
+  display: flex;
+  gap: 12px;
+  margin-top: 18px;
+}
+
+.tender button {
+  margin: 0;
+  padding: 20px;
+  font-size: 18px;
+}
+
+.dialog {
+  position: fixed;
+  inset: 0;
+  margin: auto;
+  height: fit-content;
+  width: min(420px, 92vw);
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 24px;
+  box-shadow: 0 20px 60px #0006;
+}
+
+.dialog .due {
+  display: flex;
+  justify-content: space-between;
+  font-size: 30px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.dialog .rounding {
+  color: var(--muted);
+  font-size: 13px;
+  margin: 4px 0 0;
+}
+
+.row {
+  display: flex;
+  gap: 10px;
+}
+
+.row button {
+  margin-top: 18px;
+}
+
+.done h2 {
+  font-size: 46px;
+  margin: 12px 0 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.done .change {
+  font-size: 20px;
+  color: var(--accent);
+  margin: 4px 0 16px;
+}
+
+.receipt-view {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 16px;
+  margin: 16px 0;
+  max-height: 46vh;
+  overflow-y: auto;
+}
+
+.receipt .amt {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.receipt table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.receipt td {
+  padding: 3px 4px;
+}
+
+.receipt tfoot .total td {
+  border-top: 2px solid var(--line);
+  font-weight: 700;
+  font-size: 15px;
+  padding-top: 8px;
+}
+
+.receipt tfoot .rounding td {
+  color: var(--muted);
+}
+
+.receipt .split {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.receipt header {
+  text-align: center;
+  margin-bottom: 10px;
+}
+
+.receipt header h2 {
+  margin: 0;
+  font-size: 17px;
+}
+
+.receipt .meta,
+.receipt .gstin {
+  margin: 2px 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.receipt .banner {
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  color: var(--bad);
+}
