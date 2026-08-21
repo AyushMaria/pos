@@ -4,6 +4,8 @@ import type {
   LookupResponse,
   PostSaleResponse,
   SearchResponse,
+  SyncFailuresResponse,
+  SyncStatusResponse,
   TenderQuote,
   TenderResponse,
 } from "./contract";
@@ -95,6 +97,21 @@ export const register = {
     request<{ path: string }>(`/register/sales/${saleId}/receipt.pdf`, {
       method: "POST",
     }),
+};
+
+/**
+ * Sync — architecture §9.
+ *
+ * Read-only from the register's point of view, apart from `pushNow`, which
+ * exists for the person who has just plugged the network back in and would
+ * rather watch the backlog empty than trust that it will.
+ */
+export const sync = {
+  status: () => request<SyncStatusResponse>("/sync/status"),
+
+  pushNow: () => request<SyncStatusResponse>("/sync/push", { method: "POST" }),
+
+  failures: () => request<SyncFailuresResponse>("/sync/failures"),
 };
 
 export const catalog = {

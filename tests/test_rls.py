@@ -391,6 +391,175 @@ def test_a_review_cannot_be_rewritten(pg: Any) -> None:
         assert cur.rowcount == 0
 
 
+# ── sync_push, against a real Postgres — architecture §9.2 ──────────────────
+#
+# The idempotency claim in the pusher's tests rests on `ON CONFLICT DO
+# NOTHING`, which a fake server can only pretend to have. These assert it
+# where it actually lives.
+
+TERMINAL_UUID = "018f0000-0000-7000-8000-000000000200"
+PRODUCT_ID = "018f0000-0000-7000-8000-000000001002"
+
+
+def _sale_envelope(sale_id: str, *, schema_version: int = 3) -> str:
+    return json.dumps(
+        [
+            {
+                "schema_version": schema_version,
+                "entity": "sale",
+                "op": "insert",
+                "id": sale_id,
+                "client_seq": 1,
+                "data": {
+                    "id": sale_id,
+                    "store_id": STORE_ID,
+                    "terminal_id": TERMINAL_UUID,
+                    "session_id": None,
+                    "receipt_no": f"ST01-T1-{sale_id[-6:]}",
+                    "cashier_id": CASHIER_ID,
+                    "type": "sale",
+                    "status": "completed",
+                    "subtotal": 3740,
+                    "discount_total": 0,
+                    "tax_total": 570,
+                    "rounding_adjustment": -40,
+                    "grand_total": 3700,
+                    "original_sale_id": None,
+                    "client_created_at": "2026-08-21T10:00:00+00:00",
+                    "lines": [
+                        {
+                            "id": f"018f0000-0000-7000-8000-0000000{sale_id[-5:]}",
+                            "sale_id": sale_id,
+                            "line_no": 1,
+                            "product_id": PRODUCT_ID,
+                            "description": "Milk 1L",
+                            "qty_milli": 1000,
+                            "unit_price": 3740,
+                            "discount_amount": 0,
+                            "tax_amount": 570,
+                            "line_total": 3740,
+                            "tax_code": "GST18",
+                            "tax_rate_bp": 1800,
+                        }
+                    ],
+                    "stock_ledger": [
+                        {
+                            "id": f"018f0000-0000-7000-8000-0000001{sale_id[-5:]}",
+                            "store_id": STORE_ID,
+                            "product_id": PRODUCT_ID,
+                            "delta_milli": -1000,
+                            "reason": "sale",
+                            "ref_type": "sale",
+                            "ref_id": sale_id,
+                            "occurred_at": "2026-08-21T10:00:00+00:00",
+                            "terminal_id": TERMINAL_UUID,
+                            "user_id": CASHIER_ID,
+                        }
+                    ],
+                },
+            }
+        ]
+    )
+
+
+def _push(pg: Any, envelope: str, actor: str = CASHIER_ID, role: str = perms.CASHIER):
+    cur = pg.cursor()
+    cur.execute("set local role authenticated")
+    cur.execute("select set_config('request.jwt.claims', %s, true)",
+                (claims(actor, role),))
+    cur.execute("select public.sync_push(%s::jsonb)", (envelope,))
+    return cur
+
+
+def test_a_pushed_sale_lands_whole(pg: Any) -> None:
+    sale_id = "018f0000-0000-7000-8000-00000000a001"
+    with pg.transaction(force_rollback=True):
+        _push(pg, _sale_envelope(sale_id))
+
+        cur = pg.cursor()
+        cur.execute("select count(*) from public.sales where id = %s", (sale_id,))
+        assert cur.fetchone()[0] == 1
+        cur.execute("select count(*) from public.sale_lines where sale_id = %s", (sale_id,))
+        assert cur.fetchone()[0] == 1
+        cur.execute("select count(*) from public.stock_ledger where ref_id = %s", (sale_id,))
+        assert cur.fetchone()[0] == 1
+
+
+def test_pushing_the_same_sale_twice_changes_nothing(pg: Any) -> None:
+    """The claim the whole sync design rests on. A dropped acknowledgement
+    makes the terminal re-send; the re-send must not be a second sale."""
+    sale_id = "018f0000-0000-7000-8000-00000000a002"
+    with pg.transaction(force_rollback=True):
+        _push(pg, _sale_envelope(sale_id))
+        _push(pg, _sale_envelope(sale_id))
+
+        cur = pg.cursor()
+        cur.execute("select count(*) from public.sales where id = %s", (sale_id,))
+        assert cur.fetchone()[0] == 1
+        cur.execute("select count(*) from public.sale_lines where sale_id = %s", (sale_id,))
+        assert cur.fetchone()[0] == 1
+        cur.execute(
+            "select coalesce(sum(delta_milli), 0) from public.stock_ledger "
+            " where ref_id = %s",
+            (sale_id,),
+        )
+        # The one that would hurt: stock counted twice for a sale made once.
+        assert cur.fetchone()[0] == -1000
+
+
+def test_the_ledger_maintains_stock_levels(pg: Any) -> None:
+    """Deltas in, running total out — the terminal never sends a level (§9.4)."""
+    sale_id = "018f0000-0000-7000-8000-00000000a003"
+    with pg.transaction(force_rollback=True):
+        cur = pg.cursor()
+        cur.execute(
+            "select coalesce(on_hand, 0) from public.stock_levels "
+            " where store_id = %s and product_id = %s",
+            (STORE_ID, PRODUCT_ID),
+        )
+        row = cur.fetchone()
+        before = row[0] if row else 0
+
+        _push(pg, _sale_envelope(sale_id))
+
+        cur.execute(
+            "select on_hand from public.stock_levels "
+            " where store_id = %s and product_id = %s",
+            (STORE_ID, PRODUCT_ID),
+        )
+        assert cur.fetchone()[0] == before - 1000
+
+
+def test_sync_push_is_not_a_way_around_rls(pg: Any) -> None:
+    """`security invoker`, so the RPC is exactly as privileged as its caller.
+
+    A `security definer` here would be a hole straight through the only real
+    trust boundary in the system.
+    """
+    sale_id = "018f0000-0000-7000-8000-00000000a004"
+    envelope = json.loads(_sale_envelope(sale_id))
+    envelope[0]["data"]["cashier_id"] = MANAGER_ID  # not the caller
+
+    with (
+        pytest.raises(psycopg.errors.InsufficientPrivilege),
+        pg.transaction(force_rollback=True),
+    ):
+        _push(pg, json.dumps(envelope))
+
+
+def test_an_outdated_terminal_is_refused_by_name(pg: Any) -> None:
+    """Architecture §17. The terminal is told to update, not told its data is
+    invalid — those call for completely different actions."""
+    sale_id = "018f0000-0000-7000-8000-00000000a005"
+    with (
+        pytest.raises(psycopg.errors.RaiseException) as refused,
+        pg.transaction(force_rollback=True),
+    ):
+        _push(pg, _sale_envelope(sale_id, schema_version=2))
+
+    assert "outdated_terminal" in str(refused.value)
+
+
 # ── The matrix, at the layer that enforces it ───────────────────────────────
 
 

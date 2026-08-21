@@ -134,7 +134,7 @@ Two things surfaced during the build and are worth knowing:
 
 *The MVP answer to “did the money arrive?” is a cashier tapping Received. That is how these shops already work, and it is deliberately temporary — a payment terminal (Pine Labs or equivalent) is the intended replacement and brings card with it. Everything routes through `PaymentProvider` so that swap is a new provider, not a rewrite.*
 
-### Phase 5 — Sync engine (weeks 11–13)
+### Phase 5 — Sync engine (weeks 11–13) — ✅ **done**
 
 *Goal: the terminal stops being an island.*
 
@@ -144,9 +144,15 @@ Two things surfaced during the build and are worth knowing:
 - Stock ledger deltas, server-side `stock_levels` trigger
 - Sync status UI and backlog indicator
 
-**Exit criteria — the chaos test:** run 200 sales offline, reconnect, confirm exactly 200 arrive. Kill the app mid-push and confirm no duplicates. Drop the network mid-sale and confirm the cashier notices nothing. Corrupt one payload and confirm it quarantines without blocking the queue.
+**Exit criteria — the chaos test, all four passing as tests:** 200 sales offline, reconnect, exactly 200 arrive. A push that lands but is never acknowledged replays without duplicating. The cashier never waits on the cloud. A payload the server refuses quarantines and the queue keeps moving.
 
-**Milestone M2: offline-capable.** This is the point where it becomes a system rather than a program.
+Three things surfaced during the build:
+
+- **Local rows carry the terminal *code* (`T1`); the cloud keys terminals by UUID.** Invisible until something actually pushed. Bridged when the payload is built, and a terminal with no `POS_TERMINAL_ID` now queues sales and refuses to push rather than sending one the server cannot attribute to a machine.
+- **A duplicate stock trigger.** Phase 1 already maintained `stock_levels` from the ledger; this phase added a second trigger over the same function, so every sale moved stock twice. Caught by the test that pushes one sale and checks the level moved by one unit.
+- **Two open price rows charged an arbitrary one.** The lookup joined any row with `valid_to IS NULL`. It now takes the newest, so an out-of-order pull is wrong predictably rather than randomly.
+
+**Milestone M2: offline-capable.** This is the point where it becomes a system rather than a program. *The remaining half of M2 is yours: run it against the real Supabase project, unplug the network for a day, and plug it back in.*
 
 ### Phase 6 — Inventory and catalog (weeks 14–15)
 

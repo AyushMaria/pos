@@ -10,6 +10,7 @@ import type {
   TenderResponse,
 } from "../../core/api/contract";
 import { useBarcodeCapture } from "../../core/barcode-capture/useBarcodeCapture";
+import { SyncIndicator } from "../sync/SyncIndicator";
 
 /**
  * The register — architecture §4.
@@ -201,6 +202,7 @@ export function RegisterScreen({ session }: { session: SessionResponse }) {
     <div className="register">
       <header className="bar">
         <span className="who">{session.full_name}</span>
+        <SyncIndicator />
         <span className="till">{session.employee_code}</span>
       </header>
 

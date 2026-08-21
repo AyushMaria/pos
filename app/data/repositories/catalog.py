@@ -43,14 +43,24 @@ class CatalogProduct:
         return self.short_name or self.name
 
 
+# The price is the *newest* open one, not merely an open one.
+#
+# Upstream closes a row and opens another when a price changes, so normally
+# exactly one is open and this is the same answer either way. But a pull that
+# arrives out of order, or an upstream edit that forgets to close the old row,
+# leaves two open — and a plain join then charges whichever SQLite happened to
+# read first. Picking the latest `valid_from` makes that case wrong in a
+# predictable direction (the new price) rather than an arbitrary one.
 _SELECT = """
     SELECT p.id, p.sku, p.name, p.short_name, p.uom, p.is_weighed,
            t.code AS tax_code, t.name AS tax_name, t.rate_bp, t.is_inclusive,
-           pr.price
+           (SELECT pr.price
+              FROM product_prices pr
+             WHERE pr.product_id = p.id AND pr.valid_to IS NULL
+             ORDER BY pr.valid_from DESC
+             LIMIT 1) AS price
       FROM products p
-      JOIN tax_codes t       ON t.code = p.tax_code
-      LEFT JOIN product_prices pr
-             ON pr.product_id = p.id AND pr.valid_to IS NULL
+      JOIN tax_codes t ON t.code = p.tax_code
 """
 
 

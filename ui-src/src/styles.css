@@ -164,10 +164,51 @@ body:has(.done) {
 .bar {
   display: flex;
   justify-content: space-between;
+  align-items: center;
+  gap: 12px;
   font-size: 13px;
   color: var(--muted);
   padding-bottom: 10px;
   border-bottom: 1px solid var(--line);
+}
+
+/* Sync state — architecture §9.
+   Small on purpose. A backlog is worth seeing and never worth interrupting a
+   sale for, so this is a badge in the header rather than anything modal. */
+.sync {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.sync .dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--muted);
+}
+
+.sync.ok .dot { background: #16a34a; }
+.sync.busy .dot { background: #2563eb; }
+.sync.warn .dot { background: #d08700; }
+.sync.bad .dot { background: #dc2626; }
+
+.sync.bad .label,
+.sync.warn .label {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.sync .link {
+  background: none;
+  border: 0;
+  padding: 0;
+  color: var(--accent, #2563eb);
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
 }
 
 .entry {

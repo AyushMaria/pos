@@ -759,6 +759,142 @@
         "title": "SessionResponse",
         "type": "object"
       },
+      "SyncFailureOut": {
+        "additionalProperties": false,
+        "properties": {
+          "entity": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Entity"
+          },
+          "error": {
+            "title": "Error",
+            "type": "string"
+          },
+          "failed_at": {
+            "title": "Failed At",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "outbox_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Outbox Id"
+          }
+        },
+        "required": [
+          "id",
+          "error",
+          "failed_at"
+        ],
+        "title": "SyncFailureOut",
+        "type": "object"
+      },
+      "SyncFailuresResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/SyncFailureOut"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "SyncFailuresResponse",
+        "type": "object"
+      },
+      "SyncStatusResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "backlog": {
+            "title": "Backlog",
+            "type": "integer"
+          },
+          "failures": {
+            "default": 0,
+            "title": "Failures",
+            "type": "integer"
+          },
+          "last_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Error"
+          },
+          "last_pull_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Pull At"
+          },
+          "last_push_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Push At"
+          },
+          "needs_update": {
+            "default": false,
+            "title": "Needs Update",
+            "type": "boolean"
+          },
+          "oldest_pending_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Oldest Pending At"
+          },
+          "online": {
+            "title": "Online",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "online",
+          "backlog"
+        ],
+        "title": "SyncStatusResponse",
+        "type": "object"
+      },
       "TaxComponentOut": {
         "additionalProperties": false,
         "properties": {
@@ -1907,6 +2043,72 @@
         "summary": "Margin Report",
         "tags": [
           "reports"
+        ]
+      }
+    },
+    "/sync/failures": {
+      "get": {
+        "description": "What was set aside, and why.\n\nA quarantined sale is in the local database and not in the cloud, which\nmeans the day's totals differ between the two. Someone has to be able to\nsee which ones and decide what to do, so this shows the payload that was\nactually sent rather than a row id and an apology.",
+        "operationId": "sync_failures_sync_failures_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SyncFailuresResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Sync Failures",
+        "tags": [
+          "sync"
+        ]
+      }
+    },
+    "/sync/push": {
+      "post": {
+        "description": "Drain the queue now.\n\nFor the person who has just plugged the network back in and would rather\nwatch the backlog empty than trust that it will.",
+        "operationId": "push_now_sync_push_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SyncStatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Push Now",
+        "tags": [
+          "sync"
+        ]
+      }
+    },
+    "/sync/status": {
+      "get": {
+        "description": "Backlog depth, last push and pull, and anything that went wrong.\n\nRead live rather than from the last cycle, because the number a cashier\ncares about \u2014 how many sales are still here \u2014 changes with every sale\nthey take, not every ninety seconds.",
+        "operationId": "sync_status_sync_status_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SyncStatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Sync Status",
+        "tags": [
+          "sync"
         ]
       }
     }

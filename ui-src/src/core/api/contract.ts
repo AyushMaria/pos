@@ -161,6 +161,26 @@ export interface SessionResponse {
   /** True when authenticated against the local cache */
   offline: boolean;
 }
+export interface SyncFailureOut {
+  id: number;
+  outbox_id?: number | null;
+  entity?: string | null;
+  error: string;
+  failed_at: string;
+}
+export interface SyncFailuresResponse {
+  items: SyncFailureOut[];
+}
+export interface SyncStatusResponse {
+  online: boolean;
+  backlog: number;
+  oldest_pending_at?: string | null;
+  failures?: number;
+  last_push_at?: string | null;
+  last_pull_at?: string | null;
+  last_error?: string | null;
+  needs_update?: boolean;
+}
 export interface TaxComponentOut {
   tax_code: string;
   rate_bp: number;

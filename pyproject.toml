@@ -88,12 +88,12 @@ root_package = "app"
 include_external_packages = true
 
 [[tool.importlinter.contracts]]
-name = "Layered architecture: api -> services -> {domain, data}"
+name = "Layered architecture: api -> {services, sync} -> {domain, data}"
 type = "layers"
 layers = [
     "app.main",
     "app.api",
-    "app.services",
+    "app.services | app.sync",
     "app.data | app.security",
     "app.domain",
 ]

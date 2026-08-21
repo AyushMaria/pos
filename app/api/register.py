@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 
 from app.api.deps import CurrentSession, get_cart_service, get_sale_service, require
 from app.api.schemas import (
@@ -404,6 +404,7 @@ async def cancel_payment(
 @router.post("/carts/{cart_id}/post", response_model=PostSaleResponse)
 def post_sale(
     cart_id: str,
+    request: Request,
     carts: CartSvc,
     sales: SaleSvc,
     session: Annotated[Session, Depends(require(permissions.SALE_CREATE))],
@@ -419,6 +420,13 @@ def post_sale(
         posted = sales.post(cart_id)
     except SaleNotSettled as exc:
         raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
+
+    # The sale is committed and queued. Wake the sync loop rather than making
+    # it wait out its idle interval — and do it *after* the commit, so a
+    # failure to nudge can never be a failure to sell (architecture §9).
+    engine = getattr(request.app.state, "sync", None)
+    if engine is not None:
+        engine.nudge()
 
     receipt = sales.receipt_for_cart(open_cart, posted, session.full_name)
 

@@ -24,11 +24,13 @@ from app.api import events as events_router
 from app.api import health as health_router
 from app.api import register as register_router
 from app.api import reports as reports_router
+from app.api import sync as sync_router
 from app.api.dev_ui import DEV_LOGIN_PAGE
 from app.config import Settings, get_settings
 from app.data.db import Database
 from app.data.migrations import migrate
 from app.data.repositories.catalog import CatalogRepository
+from app.data.repositories.outbox import OutboxRepository
 from app.data.repositories.sales import SalesRepository
 from app.data.repositories.terminal import TerminalRepository
 from app.data.repositories.users import CachedUserRepository
@@ -38,6 +40,10 @@ from app.services.cart_service import CartService
 from app.services.payment_providers import default_registry
 from app.services.sale_service import SaleService
 from app.services.supabase_auth import SupabaseAuthClient
+from app.sync.engine import SyncEngine
+from app.sync.payloads import PayloadBuilder
+from app.sync.puller import Puller
+from app.sync.pusher import Pusher
 
 log = logging.getLogger(__name__)
 
@@ -73,9 +79,21 @@ def build_app(
             "no Supabase project configured — login will use the local cache only"
         )
 
+    outbox = OutboxRepository(db)
+    engine = _build_sync_engine(db, outbox, sessions, settings)
+
     @asynccontextmanager
-    async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+    async def lifespan(instance: FastAPI) -> AsyncIterator[None]:
+        # Started inside the running loop, not at construction: the engine
+        # owns an asyncio task and a wake event, and both need a loop to
+        # belong to. A test client that never enters the context therefore
+        # never starts a background task, which is what keeps the suite quiet.
+        if engine is not None:
+            engine.publish = instance.state.events.broadcast
+            engine.start()
         yield
+        if engine is not None:
+            await engine.stop()
         if cloud is not None:
             await cloud.aclose()
 
@@ -91,6 +109,8 @@ def build_app(
 
     app.state.settings = settings
     app.state.db = db
+    app.state.outbox = outbox
+    app.state.sync = engine
     app.state.sessions = sessions
     app.state.session_token = token
     app.state.events = events_router.EventHub()
@@ -125,10 +145,46 @@ def build_app(
     app.include_router(events_router.router)
     app.include_router(register_router.router)
     app.include_router(reports_router.router)
+    app.include_router(sync_router.router)
 
     _mount_ui(app)
 
     return app
+
+
+def _build_sync_engine(
+    db: Database,
+    outbox: OutboxRepository,
+    sessions: SessionStore,
+    settings: Settings,
+) -> SyncEngine | None:
+    """The engine, or None when there is no cloud to sync with.
+
+    A terminal with no Supabase project is a perfectly valid development
+    setup, and returning None rather than a disabled engine keeps the
+    "is there a cloud?" question in one place instead of inside every method.
+    """
+    if not settings.cloud_configured:
+        return None
+
+    return SyncEngine(
+        outbox=outbox,
+        pusher=Pusher(
+            outbox,
+            PayloadBuilder(db, terminal_id=settings.terminal_id),
+            base_url=settings.supabase_url,
+            anon_key=settings.supabase_anon_key,
+            # RLS runs as whoever is signed in, so a push carries the
+            # cashier's own rights and nothing more (architecture §11.2).
+            token_provider=lambda: sessions.access_token,
+        ),
+        puller=Puller(
+            db,
+            base_url=settings.supabase_url,
+            anon_key=settings.supabase_anon_key,
+            token_provider=lambda: sessions.access_token,
+        ),
+    )
 
 
 def _mount_ui(app: FastAPI) -> None:

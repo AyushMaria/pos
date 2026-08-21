@@ -284,3 +284,34 @@ class ReceiptPdfResponse(ApiModel):
     sale_id: str
     receipt_no: str
     path: str
+
+
+# ── Sync — architecture §9 ──────────────────────────────────────────────────
+
+
+class SyncStatusResponse(ApiModel):
+    online: bool
+    #: Sales taken here that the cloud has not acknowledged. The one figure a
+    #: cashier actually needs.
+    backlog: int
+    oldest_pending_at: str | None = None
+    #: Rows the server refused permanently. Never zero for a good reason.
+    failures: int = 0
+    last_push_at: str | None = None
+    last_pull_at: str | None = None
+    last_error: str | None = None
+    #: The server rejected this build's payload version (§17). Waiting will
+    #: not fix it; updating the terminal will.
+    needs_update: bool = False
+
+
+class SyncFailureOut(ApiModel):
+    id: int
+    outbox_id: int | None = None
+    entity: str | None = None
+    error: str
+    failed_at: str
+
+
+class SyncFailuresResponse(ApiModel):
+    items: list[SyncFailureOut]

@@ -42,6 +42,15 @@ class Settings(BaseSettings):
     # ── Terminal identity ───────────────────────────────────────────────────
     store_code: str = "ST01"
     terminal_code: str = "T1"
+    #: The server's UUID for this till, from the `terminals` table.
+    #:
+    #: Local rows carry the *code* (`T1`) because that is what a receipt
+    #: number is built from and what a person at the counter recognises. The
+    #: cloud keys terminals by UUID, so the two are bridged when a payload is
+    #: built (app/sync/payloads.py). Until this is set, sales queue locally
+    #: and refuse to push rather than pushing something the server cannot
+    #: attribute to a machine. Device registration (phase 9) will fill it in.
+    terminal_id: str = ""
     #: Printed at the head of every receipt. A GSTIN is required on a GST
     #: invoice; blank means the receipt omits the line rather than printing an
     #: empty one.

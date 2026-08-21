@@ -10,7 +10,7 @@
 
 This document describes the whole system. Roughly a third of it is now running code, and the two have been reconciled here — where the build diverged from the design, the built version is what this document now says, with the reason given inline.
 
-**As of the end of phase 4** (execution plan §3):
+**As of the end of phase 5** (execution plan §3):
 
 | § | Area | State |
 |---|---|---|
@@ -19,20 +19,20 @@ This document describes the whole system. Roughly a third of it is now running c
 | 4 | Local API | Built for auth, catalog, register, payments and reports. Inventory, shifts, admin, park/resume, override and print endpoints are unwritten. |
 | 5 | Local API security | Built in full, one test per defence. |
 | 6 | Money and quantities | Built. `float` is banned from `domain/` by a CI check that walks the AST. |
-| 7 | SQLite schema | Built through migration `003`. |
+| 7 | SQLite schema | Built through migration `003`; the cloud through `0008`. |
 | 8 | Concurrency | Built. One write connection behind a lock, thread-local readers, `post_sale` as a single transaction. |
-| 9 | Sync engine | **Not built.** Outbox rows are already written by every sale, so nothing is being lost; nothing drains them yet. Phase 5. |
+| 9 | Sync engine | Built. Outbox drain with backoff and quarantine, `sync_push` RPC, per-entity watermark pullers, status endpoint and a badge on the register. |
 | 10 | Barcode subsystem | Built, plus a weighed-item *generator* (§10.3) that the original design did not anticipate. |
 | 11 | RBAC | The matrix is built and generated from one source into Postgres, Python and TypeScript. Manager override is phase 7. |
 | 12 | Peripherals | Scanner only — and it needs no code. |
 | 13 | Payments | Built: cash and UPI, split tender either way round, attestation with UTR capture, attempt expiry, and the `requires_review` queue with supervisor resolution. A card terminal is one more provider (§13.6). |
 | 14 | Packaging | Not started. The code-signing certificate is the long-lead item and is still unstarted. |
-| 15 | Testing | 556 Python tests (+32 skipped without the Postgres extra), 32 RLS tests against a real Postgres, 17 UI tests. |
+| 15 | Testing | 604 Python tests (+37 skipped without the Postgres extra), 37 RLS tests against a real Postgres, 41 UI tests. |
 
 ```
-pytest -q                        # 556 passed, 32 skipped
-python scripts/run_rls_tests.py  # 32 passed, against bundled Postgres
-npm test          (in ui-src/)   # 17 passed
+pytest -q                        # 604 passed, 37 skipped
+python scripts/run_rls_tests.py  # 37 passed, against bundled Postgres
+npm test          (in ui-src/)   # 41 passed
 ```
 
 Two things known to be wrong in the **data** rather than the code, both to be fixed during the catalogue migration and neither of them a pilot-ready state:
@@ -200,8 +200,10 @@ A tick marks what exists today; the rest is the intended surface.
 | | `POST` | `/inventory/receipts` `/counts` `/adjustments` | Stock movements |
 | | `POST` | `/print/receipt/{sale_id}` `/print/labels` | Reprint, label sheets |
 | | `POST` | `/shifts/open` `/shifts/close` | Session + cash reconciliation |
-| | `GET` | `/sync/status` | Backlog depth, last push/pull, errors |
-| ✅ | `WS` | `/events` | Today: `connectivity`. Reserved: `sync.status`, `catalog.updated`, `auth.revoked` |
+| ✅ | `GET` | `/sync/status` | Backlog depth, last push/pull, errors |
+| ✅ | `POST` | `/sync/push` | Drain now, for whoever just plugged the network back in |
+| ✅ | `GET` | `/sync/failures` | What was quarantined and why (`report.sales.store`) |
+| ✅ | `WS` | `/events` | Today: `connectivity`, `sync.status`. Reserved: `catalog.updated`, `auth.revoked` |
 
 Two shapes came out differently from the sketch above, both for the same reason — the cashier needs to know a number *before* committing to it. `tender-quote` is a separate read so the rounding adjustment can be shown while the customer is still holding their money, and posting is its own call rather than a side effect of the final payment, so a settled balance and a committed sale stay distinguishable.
 
@@ -365,6 +367,8 @@ async def drain(self) -> None:
 ```
 
 - **Idempotency:** client-generated UUID v7 PKs + `ON CONFLICT (id) DO NOTHING` server-side. A dropped ACK never double-posts a sale.
+- **Outbox rows are pointers, not snapshots.** A sale queues `{"sale_id": …}` and the pusher re-reads the record at drain time. That is safe *because* transactional rows are append-only — nothing can change under a queued pointer — and it keeps the write path, which runs inside the customer-facing transaction, down to one small INSERT. If an UPDATE ever appears on a transactional table, this becomes wrong and payloads must be snapshotted at write time instead.
+- **`sync_push` is `security invoker`.** The RPC is exactly as privileged as the cashier who called it, so RLS still decides. A `security definer` RPC here would be a hole straight through the only real trust boundary in the system.
 - **Ordering:** `client_seq` per terminal preserves causality (sale before its payment).
 - Permanent failures quarantine rather than block the queue, and surface in the UI.
 
