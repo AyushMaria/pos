@@ -4,10 +4,17 @@ The balance loop lives here:
 
     balance = grand_total - approved payments
     while balance > 0:  choose method -> begin attempt -> resolve
-    post when balance <= 0;  change due = -balance   (cash only)
+    post when balance <= 0;  change due = -balance, handed back in cash
 
-Rounding is applied when the *first* tender method is chosen, to the balance
-outstanding at that moment, and never to the basket (architecture §13.4).
+Two rules the loop exists to keep straight:
+
+  * **Rounding is applied when cash is chosen**, to the balance outstanding at
+    that moment, and never to the basket (architecture §13.4). On a split
+    tender that is the cash remainder, not the whole sale.
+  * **Any method can overpay.** The shops take UPI on a printed counter QR, so
+    the customer types the amount themselves and can type it wrong in either
+    direction (§13.3). Short leaves the balance open; over is change, in cash,
+    because the till cannot refund a transfer.
 """
 
 from __future__ import annotations
@@ -28,11 +35,12 @@ from app.domain.payments import (
     BalanceState,
     PaymentAttempt,
     PaymentError,
+    needs_review,
 )
 from app.domain.receipt import Receipt, ReceiptError, ReceiptLine, ReceiptPayment
 from app.domain.tax import TaxCode, breakdown
 from app.domain.tender import TenderMethod, change_due
-from app.services.cart_service import CartService, OpenCart
+from app.services.cart_service import AttemptNotFound, CartService, OpenCart
 from app.services.payment_providers import ProviderRegistry, new_attempt
 
 log = logging.getLogger(__name__)
@@ -77,9 +85,15 @@ class SaleService:
         if open_cart.cart.is_empty:
             raise PaymentError("cannot take payment for an empty basket")
 
-        # Rounding is settled once, when the first tender method is chosen,
-        # against the balance outstanding at that moment (architecture §13.4).
-        if open_cart.rounding is None:
+        # Rounding is a property of *cash*, settled against the balance
+        # outstanding at the moment cash is chosen (architecture §13.4).
+        #
+        # It is deliberately not settled when the first tender is chosen. On a
+        # UPI-then-cash split that would round the whole basket at a moment
+        # when nothing was being paid in cash, and then collect the cash
+        # remainder unrounded — the exact inversion of the rule. Rounding the
+        # remainder, here, is what "only the cash portion rounds" means.
+        if method == "cash" and open_cart.rounding is None:
             open_cart.rounding = self.carts.quote_tender(cart_id, method)
 
         outstanding = open_cart.balance().outstanding
@@ -102,13 +116,96 @@ class SaleService:
             attempt=resolved, balance=balance, settled=balance.is_settled
         )
 
-    def change_for(self, cart_id: str) -> Money:
-        """Change owed, from the cash actually handed over.
+    # ── Resolving an attempt a provider cannot resolve for itself ───────────
 
-        Only cash can overpay: a UPI attempt is always for the exact balance
-        because the amount is embedded in the QR (architecture §13.2).
+    def _attempt(self, attempt_id: str) -> tuple[OpenCart, PaymentAttempt]:
+        open_cart = self.carts.cart_for_attempt(attempt_id)
+        for attempt in open_cart.attempts:
+            if attempt.id == attempt_id:
+                return open_cart, attempt
+        raise AttemptNotFound(attempt_id)
+
+    def attest(
+        self,
+        attempt_id: str,
+        *,
+        amount: Money | None = None,
+        reference: str | None = None,
+    ) -> TenderResult:
+        """The cashier confirms the money arrived — architecture §13.3.
+
+        This is the weakest link in the payment path and it is deliberate: on
+        a printed counter QR there is no signal a computer can read, so the
+        alternative to trusting the cashier is not trusting them and refusing
+        the sale. It is audited, recorded as `manual_attestation`, and carries
+        `verified = 0` so a shift close can never mistake it for settled money.
+
+        `amount` is what actually arrived, which need not be what was asked
+        for. A short payment leaves the balance open and the loop continues.
+        """
+        open_cart, attempt = self._attempt(attempt_id)
+        resolved = attempt.attest(at=utcnow(), amount=amount, reference=reference)
+        self.carts.replace_attempt(open_cart, resolved)
+
+        balance = open_cart.balance()
+        log.info(
+            "attested %s %s on cart %s (asked %s)",
+            resolved.method, resolved.amount, open_cart.id, attempt.amount,
+        )
+        return TenderResult(
+            attempt=resolved, balance=balance, settled=balance.is_settled
+        )
+
+    def mark_unknown(self, attempt_id: str, reason: str | None = None) -> TenderResult:
+        """The cashier cannot tell whether the money arrived.
+
+        "The customer insists they paid and no notification came" is a real
+        counter event, and both confident answers to it are wrong: refusing
+        the sale accuses a paying customer, and attesting invents money. So
+        the attempt records that nobody knows, the sale posts as
+        `requires_review`, and a supervisor settles it later (§13.5).
+        """
+        open_cart, attempt = self._attempt(attempt_id)
+        resolved = attempt.to(
+            AttemptState.UNKNOWN,
+            at=utcnow(),
+            reason=reason or "cashier could not confirm receipt",
+        )
+        self.carts.replace_attempt(open_cart, resolved)
+
+        balance = open_cart.balance()
+        return TenderResult(
+            attempt=resolved, balance=balance, settled=balance.is_settled
+        )
+
+    async def cancel_attempt(self, attempt_id: str) -> TenderResult:
+        """Abandon an attempt. The cart stays open and the basket unfreezes."""
+        open_cart, attempt = self._attempt(attempt_id)
+        provider = self.providers.for_method(attempt.method)
+        resolved = await provider.cancel(attempt)
+        self.carts.replace_attempt(open_cart, resolved)
+
+        balance = open_cart.balance()
+        return TenderResult(
+            attempt=resolved, balance=balance, settled=balance.is_settled
+        )
+
+    def change_for(self, cart_id: str) -> Money:
+        """Change owed, from two sources that can both be non-zero.
+
+        A customer overpays in two different ways, and the till owes cash back
+        for both:
+
+          * **cash handed over** beyond the rounded amount asked for, and
+          * **an over-attested payment** — on a printed counter QR the
+            customer types the amount themselves, so ₹200 against a ₹187
+            balance is an ordinary Tuesday (architecture §13.3).
+
+        The second was impossible under the original dynamic-QR design, which
+        is why this is not simply a cash surplus.
         """
         open_cart = self.carts.get(cart_id)
+
         cash_tendered = Money.zero()
         cash_owed = Money.zero()
         for attempt in open_cart.attempts:
@@ -117,9 +214,12 @@ class SaleService:
             cash_owed = cash_owed + attempt.amount
             cash_tendered = cash_tendered + (attempt.tendered or attempt.amount)
 
-        if cash_tendered <= cash_owed:
-            return Money.zero()
-        return change_due(cash_tendered, cash_owed)
+        surplus = (
+            change_due(cash_tendered, cash_owed)
+            if cash_tendered > cash_owed
+            else Money.zero()
+        )
+        return surplus + open_cart.balance().change_due
 
     # ── Posting ─────────────────────────────────────────────────────────────
 
@@ -149,6 +249,7 @@ class SaleService:
             change_due=self.change_for(cart_id),
             client_created_at=open_cart.opened_at,
             posted_at=utcnow(),
+            requires_review=needs_review(open_cart.attempts),
         )
 
         # The cart is only forgotten after the transaction has committed. A

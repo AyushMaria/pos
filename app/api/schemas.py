@@ -187,7 +187,7 @@ class TenderQuote(ApiModel):
 
 
 class TenderRequest(ApiModel):
-    method: str = Field(description="cash (phase 3); upi arrives in phase 4")
+    method: str = Field(description="cash or upi")
     tendered_paise: int | None = Field(
         default=None, description="Cash handed over, when more than is owed"
     )
@@ -198,6 +198,75 @@ class TenderResponse(ApiModel):
     state: str
     cart: CartOut
     change_due: MoneyOut
+    #: When a UPI attempt lapses if nobody confirms it. Null for cash, which
+    #: resolves the instant it is begun.
+    expires_at: str | None = None
+
+
+class AttestRequest(ApiModel):
+    """What the cashier saw on the merchant phone or soundbox."""
+
+    amount_paise: int | None = Field(
+        default=None,
+        description=(
+            "What actually arrived. Defaults to the amount asked for. The "
+            "customer types the figure into their own app on a printed "
+            "counter QR, so it can differ in either direction."
+        ),
+    )
+    reference: str | None = Field(
+        default=None,
+        description=(
+            "The UTR. With a static QR this is the only identifier the bank "
+            "statement and this sale have in common — worth capturing."
+        ),
+    )
+
+
+class UnknownPaymentRequest(ApiModel):
+    reason: str | None = None
+
+
+class AttemptOut(ApiModel):
+    attempt_id: str
+    method: str
+    state: str
+    amount: MoneyOut
+    reference: str | None = None
+    expires_at: str | None = None
+    #: True while the attempt is still waiting on the world.
+    is_pending: bool
+
+
+class ReviewItemOut(ApiModel):
+    """A sale posted as `requires_review`, awaiting a supervisor."""
+
+    sale_id: str
+    receipt_no: str
+    grand_total: MoneyOut
+    disputed_amount: MoneyOut
+    posted_at: str
+
+
+class ReviewQueueResponse(ApiModel):
+    items: list[ReviewItemOut]
+
+
+class ResolveReviewRequest(ApiModel):
+    outcome: str = Field(
+        description=(
+            "'paid' if the money was there after all, 'not_paid' if it never "
+            "arrived. Never a bare 'resolved': a variance nobody can name is "
+            "one nobody can act on at shift close."
+        )
+    )
+    note: str | None = None
+
+
+class ResolveReviewResponse(ApiModel):
+    sale_id: str
+    outcome: str
+    resolved_at: str
 
 
 class PostSaleResponse(ApiModel):

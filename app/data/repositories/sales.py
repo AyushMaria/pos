@@ -259,6 +259,85 @@ class SalesRepository(Repository):
     def count(self) -> int:
         return int(self._scalar("SELECT COUNT(*) FROM sales") or 0)
 
+    # ── The review queue — architecture §13.5 ───────────────────────────────
+
+    def open_reviews(self) -> list[sqlite3.Row]:
+        """Sales posted as `requires_review` that nobody has settled yet.
+
+        A left join rather than a status flag, because the sale's status is
+        never rewritten: `requires_review` is what happened, and it stays true
+        after the fact (see migration 003).
+        """
+        return self._rows(
+            """
+            SELECT s.id, s.receipt_no, s.grand_total, s.client_created_at,
+                   s.cashier_id,
+                   (SELECT COALESCE(SUM(amount), 0) FROM payment_attempts
+                     WHERE sale_id = s.id AND state = 'unknown') AS disputed_amount
+              FROM sales s
+              LEFT JOIN sale_reviews r ON r.sale_id = s.id
+             WHERE s.status = 'requires_review' AND r.id IS NULL
+             ORDER BY s.client_created_at
+            """
+        )
+
+    def review_for(self, sale_id: str) -> sqlite3.Row | None:
+        return self._row("SELECT * FROM sale_reviews WHERE sale_id = ?", (sale_id,))
+
+    def resolve_review(
+        self,
+        *,
+        sale_id: str,
+        outcome: str,
+        resolved_by: str,
+        resolved_at: datetime,
+        note: str | None = None,
+    ) -> str:
+        """Record what a supervisor decided about a disputed payment.
+
+        The review row and its audit row commit together: a decision about
+        money that leaves no trace of who made it is worse than no decision.
+        """
+        review_id = new_id()
+        with self.transaction() as conn:
+            conn.execute(
+                """
+                INSERT INTO sale_reviews (
+                    id, sale_id, outcome, note, resolved_by, resolved_at
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (review_id, sale_id, outcome, note, resolved_by,
+                 resolved_at.isoformat()),
+            )
+            conn.execute(
+                """
+                INSERT INTO audit_log (
+                    id, actor_id, action, entity, entity_id, after_json, occurred_at
+                ) VALUES (?, ?, 'sale.review.resolve', 'sale', ?, ?, ?)
+                """,
+                (
+                    new_id(),
+                    resolved_by,
+                    sale_id,
+                    json.dumps({"outcome": outcome, "note": note}),
+                    resolved_at.isoformat(),
+                ),
+            )
+            conn.execute(
+                """
+                INSERT INTO outbox (entity, entity_id, op, payload_json,
+                                    client_seq, created_at)
+                VALUES ('sale_review', ?, 'insert', ?, ?, ?)
+                """,
+                (
+                    review_id,
+                    json.dumps({"review_id": review_id, "sale_id": sale_id}),
+                    self._next_client_seq(conn),
+                    resolved_at.isoformat(),
+                ),
+            )
+        return review_id
+
     def totals_balance(self, sale_id: str) -> bool:
         """Does this stored sale add up?
 

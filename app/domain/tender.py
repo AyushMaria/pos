@@ -107,10 +107,12 @@ def rounding_for(outstanding: Money, method: TenderMethod) -> CashRounding:
 
 
 def change_due(collected: Money, owed: Money) -> Money:
-    """Change owed when the customer hands over more than the rounded total.
+    """Change owed when more was collected than the rounded total.
 
-    Only cash can overpay — a UPI attempt is always for the exact outstanding
-    balance because the amount is embedded in the QR (architecture §13.2).
+    Cash overpays when the customer hands over a round note. UPI overpays when
+    they mistype the amount into their own app, which a printed counter QR
+    makes possible where a dynamic one would not (architecture §13.3). Change
+    is handed back in cash in both cases: the till cannot refund a transfer.
     """
     if collected < owed:
         raise TenderError(

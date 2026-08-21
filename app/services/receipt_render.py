@@ -85,6 +85,12 @@ def render_text(receipt: Receipt) -> str:
         if not payment.verified:
             label += " (unverified)"
         row(label, str(payment.amount))
+        if payment.reference:
+            # The UTR. On a printed counter QR this is the only identifier the
+            # customer's bank app and this sale have in common (architecture
+            # §13.3), so it belongs on the copy the customer walks out with —
+            # otherwise a disputed payment has nothing to trace.
+            out.append(f"  ref {payment.reference}")
     if not receipt.change_due.is_zero:
         row("Change", str(receipt.change_due))
 
@@ -137,7 +143,9 @@ def render_html(receipt: Receipt) -> str:
 
     payments = "".join(
         f"""<tr><td colspan="3">{esc(payment.method.upper())}
-             {"<em>(unverified)</em>" if not payment.verified else ""}</td>
+             {"<em>(unverified)</em>" if not payment.verified else ""}
+             {f'<span class="ref">ref {esc(payment.reference)}</span>'
+              if payment.reference else ""}</td>
              <td class="amt">{esc(payment.amount)}</td></tr>"""
         for payment in receipt.payments
     )

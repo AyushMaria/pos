@@ -10,28 +10,28 @@
 
 This document describes the whole system. Roughly a third of it is now running code, and the two have been reconciled here — where the build diverged from the design, the built version is what this document now says, with the reason given inline.
 
-**As of the end of phase 3** (execution plan §3):
+**As of the end of phase 4** (execution plan §3):
 
 | § | Area | State |
 |---|---|---|
 | 2 | Process topology | Built. pywebview on the main thread, uvicorn in a daemon thread, health gate, single-instance lock. No peripheral worker threads and no sync tasks yet — nothing needs the former, and the latter is phase 5. |
 | 3 | Layers | Built, and the dependency rule is enforced in CI by `import-linter`. |
-| 4 | Local API | Built for auth, catalog, register and reports. Inventory, shifts, admin, park/resume, override and print endpoints are unwritten. |
+| 4 | Local API | Built for auth, catalog, register, payments and reports. Inventory, shifts, admin, park/resume, override and print endpoints are unwritten. |
 | 5 | Local API security | Built in full, one test per defence. |
 | 6 | Money and quantities | Built. `float` is banned from `domain/` by a CI check that walks the AST. |
-| 7 | SQLite schema | Built through migration `002`. |
+| 7 | SQLite schema | Built through migration `003`. |
 | 8 | Concurrency | Built. One write connection behind a lock, thread-local readers, `post_sale` as a single transaction. |
 | 9 | Sync engine | **Not built.** Outbox rows are already written by every sale, so nothing is being lost; nothing drains them yet. Phase 5. |
 | 10 | Barcode subsystem | Built, plus a weighed-item *generator* (§10.3) that the original design did not anticipate. |
 | 11 | RBAC | The matrix is built and generated from one source into Postgres, Python and TypeScript. Manager override is phase 7. |
 | 12 | Peripherals | Scanner only — and it needs no code. |
-| 13 | Payments | Lifecycle, state machine and split-tender balance loop built; `CashProvider` is the only registered provider. UPI is phase 4, and smaller than first scoped — the shops' QR is already printed on the counter, so there is nothing to render (§13.3). |
+| 13 | Payments | Built: cash and UPI, split tender either way round, attestation with UTR capture, attempt expiry, and the `requires_review` queue with supervisor resolution. A card terminal is one more provider (§13.6). |
 | 14 | Packaging | Not started. The code-signing certificate is the long-lead item and is still unstarted. |
-| 15 | Testing | 513 Python tests (+27 skipped without the Postgres extra), 27 RLS tests against a real Postgres, 17 UI tests. |
+| 15 | Testing | 556 Python tests (+32 skipped without the Postgres extra), 32 RLS tests against a real Postgres, 17 UI tests. |
 
 ```
-pytest -q                        # 513 passed, 27 skipped
-python scripts/run_rls_tests.py  # 27 passed, against bundled Postgres
+pytest -q                        # 556 passed, 32 skipped
+python scripts/run_rls_tests.py  # 32 passed, against bundled Postgres
 npm test          (in ui-src/)   # 17 passed
 ```
 
@@ -189,10 +189,12 @@ A tick marks what exists today; the rest is the intended surface.
 | ✅ | `POST` | `/register/sales/{id}/receipt.pdf` | Render on demand; the file is written locally, not streamed |
 | ✅ | `GET` | `/reports/margin` `/reports/size` | Thin, and mainly there to prove RLS denies a cashier the margin columns |
 | | `POST` | `/register/carts/{id}/park` `/resume` | Suspend transaction |
-| | `GET` | `/register/payments/{attempt_id}` | Poll attempt state |
-| | `POST` | `/register/payments/{attempt_id}/confirm` | Manual attestation (`payment.attest`) |
-| | `POST` | `/register/payments/{attempt_id}/cancel` | Abandon attempt; cart stays open |
-| | `POST` | `/register/sales/{id}/resolve-review` | Clear a `requires_review` sale (`sale.review.resolve`) |
+| ✅ | `GET` | `/register/payments/{attempt_id}` | Attempt state, including one that has quietly expired since the screen last looked |
+| ✅ | `POST` | `/register/payments/{attempt_id}/confirm` | Manual attestation with the amount that actually arrived (`payment.attest`) |
+| ✅ | `POST` | `/register/payments/{attempt_id}/unknown` | "I can't tell" — posts the sale for review rather than guessing (`payment.attest`) |
+| ✅ | `POST` | `/register/payments/{attempt_id}/cancel` | Abandon attempt; cart stays open and the basket unfreezes |
+| ✅ | `GET` | `/register/reviews` | The supervisor's worklist (`sale.review.resolve`) |
+| ✅ | `POST` | `/register/sales/{id}/resolve-review` | Settle a `requires_review` sale (`sale.review.resolve`) |
 | | `POST` | `/register/sales/{id}/void` `/refund` | Requires override token |
 | | `POST` | `/overrides/authorize` | Supervisor PIN → short-lived grant |
 | | `POST` | `/inventory/receipts` `/counts` `/adjustments` | Stock movements |
@@ -614,7 +616,7 @@ Reconciliation is therefore by **amount and timestamp**, with the UTR captured a
 
 **Confirmation is manual attestation.** The cashier hears the soundbox or sees the notification on the merchant phone and taps "Received", optionally capturing the UTR and the amount actually paid. Recorded as `confirmation_method='manual_attestation'` with `confirmed_by`, `verified = 0`, and an audit row. This is how these shops already operate, and it works fully offline — UPI needs the *customer's* connectivity, not the terminal's.
 
-Attempts still expire (default 5 min) and auto-cancel, so a customer who wanders off cannot leave a cart wedged.
+Attempts still expire (default 5 min) and auto-cancel, so a customer who wanders off cannot leave a cart wedged. **A pending attempt also freezes the basket**: the cashier has read a figure out loud and the customer is typing it into their own app, so adding a line underneath would collect the wrong money. Cancelling the attempt is the way out.
 
 ### 13.4 Rounding is tender-dependent
 
@@ -624,6 +626,8 @@ If you don't stock coins, a ₹123.40 total is collected as ₹123 in cash but �
 
 - **Shift close:** cash counted against expected float, and UPI attested totals listed separately with their `txn_ref`s for manual comparison against the bank or PSP statement. Unverified UPI is a distinct figure on the Z-report, not folded into takings.
 - **`requires_review` queue:** for the "customer insists they paid, no notification arrived" case. A supervisor resolves it with `sale.review.resolve` — never the cashier, and never by voiding a possibly-real payment.
+
+  Resolving does **not** rewrite the sale. There is no UPDATE policy on `sales` and there never will be (§1.4), so a status this terminal edited locally could never be pushed. The resolution is its own append-only `sale_reviews` row naming an outcome — `paid` or `not_paid`, never a bare "resolved", because a variance nobody can name is one nobody can act on at shift close. The sale goes on saying `requires_review`, which is what happened.
 - **UPI refunds are out of band in v1.** The POS records the refund with `refund_method` and an external reference; the actual money moves through the merchant app. Alternatively refund UPI sales in cash, if store policy allows. Do not build a UPI refund button that cannot actually move money.
 
 ### 13.6 Path to card and automated UPI

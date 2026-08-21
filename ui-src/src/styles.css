@@ -333,6 +333,31 @@ body:has(.done) {
   margin: 4px 0 0;
 }
 
+/* UPI has more to say than cash: an amount to read out, an amount that came
+   back, and a reference worth capturing (architecture §13.3). */
+.dialog.upi {
+  width: min(460px, 94vw);
+}
+
+.dialog .hint {
+  color: var(--muted);
+  font-size: 13px;
+  margin: 4px 0 12px;
+}
+
+.dialog .hint.warn {
+  color: var(--warn, #d08700);
+  font-weight: 600;
+}
+
+/* The payment reference on a receipt: present but never competing with the
+   figures, which are what the customer actually reads. */
+.receipt .ref {
+  display: block;
+  color: var(--muted);
+  font-size: 11px;
+}
+
 .row {
   display: flex;
   gap: 10px;

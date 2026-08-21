@@ -10,6 +10,22 @@ export interface AddLineRequest {
   /** Integer thousandths; 1.250 kg is 1250 */
   qty_milli?: number | null;
 }
+export interface AttemptOut {
+  attempt_id: string;
+  method: string;
+  state: string;
+  amount: MoneyOut;
+  reference?: string | null;
+  expires_at?: string | null;
+  is_pending: boolean;
+}
+/** What the cashier saw on the merchant phone or soundbox. */
+export interface AttestRequest {
+  /** What actually arrived. Defaults to the amount asked for. The customer types the figure into their own app on a printed counter QR, so it can differ in either direction. */
+  amount_paise?: number | null;
+  /** The UTR. With a static QR this is the only identifier the bank statement and this sale have in common — worth capturing. */
+  reference?: string | null;
+}
 export interface CartLineOut {
   line_no: number;
   product_id: string;
@@ -108,6 +124,27 @@ export interface ReceiptPdfResponse {
   receipt_no: string;
   path: string;
 }
+export interface ResolveReviewRequest {
+  /** 'paid' if the money was there after all, 'not_paid' if it never arrived. Never a bare 'resolved': a variance nobody can name is one nobody can act on at shift close. */
+  outcome: string;
+  note?: string | null;
+}
+export interface ResolveReviewResponse {
+  sale_id: string;
+  outcome: string;
+  resolved_at: string;
+}
+/** A sale posted as `requires_review`, awaiting a supervisor. */
+export interface ReviewItemOut {
+  sale_id: string;
+  receipt_no: string;
+  grand_total: MoneyOut;
+  disputed_amount: MoneyOut;
+  posted_at: string;
+}
+export interface ReviewQueueResponse {
+  items: ReviewItemOut[];
+}
 export interface SearchResponse {
   query: string;
   results: ProductOut[];
@@ -140,7 +177,7 @@ export interface TenderQuote {
   rounding_adjustment: MoneyOut;
 }
 export interface TenderRequest {
-  /** cash (phase 3); upi arrives in phase 4 */
+  /** cash or upi */
   method: string;
   /** Cash handed over, when more than is owed */
   tendered_paise?: number | null;
@@ -150,6 +187,10 @@ export interface TenderResponse {
   state: string;
   cart: CartOut;
   change_due: MoneyOut;
+  expires_at?: string | null;
+}
+export interface UnknownPaymentRequest {
+  reason?: string | null;
 }
 
 /**

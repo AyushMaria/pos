@@ -7,6 +7,7 @@ import type {
   ProductOut,
   SessionResponse,
   TenderQuote,
+  TenderResponse,
 } from "../../core/api/contract";
 import { useBarcodeCapture } from "../../core/barcode-capture/useBarcodeCapture";
 
@@ -25,6 +26,7 @@ export function RegisterScreen({ session }: { session: SessionResponse }) {
   const [message, setMessage] = useState<{ text: string; bad: boolean } | null>(null);
   const [results, setResults] = useState<ProductOut[]>([]);
   const [quote, setQuote] = useState<TenderQuote | null>(null);
+  const [upi, setUpi] = useState<TenderResponse | null>(null);
   const [sale, setSale] = useState<PostSaleResponse | null>(null);
   const [busy, setBusy] = useState(false);
   const entryRef = useRef<HTMLInputElement>(null);
@@ -35,6 +37,7 @@ export function RegisterScreen({ session }: { session: SessionResponse }) {
     setSale(null);
     setResults([]);
     setQuote(null);
+    setUpi(null);
     setMessage(null);
     setCart(await register.openCart());
     focusEntry();
@@ -106,22 +109,89 @@ export function RegisterScreen({ session }: { session: SessionResponse }) {
     setQuote(await register.tenderQuote(cart.cart_id, method));
   }
 
+  /**
+   * UPI opens its attempt immediately — architecture §13.3.
+   *
+   * There is no QR to show: the shop's is printed and standing on the
+   * counter. What the till does is freeze the basket at a figure, so that the
+   * amount the cashier reads out is the amount still owed when the customer
+   * finishes typing it into their own app.
+   */
+  async function startUpi() {
+    if (!cart || cart.item_count === 0 || busy) return;
+    setBusy(true);
+    try {
+      setUpi(await register.takePayment(cart.cart_id, "upi"));
+    } catch (error) {
+      say(error instanceof ApiError ? error.message : "Could not start UPI", true);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /** Whatever the customer actually paid, settle or continue accordingly. */
+  async function settleWith(result: TenderResponse) {
+    setCart(result.cart);
+    if (!result.cart.settled) {
+      say(`${result.cart.outstanding.text} still to collect`, true);
+      return;
+    }
+    setSale(await register.post(result.cart.cart_id));
+  }
+
+  async function attestUpi(amountPaise: number, reference: string) {
+    if (!upi) return;
+    setBusy(true);
+    try {
+      await settleWith(await register.attest(upi.attempt_id, amountPaise, reference));
+    } catch (error) {
+      say(error instanceof ApiError ? error.message : "Could not record that", true);
+    } finally {
+      setBusy(false);
+      setUpi(null);
+      focusEntry();
+    }
+  }
+
+  async function upiUnsure() {
+    if (!upi) return;
+    setBusy(true);
+    try {
+      const result = await register.markUnknown(upi.attempt_id);
+      setCart(result.cart);
+      // Nothing was collected, so the balance stands. The sale will post
+      // flagged for a supervisor once the cashier settles it (§13.5).
+      say("Held for review. Collect the balance or void the sale.", true);
+    } catch (error) {
+      say(error instanceof ApiError ? error.message : "Could not record that", true);
+    } finally {
+      setBusy(false);
+      setUpi(null);
+      focusEntry();
+    }
+  }
+
+  async function cancelUpi() {
+    if (!upi) return;
+    try {
+      setCart((await register.cancelPayment(upi.attempt_id)).cart);
+    } finally {
+      setUpi(null);
+      focusEntry();
+    }
+  }
+
   async function takeCash(tenderedPaise?: number) {
     if (!cart) return;
     setBusy(true);
     try {
-      const result = await register.takePayment(cart.cart_id, "cash", tenderedPaise);
-      if (!result.cart.settled) {
-        setCart(result.cart);
-        say("Balance still outstanding", true);
-        return;
-      }
-      setSale(await register.post(cart.cart_id));
+      await settleWith(await register.takePayment(cart.cart_id, "cash", tenderedPaise));
     } catch (error) {
       say(error instanceof ApiError ? error.message : "Payment failed", true);
     } finally {
       setBusy(false);
       setQuote(null);
+      focusEntry();
     }
   }
 
@@ -179,6 +249,13 @@ export function RegisterScreen({ session }: { session: SessionResponse }) {
         >
           Cash
         </button>
+        <button
+          type="button"
+          disabled={!cart || cart.item_count === 0 || busy}
+          onClick={() => void startUpi()}
+        >
+          UPI
+        </button>
         <button type="button" className="secondary" onClick={() => void startCart()}>
           New sale
         </button>
@@ -189,6 +266,16 @@ export function RegisterScreen({ session }: { session: SessionResponse }) {
           quote={quote}
           onCancel={() => setQuote(null)}
           onConfirm={(tendered) => void takeCash(tendered)}
+        />
+      )}
+
+      {upi && (
+        <UpiDialog
+          attempt={upi}
+          busy={busy}
+          onAttest={(amount, reference) => void attestUpi(amount, reference)}
+          onUnsure={() => void upiUnsure()}
+          onCancel={() => void cancelUpi()}
         />
       )}
     </div>
@@ -305,6 +392,88 @@ function TenderDialog({
   );
 }
 
+function UpiDialog({
+  attempt,
+  busy,
+  onAttest,
+  onUnsure,
+  onCancel,
+}: {
+  attempt: TenderResponse;
+  busy: boolean;
+  onAttest: (amountPaise: number, reference: string) => void;
+  onUnsure: () => void;
+  onCancel: () => void;
+}) {
+  const asked = attempt.cart.outstanding.paise + attempt.cart.paid.paise;
+  const [received, setReceived] = useState((asked / 100).toFixed(2));
+  const [reference, setReference] = useState("");
+
+  const paise = Math.round(Number(received) * 100);
+  const mismatch = Number.isFinite(paise) && paise !== asked;
+
+  return (
+    <div className="dialog upi" role="dialog" aria-label="UPI payment">
+      <h3>UPI</h3>
+      {/*
+        No QR here, deliberately. The shop's is printed and standing on the
+        counter (architecture §13.3), so the till's job is to say the figure
+        out loud and then record what actually arrived.
+      */}
+      <p className="due">
+        <span>Ask for</span>
+        <span>{attempt.cart.outstanding.text}</span>
+      </p>
+      <p className="hint">Customer pays at the counter QR.</p>
+
+      <label htmlFor="received">Amount received</label>
+      <input
+        id="received"
+        inputMode="decimal"
+        value={received}
+        onChange={(event) => setReceived(event.target.value)}
+        autoFocus
+      />
+      {mismatch && (
+        // The customer types the amount into their own app, so this is a
+        // routine correction rather than an error worth blocking on.
+        <p className="hint warn">
+          {paise < asked ? "Short — the balance stays open." : "Over — change is due in cash."}
+        </p>
+      )}
+
+      <label htmlFor="utr">Reference / UTR (optional)</label>
+      <input
+        id="utr"
+        value={reference}
+        onChange={(event) => setReference(event.target.value)}
+        placeholder="from the customer's app"
+        autoComplete="off"
+      />
+
+      <div className="row">
+        <button
+          type="button"
+          disabled={busy || !Number.isFinite(paise) || paise <= 0}
+          onClick={() => onAttest(paise, reference)}
+        >
+          Received
+        </button>
+        <button type="button" className="secondary" disabled={busy} onClick={onUnsure}>
+          Can&rsquo;t tell
+        </button>
+        <button type="button" className="secondary" disabled={busy} onClick={onCancel}>
+          Cancel
+        </button>
+      </div>
+      <p className="hint">
+        &ldquo;Can&rsquo;t tell&rdquo; holds the sale for a supervisor rather than
+        guessing either way.
+      </p>
+    </div>
+  );
+}
+
 function CompletedSale({
   sale,
   onNext,
@@ -328,6 +497,13 @@ function CompletedSale({
       <h2>{sale.grand_total.text}</h2>
       {sale.change_due.paise > 0 && (
         <p className="change">Change {sale.change_due.text}</p>
+      )}
+      {sale.status === "requires_review" && (
+        // Visible at the counter, not only in a report: the cashier should
+        // know the sale they just took is going to a supervisor (§13.5).
+        <p className="msg error" role="alert">
+          Held for review — a supervisor needs to settle this payment.
+        </p>
       )}
       <div
         className="receipt-view"

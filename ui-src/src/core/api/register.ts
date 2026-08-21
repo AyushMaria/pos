@@ -60,6 +60,34 @@ export const register = {
       }),
     }),
 
+  /**
+   * The cashier heard the soundbox — architecture §13.3.
+   *
+   * `amountPaise` is what actually arrived. It is sent explicitly rather than
+   * left to default, because on a printed counter QR the customer types the
+   * figure into their own app and can type it wrong in either direction.
+   */
+  attest: (attemptId: string, amountPaise?: number, reference?: string) =>
+    request<TenderResponse>(`/register/payments/${attemptId}/confirm`, {
+      method: "POST",
+      body: JSON.stringify({
+        amount_paise: amountPaise ?? null,
+        reference: reference?.trim() || null,
+      }),
+    }),
+
+  /** The cashier cannot tell. Posts the sale for a supervisor instead. */
+  markUnknown: (attemptId: string, reason?: string) =>
+    request<TenderResponse>(`/register/payments/${attemptId}/unknown`, {
+      method: "POST",
+      body: JSON.stringify({ reason: reason ?? null }),
+    }),
+
+  cancelPayment: (attemptId: string) =>
+    request<TenderResponse>(`/register/payments/${attemptId}/cancel`, {
+      method: "POST",
+    }),
+
   post: (cartId: string) =>
     request<PostSaleResponse>(`/register/carts/${cartId}/post`, { method: "POST" }),
 

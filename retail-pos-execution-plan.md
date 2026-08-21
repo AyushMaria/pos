@@ -114,7 +114,7 @@ The open question going in was the no-barcode tail — 38% of the migrated catal
 
 One thing the decision does not settle, and it belongs to phase 6 rather than here: **an internal code that is never printed cannot be scanned.** Assigning `21…` to loose potatoes makes the catalogue complete; it does not put a code on the potatoes. Whatever is sold loose or by weight still has to be *selected* somehow — a shelf label the cashier scans, a quick-key grid, or the search — and which of those it is decides how much the weighed-item flow (architecture §10.3) needs at the counter.
 
-### Phase 4 — UPI tender (weeks 9–10, now smaller)
+### Phase 4 — UPI tender (weeks 9–10, now smaller) — ✅ **done**
 
 **The shops already have a printed UPI QR on the counter, and there is no customer-facing screen.** So the till never renders a QR: no deep-link construction, no `qrcode` dependency, no second window, no scan-from-arm's-length test. The customer pays the standee; the POS records that it happened.
 
@@ -125,7 +125,12 @@ One thing the decision does not settle, and it belongs to phase 6 rather than he
 
 **One consequence of the static QR, and it is the reason to read §13.3 before building this:** the payment carries no `tr`, so nothing in the bank statement points back at a sale. Reconciliation is by amount and time, and the customer types the amount themselves — so a UPI payment can arrive short or over. The attested amount is an input defaulting to the outstanding balance, never an assumption.
 
-**Exit criteria:** all three tender combinations complete correctly; a short UPI payment leaves a balance the cashier can settle in cash without leaving the sale; an expired attempt releases the cart cleanly; an attested UPI sale is visibly distinct from a verified one in the data; a UPI-only sale carries no cash rounding adjustment.
+**Exit criteria — all met:** all three tender combinations complete correctly; a short UPI payment leaves a balance the cashier can settle in cash without leaving the sale; an expired attempt releases the cart cleanly; an attested UPI sale is visibly distinct from a verified one in the data (`verified = 0`, `manual_attestation`); a UPI-only sale carries no cash rounding adjustment.
+
+Two things surfaced during the build and are worth knowing:
+
+- **Rounding was being settled at the wrong moment.** It was applied when the *first* tender was chosen, which is right for cash-first and wrong for UPI-first: it rounded the whole basket at a moment when nothing was being paid in cash, then collected the cash remainder unrounded — the exact inversion of §13.4. It now settles when cash is chosen, against the balance outstanding then.
+- **The RLS suite's migration list was hand-maintained and had fallen a migration behind.** It is discovered from the directory now. A security suite quietly testing a schema older than the one that ships is worse than one that fails.
 
 *The MVP answer to “did the money arrive?” is a cashier tapping Received. That is how these shops already work, and it is deliberately temporary — a payment terminal (Pine Labs or equivalent) is the intended replacement and brings card with it. Everything routes through `PaymentProvider` so that swap is a new provider, not a rewrite.*
 

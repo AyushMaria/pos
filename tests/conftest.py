@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import os
 from collections.abc import Iterator
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -22,6 +23,7 @@ from app.data.db import Database
 from app.data.migrations import migrate
 from app.data.repositories.users import CachedUserRepository
 from app.domain import permissions as perms
+from app.domain.ids import new_id
 from app.services.auth_service import AuthService, SessionStore
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -180,3 +182,80 @@ requires_postgres = pytest.mark.skipif(
     pg_dsn() is None,
     reason="set POS_TEST_PG_DSN to a Postgres database to run the RLS suite",
 )
+
+
+# ── A shop to sell from ─────────────────────────────────────────────────────
+#
+# Shared by every register suite. It lived in test_register_flow.py until UPI
+# needed the same shelf; a second suite importing fixtures from the first is
+# the point at which they belong here instead.
+
+# Four products spanning four GST rates, so every basket below exercises the
+# mixed-rate breakdown that the week-5 checkpoint cares about.
+PRODUCTS = [
+    # (sku, name, price_paise, tax_code, rate_bp, barcode)
+    ("SKU-MILK", "Amul Taaza Milk 1L", 3300, "GST0", 0, "8901262010016"),
+    ("SKU-ATTA", "Aashirvaad Atta 5kg", 27500, "GST5", 500, "8901030865275"),
+    ("SKU-PARLE", "Parle-G Biscuits 250g", 2500, "GST12", 1200, "8901719101250"),
+    ("SKU-COLGATE", "Colgate Strong Teeth", 11500, "GST18", 1800, "8901314700100"),
+    # An odd price, so a cash sale has something to round.
+    ("SKU-SOAP", "Lifebuoy Soap 100g", 3740, "GST18", 1800, "8901030608278"),
+]
+
+
+@pytest.fixture
+def catalog(db: Database) -> dict[str, str]:
+    """A small real-shaped catalogue, seeded directly (execution plan §1)."""
+    now = datetime.now(timezone.utc).isoformat()
+    ids: dict[str, str] = {}
+
+    with db.write() as conn:
+        conn.executemany(
+            "INSERT INTO tax_codes (code, name, rate_bp, is_inclusive, updated_at) "
+            "VALUES (?, ?, ?, 1, ?)",
+            [
+                ("GST0", "GST 0%", 0, now),
+                ("GST5", "GST 5%", 500, now),
+                ("GST12", "GST 12%", 1200, now),
+                ("GST18", "GST 18%", 1800, now),
+            ],
+        )
+        for sku, name, price, tax_code, _rate, barcode in PRODUCTS:
+            product_id = new_id()
+            ids[sku] = product_id
+            conn.execute(
+                "INSERT INTO products (id, sku, name, short_name, uom, is_weighed, "
+                "track_stock, tax_code, is_active, updated_at) "
+                "VALUES (?, ?, ?, ?, 'each', 0, 1, ?, 1, ?)",
+                (product_id, sku, name, name[:24], tax_code, now),
+            )
+            conn.execute(
+                "INSERT INTO product_barcodes (id, product_id, barcode, symbology, "
+                "pack_size, is_primary, updated_at) VALUES (?, ?, ?, 'EAN13', 1, 1, ?)",
+                (new_id(), product_id, barcode, now),
+            )
+            conn.execute(
+                "INSERT INTO product_prices (id, product_id, store_id, price, "
+                "valid_from) VALUES (?, ?, 'ST01', ?, ?)",
+                (new_id(), product_id, price, now),
+            )
+    return ids
+
+
+@pytest.fixture
+def till(client: TestClient, seeded_cashier: dict, catalog: dict) -> TestClient:
+    """A signed-in till with a catalogue behind it."""
+    assert client.post("/auth/login", json=seeded_cashier).status_code == 200
+    return client
+
+
+def open_cart(till: TestClient) -> str:
+    response = till.post("/register/carts")
+    assert response.status_code == 201, response.text
+    return response.json()["cart_id"]
+
+
+def add_barcode(till: TestClient, cart_id: str, barcode: str) -> dict:
+    response = till.post(f"/register/carts/{cart_id}/lines", json={"barcode": barcode})
+    assert response.status_code == 200, response.text
+    return response.json()

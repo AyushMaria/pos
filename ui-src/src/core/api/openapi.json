@@ -42,6 +42,93 @@
         "title": "AddLineRequest",
         "type": "object"
       },
+      "AttemptOut": {
+        "additionalProperties": false,
+        "properties": {
+          "amount": {
+            "$ref": "#/components/schemas/MoneyOut"
+          },
+          "attempt_id": {
+            "title": "Attempt Id",
+            "type": "string"
+          },
+          "expires_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expires At"
+          },
+          "is_pending": {
+            "title": "Is Pending",
+            "type": "boolean"
+          },
+          "method": {
+            "title": "Method",
+            "type": "string"
+          },
+          "reference": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reference"
+          },
+          "state": {
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "attempt_id",
+          "method",
+          "state",
+          "amount",
+          "is_pending"
+        ],
+        "title": "AttemptOut",
+        "type": "object"
+      },
+      "AttestRequest": {
+        "additionalProperties": false,
+        "description": "What the cashier saw on the merchant phone or soundbox.",
+        "properties": {
+          "amount_paise": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What actually arrived. Defaults to the amount asked for. The customer types the figure into their own app on a printed counter QR, so it can differ in either direction.",
+            "title": "Amount Paise"
+          },
+          "reference": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The UTR. With a static QR this is the only identifier the bank statement and this sale have in common \u2014 worth capturing.",
+            "title": "Reference"
+          }
+        },
+        "title": "AttestRequest",
+        "type": "object"
+      },
       "CartLineOut": {
         "additionalProperties": false,
         "properties": {
@@ -492,6 +579,106 @@
         "title": "ReceiptPdfResponse",
         "type": "object"
       },
+      "ResolveReviewRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "outcome": {
+            "description": "'paid' if the money was there after all, 'not_paid' if it never arrived. Never a bare 'resolved': a variance nobody can name is one nobody can act on at shift close.",
+            "title": "Outcome",
+            "type": "string"
+          }
+        },
+        "required": [
+          "outcome"
+        ],
+        "title": "ResolveReviewRequest",
+        "type": "object"
+      },
+      "ResolveReviewResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "outcome": {
+            "title": "Outcome",
+            "type": "string"
+          },
+          "resolved_at": {
+            "title": "Resolved At",
+            "type": "string"
+          },
+          "sale_id": {
+            "title": "Sale Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "sale_id",
+          "outcome",
+          "resolved_at"
+        ],
+        "title": "ResolveReviewResponse",
+        "type": "object"
+      },
+      "ReviewItemOut": {
+        "additionalProperties": false,
+        "description": "A sale posted as `requires_review`, awaiting a supervisor.",
+        "properties": {
+          "disputed_amount": {
+            "$ref": "#/components/schemas/MoneyOut"
+          },
+          "grand_total": {
+            "$ref": "#/components/schemas/MoneyOut"
+          },
+          "posted_at": {
+            "title": "Posted At",
+            "type": "string"
+          },
+          "receipt_no": {
+            "title": "Receipt No",
+            "type": "string"
+          },
+          "sale_id": {
+            "title": "Sale Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "sale_id",
+          "receipt_no",
+          "grand_total",
+          "disputed_amount",
+          "posted_at"
+        ],
+        "title": "ReviewItemOut",
+        "type": "object"
+      },
+      "ReviewQueueResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ReviewItemOut"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "ReviewQueueResponse",
+        "type": "object"
+      },
       "SearchResponse": {
         "additionalProperties": false,
         "properties": {
@@ -638,7 +825,7 @@
         "additionalProperties": false,
         "properties": {
           "method": {
-            "description": "cash (phase 3); upi arrives in phase 4",
+            "description": "cash or upi",
             "title": "Method",
             "type": "string"
           },
@@ -674,6 +861,17 @@
           "change_due": {
             "$ref": "#/components/schemas/MoneyOut"
           },
+          "expires_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expires At"
+          },
           "state": {
             "title": "State",
             "type": "string"
@@ -686,6 +884,24 @@
           "change_due"
         ],
         "title": "TenderResponse",
+        "type": "object"
+      },
+      "UnknownPaymentRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          }
+        },
+        "title": "UnknownPaymentRequest",
         "type": "object"
       },
       "ValidationError": {
@@ -1365,6 +1581,220 @@
         ]
       }
     },
+    "/register/payments/{attempt_id}": {
+      "get": {
+        "description": "Where an attempt stands.\n\nThere is nothing to poll a provider *about* \u2014 no PSP, no webhook, no\ndevice \u2014 so this reports the terminal's own view, which includes an\nattempt that has quietly expired since the screen last looked.",
+        "operationId": "payment_attempt_register_payments__attempt_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "attempt_id",
+            "required": true,
+            "schema": {
+              "title": "Attempt Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AttemptOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Payment Attempt",
+        "tags": [
+          "register"
+        ]
+      }
+    },
+    "/register/payments/{attempt_id}/cancel": {
+      "post": {
+        "description": "Abandon an attempt. The basket unfreezes and the cart stays open.",
+        "operationId": "cancel_payment_register_payments__attempt_id__cancel_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "attempt_id",
+            "required": true,
+            "schema": {
+              "title": "Attempt Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TenderResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Cancel Payment",
+        "tags": [
+          "register"
+        ]
+      }
+    },
+    "/register/payments/{attempt_id}/confirm": {
+      "post": {
+        "description": "The cashier confirms the money arrived, and says how much.\n\n`amount_paise` is what actually landed. It defaults to what was asked for,\nwhich is the common case \u2014 but it is a default, not an assumption: on a\nprinted counter QR the customer types the figure themselves.",
+        "operationId": "confirm_payment_register_payments__attempt_id__confirm_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "attempt_id",
+            "required": true,
+            "schema": {
+              "title": "Attempt Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AttestRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TenderResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Confirm Payment",
+        "tags": [
+          "register"
+        ]
+      }
+    },
+    "/register/payments/{attempt_id}/unknown": {
+      "post": {
+        "description": "\"The customer says they paid and I can't tell.\"\n\nThe sale still posts \u2014 refusing to serve someone who may well have paid is\nnot an option with a queue behind them \u2014 but it posts as `requires_review`\nfor a supervisor, and the money is never counted as received (\u00a713.5).",
+        "operationId": "unknown_payment_register_payments__attempt_id__unknown_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "attempt_id",
+            "required": true,
+            "schema": {
+              "title": "Attempt Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UnknownPaymentRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TenderResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Unknown Payment",
+        "tags": [
+          "register"
+        ]
+      }
+    },
+    "/register/reviews": {
+      "get": {
+        "description": "Sales nobody could confirm, still waiting on a supervisor.\n\nGated on the resolving permission rather than on reading sales, because\nthe queue is a worklist for the person who can act on it. A cashier\nwatching their own disputed payment sit there helps nobody.",
+        "operationId": "review_queue_register_reviews_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReviewQueueResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Review Queue",
+        "tags": [
+          "register"
+        ]
+      }
+    },
     "/register/sales/{sale_id}/receipt.pdf": {
       "post": {
         "description": "Write the PDF for a posted sale. On demand, never automatically.",
@@ -1403,6 +1833,59 @@
           }
         },
         "summary": "Write Receipt Pdf",
+        "tags": [
+          "register"
+        ]
+      }
+    },
+    "/register/sales/{sale_id}/resolve-review": {
+      "post": {
+        "description": "Settle a disputed payment \u2014 a supervisor's call, never the cashier's.\n\nThe sale's own status is not rewritten. `requires_review` is what happened\nand it stays true; this records what was decided about it, as its own row\n(migration 003). Voiding a possibly-real payment is explicitly not what\nthis does (architecture \u00a713.5).",
+        "operationId": "resolve_review_register_sales__sale_id__resolve_review_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "sale_id",
+            "required": true,
+            "schema": {
+              "title": "Sale Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResolveReviewRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResolveReviewResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Resolve Review",
         "tags": [
           "register"
         ]

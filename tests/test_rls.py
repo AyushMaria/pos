@@ -37,13 +37,12 @@ MANAGER_ID = "018f0000-0000-7000-8000-000000000003"
 
 INSUFFICIENT_PRIVILEGE = "42501"
 
+# Discovered rather than listed. The list used to be written out by hand and
+# had already fallen a migration behind without anything failing — which is
+# the quiet way a security suite stops testing the schema it ships.
 SQL_FILES = [
     REPO_ROOT / "supabase" / "test" / "00_shim.sql",
-    REPO_ROOT / "supabase" / "migrations" / "0001_core.sql",
-    REPO_ROOT / "supabase" / "migrations" / "0002_permissions_seed.sql",
-    REPO_ROOT / "supabase" / "migrations" / "0003_rls.sql",
-    REPO_ROOT / "supabase" / "migrations" / "0004_access_token_hook.sql",
-    REPO_ROOT / "supabase" / "migrations" / "0005_reports.sql",
+    *sorted((REPO_ROOT / "supabase" / "migrations").glob("[0-9][0-9][0-9][0-9]_*.sql")),
     REPO_ROOT / "supabase" / "seed" / "seed.sql",
 ]
 
@@ -292,6 +291,102 @@ def test_sales_cannot_be_updated_by_anyone(pg: Any) -> None:
         cur.execute(
             "delete from public.sales "
             " where id = '018f0000-0000-7000-8000-0000000abcde'"
+        )
+        assert cur.rowcount == 0
+
+
+# ── Resolving a disputed payment — architecture §13.5 ───────────────────────
+#
+# The permission is the whole point. A cashier whose UPI attestation could not
+# be confirmed must not be the one who decides it was fine after all.
+
+REVIEW_SALE_ID = "018f0000-0000-7000-8000-00000000fea1"
+
+
+def _held_sale(cur: Any) -> None:
+    cur.execute(
+        """
+        insert into public.sales
+            (id, store_id, terminal_id, cashier_id, status, client_created_at,
+             grand_total)
+        values (%s, %s, '018f0000-0000-7000-8000-000000000200', %s,
+                'requires_review', now(), 3740)
+        """,
+        (REVIEW_SALE_ID, STORE_ID, CASHIER_ID),
+    )
+
+
+def _resolve_as(pg: Any, actor: str, role: str) -> int:
+    with pg.transaction(force_rollback=True):
+        cur = pg.cursor()
+        _held_sale(cur)
+        cur.execute("set local role authenticated")
+        cur.execute("select set_config('request.jwt.claims', %s, true)",
+                    (claims(actor, role),))
+        cur.execute(
+            """
+            insert into public.sale_reviews
+                (id, sale_id, outcome, resolved_by, resolved_at)
+            values (gen_random_uuid(), %s, 'paid', %s, now())
+            """,
+            (REVIEW_SALE_ID, actor),
+        )
+        return cur.rowcount
+
+
+def test_a_cashier_cannot_resolve_their_own_disputed_payment(pg: Any) -> None:
+    """The client blocks this too, but only this layer is security."""
+    with pytest.raises(psycopg.errors.InsufficientPrivilege):
+        _resolve_as(pg, CASHIER_ID, perms.CASHIER)
+
+
+def test_a_supervisor_can_resolve_a_review(pg: Any) -> None:
+    assert _resolve_as(pg, SUPERVISOR_ID, perms.SUPERVISOR) == 1
+
+
+def test_a_manager_can_resolve_a_review(pg: Any) -> None:
+    assert _resolve_as(pg, MANAGER_ID, perms.MANAGER) == 1
+
+
+def test_a_review_cannot_be_attributed_to_someone_else(pg: Any) -> None:
+    """`resolved_by = auth.uid()` — a supervisor cannot sign a manager's name
+    to a decision about money."""
+    with pg.transaction(force_rollback=True):
+        cur = pg.cursor()
+        _held_sale(cur)
+        cur.execute("set local role authenticated")
+        cur.execute("select set_config('request.jwt.claims', %s, true)",
+                    (claims(SUPERVISOR_ID, perms.SUPERVISOR),))
+        with pytest.raises(psycopg.errors.InsufficientPrivilege):
+            cur.execute(
+                """
+                insert into public.sale_reviews
+                    (id, sale_id, outcome, resolved_by, resolved_at)
+                values (gen_random_uuid(), %s, 'paid', %s, now())
+                """,
+                (REVIEW_SALE_ID, MANAGER_ID),
+            )
+
+
+def test_a_review_cannot_be_rewritten(pg: Any) -> None:
+    """Append-only, like everything else that records what happened to money."""
+    with pg.transaction(force_rollback=True):
+        cur = pg.cursor()
+        _held_sale(cur)
+        cur.execute(
+            """
+            insert into public.sale_reviews
+                (id, sale_id, outcome, resolved_by, resolved_at)
+            values ('018f0000-0000-7000-8000-00000000fee2', %s, 'paid', %s, now())
+            """,
+            (REVIEW_SALE_ID, SUPERVISOR_ID),
+        )
+        cur.execute("set local role authenticated")
+        cur.execute("select set_config('request.jwt.claims', %s, true)",
+                    (claims(MANAGER_ID, perms.MANAGER),))
+        cur.execute(
+            "update public.sale_reviews set outcome = 'not_paid' "
+            " where id = '018f0000-0000-7000-8000-00000000fee2'"
         )
         assert cur.rowcount == 0
 

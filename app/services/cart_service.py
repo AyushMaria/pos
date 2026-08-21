@@ -30,6 +30,7 @@ from app.domain.payments import (
     approved_total,
     balance_of,
     expire_stale,
+    pending,
 )
 from app.domain.pricing import Discount, LineInput
 from app.domain.tender import CashRounding, TenderMethod, rounding_for
@@ -111,6 +112,27 @@ class CartService:
     def discard(self, cart_id: str) -> None:
         with self._lock:
             self._carts.pop(cart_id, None)
+
+    def cart_for_attempt(self, attempt_id: str) -> OpenCart:
+        """Find the cart an attempt belongs to.
+
+        The attempt endpoints are addressed by attempt id alone (architecture
+        §4) because that is the id the cashier's screen is holding. A till has
+        one open cart in practice, so this scan is over a single entry.
+        """
+        with self._lock:
+            carts = list(self._carts.values())
+        for open_cart in carts:
+            if any(attempt.id == attempt_id for attempt in open_cart.attempts):
+                return self._expire_attempts(open_cart)
+        raise AttemptNotFound(attempt_id)
+
+    def replace_attempt(self, open_cart: OpenCart, attempt: PaymentAttempt) -> None:
+        """Swap in a resolved attempt, in place of the one it came from."""
+        open_cart.attempts = [
+            attempt if existing.id == attempt.id else existing
+            for existing in open_cart.attempts
+        ]
 
     def _expire_attempts(self, open_cart: OpenCart) -> OpenCart:
         open_cart.attempts = expire_stale(open_cart.attempts, now=utcnow())
@@ -208,6 +230,14 @@ class CartService:
         """
         if approved_total(open_cart.attempts).is_positive:
             raise CartLocked(open_cart.id)
+        # A pending UPI attempt froze the basket the moment the cashier read a
+        # figure out loud: the customer is typing that amount into their own
+        # app right now (architecture §13.3). Adding a line underneath it would
+        # collect the wrong money. Cancelling the attempt is the way out.
+        if pending(open_cart.attempts):
+            raise CartLocked(
+                open_cart.id, reason="a payment is in progress; cancel it first"
+            )
 
     # ── Tender ──────────────────────────────────────────────────────────────
 
@@ -223,4 +253,13 @@ class CartService:
 
 
 class CartLocked(RuntimeError):
-    """The basket cannot change once a payment has been approved."""
+    """The basket cannot change while money is being collected against it."""
+
+    def __init__(self, cart_id: str, reason: str | None = None) -> None:
+        super().__init__(reason or "the basket is locked; a payment was taken")
+        self.cart_id = cart_id
+        self.reason = reason
+
+
+class AttemptNotFound(KeyError):
+    """No open cart holds a payment attempt with that id."""

@@ -18,24 +18,32 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from app.api.deps import CurrentSession, get_cart_service, get_sale_service, require
 from app.api.schemas import (
     AddLineRequest,
+    AttemptOut,
+    AttestRequest,
     CartLineOut,
     CartOut,
     ChangeQuantityRequest,
     MoneyOut,
     PostSaleResponse,
     ReceiptPdfResponse,
+    ResolveReviewRequest,
+    ResolveReviewResponse,
+    ReviewItemOut,
+    ReviewQueueResponse,
     TaxComponentOut,
     TenderQuote,
     TenderRequest,
     TenderResponse,
+    UnknownPaymentRequest,
 )
 from app.domain import permissions
-from app.domain.identity import Session
+from app.domain.identity import Session, utcnow
 from app.domain.money import QUANTITY_SCALE, Money
-from app.domain.payments import PaymentError, approved_total
+from app.domain.payments import PaymentAttempt, PaymentError, approved_total, pending
 from app.domain.receipt import ReceiptLine
 from app.domain.tender import TenderMethod
 from app.services.cart_service import (
+    AttemptNotFound,
     CartLocked,
     CartNotFound,
     CartService,
@@ -103,7 +111,10 @@ def _to_cart_out(open_cart: OpenCart) -> CartOut:
         outstanding=MoneyOut.of(balance.outstanding),
         rounding_adjustment=MoneyOut.of(open_cart.rounding_adjustment),
         settled=balance.is_settled,
-        locked=approved_total(open_cart.attempts).is_positive,
+        locked=(
+            approved_total(open_cart.attempts).is_positive
+            or bool(pending(open_cart.attempts))
+        ),
     )
 
 
@@ -112,6 +123,18 @@ def _found(cart_id: str, service: CartService) -> OpenCart:
         return service.get(cart_id)
     except CartNotFound:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "no open cart") from None
+
+
+def _to_attempt_out(attempt: PaymentAttempt) -> AttemptOut:
+    return AttemptOut(
+        attempt_id=attempt.id,
+        method=attempt.method,
+        state=attempt.state.value,
+        amount=MoneyOut.of(attempt.amount),
+        reference=attempt.txn_ref,
+        expires_at=attempt.expires_at.isoformat() if attempt.expires_at else None,
+        is_pending=not attempt.state.is_terminal,
+    )
 
 
 # ── Cart lifecycle ──────────────────────────────────────────────────────────
@@ -266,12 +289,116 @@ async def take_payment(
     except PaymentError as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
 
+    return _tender_response(result.attempt, cart_id, carts, sales)
+
+
+# ── Resolving an attempt the terminal cannot resolve itself ─────────────────
+#
+# Cash resolves in `begin`. UPI cannot: the QR is printed on the counter, so
+# the only signal that money arrived is a human hearing a soundbox
+# (architecture §13.3). These three endpoints are that human's answers —
+# yes, no, and the one that matters most, "I can't tell".
+
+
+def _tender_response(
+    attempt: PaymentAttempt, cart_id: str, carts: CartService, sales: SaleService
+) -> TenderResponse:
     return TenderResponse(
-        attempt_id=result.attempt.id,
-        state=result.attempt.state.value,
+        attempt_id=attempt.id,
+        state=attempt.state.value,
         cart=_to_cart_out(carts.get(cart_id)),
         change_due=MoneyOut.of(sales.change_for(cart_id)),
+        expires_at=attempt.expires_at.isoformat() if attempt.expires_at else None,
     )
+
+
+def _attempt_or_404(attempt_id: str, carts: CartService) -> OpenCart:
+    try:
+        return carts.cart_for_attempt(attempt_id)
+    except AttemptNotFound:
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND, "no such payment attempt"
+        ) from None
+
+
+@router.get("/payments/{attempt_id}", response_model=AttemptOut)
+def payment_attempt(
+    attempt_id: str, carts: CartSvc, session: CurrentSession
+) -> AttemptOut:
+    """Where an attempt stands.
+
+    There is nothing to poll a provider *about* — no PSP, no webhook, no
+    device — so this reports the terminal's own view, which includes an
+    attempt that has quietly expired since the screen last looked.
+    """
+    open_cart = _attempt_or_404(attempt_id, carts)
+    found = next(a for a in open_cart.attempts if a.id == attempt_id)
+    return _to_attempt_out(found)
+
+
+@router.post("/payments/{attempt_id}/confirm", response_model=TenderResponse)
+def confirm_payment(
+    attempt_id: str,
+    body: AttestRequest,
+    carts: CartSvc,
+    sales: SaleSvc,
+    session: Annotated[Session, Depends(require(permissions.PAYMENT_ATTEST))],
+) -> TenderResponse:
+    """The cashier confirms the money arrived, and says how much.
+
+    `amount_paise` is what actually landed. It defaults to what was asked for,
+    which is the common case — but it is a default, not an assumption: on a
+    printed counter QR the customer types the figure themselves.
+    """
+    open_cart = _attempt_or_404(attempt_id, carts)
+    amount = Money(body.amount_paise) if body.amount_paise is not None else None
+
+    try:
+        result = sales.attest(attempt_id, amount=amount, reference=body.reference)
+    except PaymentError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+
+    return _tender_response(result.attempt, open_cart.id, carts, sales)
+
+
+@router.post("/payments/{attempt_id}/unknown", response_model=TenderResponse)
+def unknown_payment(
+    attempt_id: str,
+    body: UnknownPaymentRequest,
+    carts: CartSvc,
+    sales: SaleSvc,
+    session: Annotated[Session, Depends(require(permissions.PAYMENT_ATTEST))],
+) -> TenderResponse:
+    """"The customer says they paid and I can't tell."
+
+    The sale still posts — refusing to serve someone who may well have paid is
+    not an option with a queue behind them — but it posts as `requires_review`
+    for a supervisor, and the money is never counted as received (§13.5).
+    """
+    open_cart = _attempt_or_404(attempt_id, carts)
+    try:
+        result = sales.mark_unknown(attempt_id, body.reason)
+    except PaymentError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+
+    return _tender_response(result.attempt, open_cart.id, carts, sales)
+
+
+@router.post("/payments/{attempt_id}/cancel", response_model=TenderResponse)
+async def cancel_payment(
+    attempt_id: str,
+    carts: CartSvc,
+    sales: SaleSvc,
+    session: Annotated[Session, Depends(require(permissions.SALE_CREATE))],
+) -> TenderResponse:
+    """Abandon an attempt. The basket unfreezes and the cart stays open."""
+    open_cart = _attempt_or_404(attempt_id, carts)
+    try:
+        result = await sales.cancel_attempt(attempt_id)
+    except PaymentError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+
+    return _tender_response(result.attempt, open_cart.id, carts, sales)
 
 
 @router.post("/carts/{cart_id}/post", response_model=PostSaleResponse)
@@ -304,6 +431,79 @@ def post_sale(
         change_due=MoneyOut.of(posted.change_due),
         receipt_html=render_html(receipt),
         receipt_text=render_text(receipt),
+    )
+
+
+# ── The review queue — architecture §13.5 ───────────────────────────────────
+
+
+@router.get("/reviews", response_model=ReviewQueueResponse)
+def review_queue(
+    sales: SaleSvc,
+    session: Annotated[Session, Depends(require(permissions.SALE_REVIEW_RESOLVE))],
+) -> ReviewQueueResponse:
+    """Sales nobody could confirm, still waiting on a supervisor.
+
+    Gated on the resolving permission rather than on reading sales, because
+    the queue is a worklist for the person who can act on it. A cashier
+    watching their own disputed payment sit there helps nobody.
+    """
+    return ReviewQueueResponse(
+        items=[
+            ReviewItemOut(
+                sale_id=row["id"],
+                receipt_no=row["receipt_no"],
+                grand_total=MoneyOut.of(Money(int(row["grand_total"]))),
+                disputed_amount=MoneyOut.of(Money(int(row["disputed_amount"] or 0))),
+                posted_at=row["client_created_at"],
+            )
+            for row in sales.sales.open_reviews()
+        ]
+    )
+
+
+@router.post("/sales/{sale_id}/resolve-review", response_model=ResolveReviewResponse)
+def resolve_review(
+    sale_id: str,
+    body: ResolveReviewRequest,
+    sales: SaleSvc,
+    session: Annotated[Session, Depends(require(permissions.SALE_REVIEW_RESOLVE))],
+) -> ResolveReviewResponse:
+    """Settle a disputed payment — a supervisor's call, never the cashier's.
+
+    The sale's own status is not rewritten. `requires_review` is what happened
+    and it stays true; this records what was decided about it, as its own row
+    (migration 003). Voiding a possibly-real payment is explicitly not what
+    this does (architecture §13.5).
+    """
+    if body.outcome not in ("paid", "not_paid"):
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "outcome must be 'paid' or 'not_paid'",
+        )
+
+    sale = sales.sales.get(sale_id)
+    if sale is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "no such sale")
+    if sale["status"] != "requires_review":
+        raise HTTPException(
+            status.HTTP_409_CONFLICT, "that sale is not awaiting review"
+        )
+    if sales.sales.review_for(sale_id) is not None:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT, "that sale has already been reviewed"
+        )
+
+    resolved_at = utcnow()
+    sales.sales.resolve_review(
+        sale_id=sale_id,
+        outcome=body.outcome,
+        resolved_by=session.user_id,
+        resolved_at=resolved_at,
+        note=body.note,
+    )
+    return ResolveReviewResponse(
+        sale_id=sale_id, outcome=body.outcome, resolved_at=resolved_at.isoformat()
     )
 
 

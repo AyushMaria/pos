@@ -133,6 +133,39 @@ class PaymentAttempt:
             failure_reason=reason or self.failure_reason,
         )
 
+    def attest(
+        self,
+        *,
+        at: datetime,
+        amount: Money | None = None,
+        reference: str | None = None,
+    ) -> PaymentAttempt:
+        """Record that the money arrived, and how much of it actually did.
+
+        The shops take UPI on a printed counter QR, so the customer types the
+        amount into their own app (architecture §13.3). What was asked for and
+        what arrived are therefore two different figures, and the till records
+        the second: `amount` overrides what the attempt was opened for.
+
+        Passing nothing means "exactly what was asked", which is the common
+        case and the safe default — but it is a default, never an assumption
+        the caller cannot override.
+
+        `reference` is the UTR. With a static QR it is the only identifier the
+        bank statement and this sale have in common, which makes it worth more
+        here than it was in the original dynamic-QR design, not less.
+        """
+        paid = self.amount if amount is None else amount
+        if not paid.is_positive:
+            raise PaymentError(
+                f"attempt {self.id}: attested amount must be positive, got {paid}"
+            )
+        return replace(
+            self.to(AttemptState.APPROVED, at=at),
+            amount=paid,
+            txn_ref=reference or self.txn_ref,
+        )
+
     def is_expired_at(self, when: datetime) -> bool:
         if self.state is not AttemptState.PENDING or self.expires_at is None:
             return False
@@ -148,6 +181,22 @@ def approved_total(attempts: Iterable[PaymentAttempt]) -> Money:
             if attempt.state.counts_toward_balance
         ]
     )
+
+
+def pending(attempts: Iterable[PaymentAttempt]) -> list[PaymentAttempt]:
+    """Attempts still waiting on the world to make up its mind."""
+    return [a for a in attempts if a.state is AttemptState.PENDING]
+
+
+def needs_review(attempts: Iterable[PaymentAttempt]) -> bool:
+    """Did any attempt end in a state nobody can vouch for?
+
+    UNKNOWN is the "customer insists they paid and no notification arrived"
+    case. The sale still posts — refusing to sell to someone who may well have
+    paid is not an option at a counter — but it posts as `requires_review` for
+    a supervisor to settle later (architecture §13.5).
+    """
+    return any(a.state is AttemptState.UNKNOWN for a in attempts)
 
 
 @dataclass(frozen=True, slots=True)
@@ -169,13 +218,26 @@ class BalanceState:
 
     @property
     def change_due(self) -> Money:
-        """Only ever non-zero for a cash-final tender.
+        """Collected beyond what was owed, and therefore owed back.
 
-        A UPI attempt is always for the exact outstanding balance because the
-        amount is embedded in the QR, so only cash can overpay (§13.2).
+        A *dynamic* QR embeds the amount, so only cash could overpay. These
+        shops use a printed counter QR and the customer types the amount into
+        their own app (architecture §13.3), so a UPI payment can arrive over
+        as easily as under — and the change goes back in cash either way,
+        because the till cannot refund a transfer.
         """
         outstanding = self.outstanding
         return -outstanding if outstanding.is_negative else Money.zero()
+
+    @property
+    def is_short(self) -> bool:
+        """Paid something, but not everything.
+
+        The split-tender loop already handles this: the balance simply stays
+        open and the cashier collects the rest. Named because a short UPI
+        payment is a routine event on a static QR rather than an error.
+        """
+        return self.paid.is_positive and self.outstanding.is_positive
 
 
 def balance_of(
