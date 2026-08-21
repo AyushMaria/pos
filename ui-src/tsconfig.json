@@ -13,7 +13,10 @@
     "resolveJsonModule": true,
     "isolatedModules": true,
     "skipLibCheck": true,
-    "noEmit": true
+    "noEmit": true,
+    // jest-dom's matchers extend expect at runtime; this is how the compiler
+    // learns about them.
+    "types": ["vitest/globals", "@testing-library/jest-dom"]
   },
-  "include": ["src", "vite.config.ts"]
+  "include": ["src", "vite.config.ts", "vitest.config.ts", "vitest.setup.ts"]
 }
