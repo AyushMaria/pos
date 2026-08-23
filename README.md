@@ -9,13 +9,27 @@ for what is being built and
 [`retail-pos-execution-plan.md`](retail-pos-execution-plan.md) for the order it
 is being built in.
 
-**Status: phases 1 (Foundation), 2 (Domain core) and 3 (Register MVP) complete.** The till opens, authenticates a
-cashier against a local database, and Postgres refuses a cashier the margin
-columns. The business rules — money, GST, discounts, the cart, cash rounding
-and barcodes — are complete and property-tested. A cashier can sign in, ring
-up a basket by barcode or by name against 31,467 real products, void a line,
-take cash and get a receipt with a correct GST breakdown. UPI arrives in
-phase 4 and the sync engine in phase 5, so the till is still an island.
+**Status: phases 1–5 complete. M2 ("offline-capable") passed on real hardware
+against a live Supabase project.** The till opens, authenticates a cashier
+against the cloud or — for up to fourteen days — against a local snapshot, and
+Postgres refuses a cashier the margin columns. The business rules — money, GST,
+discounts, the cart, cash rounding and barcodes — are complete and
+property-tested. A cashier can sign in, ring up a basket by barcode or by name
+against the real catalogue, void a line, take cash or UPI, and get a receipt
+with a correct GST breakdown.
+
+The till is no longer an island. It sells with the network unplugged, queues
+what it takes, and drains the queue when the line comes back; a sale refused by
+the cloud is quarantined rather than blocking the ones behind it, shows on the
+badge, and can be retried by a manager once the cause is fixed. All five M2
+claims hold — nothing lost, nothing duplicated, stock moved once, no sale
+waiting on the network, refusals visible and recoverable.
+
+Running M2 against a real project found seven defects that the suite could not
+have caught, every one of them in the seam between the terminal and a hosted
+Supabase rather than in the code either side. `docs/m2-test-guide.md` lists them
+with their symptoms; each has a test now. `docs/existing-project-setup.md`
+covers standing the schema up on a project that already holds other tables.
 
 ---
 
