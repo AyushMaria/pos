@@ -174,6 +174,32 @@ async def test_a_broken_function_is_an_outage_not_a_rejection(
 
 
 @respx.mock
+async def test_an_undeployed_function_is_an_outage_too(
+    online_auth: AuthService, settings: Settings
+) -> None:
+    """A 404 must fall back, not crash.
+
+    Found on a real project: `authenticate-pin` had not been deployed, so
+    Supabase answered 404, `raise_for_status()` raised an HTTPStatusError that
+    nothing caught, and /auth/login returned 500. The till would not open —
+    on the one mistake a new deployment is most likely to make.
+
+    400 and 429 are here for the same reason: anything that is not 200, 401 or
+    403 is the cloud failing to answer, not a decision about this PIN.
+    """
+    from app.security.pins import hash_pin
+
+    payload = cloud_payload(pin_hash=hash_pin("4913", settings))
+    route = respx.post(LOGIN_URL).mock(return_value=httpx.Response(200, json=payload))
+    await online_auth.login("C001", "4913")
+
+    for status_code in (400, 404, 429):
+        route.mock(return_value=httpx.Response(status_code, text="nope"))
+        session = await online_auth.login("C001", "4913")
+        assert session.offline is True, f"{status_code} did not fall back to the cache"
+
+
+@respx.mock
 async def test_never_seen_here_and_offline_says_so(online_auth: AuthService) -> None:
     respx.post(LOGIN_URL).mock(side_effect=httpx.ConnectTimeout("timed out"))
 

@@ -10,8 +10,27 @@
 -- (architecture §1.4).
 
 -- ── Claim helpers ─────────────────────────────────────────────────────────
+--
+-- These live in `pos`, not in `auth`. Supabase owns the `auth` schema with
+-- the `supabase_auth_admin` role and no longer lets the project's `postgres`
+-- role create objects in it — a migration that tries gets
+-- `permission denied for schema auth`. Reading `auth.uid()` and `auth.jwt()`
+-- is still fine and is all this file does with that schema.
+--
+-- A private schema rather than `public`, because PostgREST exposes `public`
+-- and these would otherwise appear as callable RPCs. `authenticated` needs
+-- USAGE to evaluate the policies below, but nothing outside the database can
+-- reach them.
 
-create or replace function auth.has_perm(p text)
+create schema if not exists pos;
+
+comment on schema pos is
+    'Internal helpers for RLS policies. Not exposed to PostgREST. Kept out of '
+    'the auth schema, which Supabase reserves to supabase_auth_admin.';
+
+grant usage on schema pos to authenticated;
+
+create or replace function pos.has_perm(p text)
 returns boolean
 language sql
 stable
@@ -19,7 +38,7 @@ as $$
   select coalesce(auth.jwt() -> 'app_metadata' -> 'permissions' ? p, false);
 $$;
 
-create or replace function auth.in_store(s uuid)
+create or replace function pos.in_store(s uuid)
 returns boolean
 language sql
 stable
@@ -30,8 +49,8 @@ as $$
   );
 $$;
 
-grant execute on function auth.has_perm(text) to authenticated;
-grant execute on function auth.in_store(uuid) to authenticated;
+grant execute on function pos.has_perm(text) to authenticated;
+grant execute on function pos.in_store(uuid) to authenticated;
 
 -- ── Enable RLS everywhere ─────────────────────────────────────────────────
 -- A table with RLS enabled and no policy denies everything, which is the
@@ -82,11 +101,11 @@ grant select (user_id, employee_code, full_name, status, created_at, updated_at)
 
 create policy stores_select on public.stores
     for select to authenticated
-    using (auth.in_store(id));
+    using (pos.in_store(id));
 
 create policy terminals_select on public.terminals
     for select to authenticated
-    using (auth.in_store(store_id));
+    using (pos.in_store(store_id));
 
 -- The permission catalogue itself is not secret; knowing that
 -- `report.margin` exists grants nobody anything.
@@ -104,72 +123,72 @@ create policy employees_select_self_or_manager on public.employees
         or exists (
             select 1 from public.user_store_roles usr
              where usr.user_id = public.employees.user_id
-               and auth.in_store(usr.store_id)
-               and auth.has_perm('user.manage')
+               and pos.in_store(usr.store_id)
+               and pos.has_perm('user.manage')
         )
     );
 
 create policy user_store_roles_select on public.user_store_roles
     for select to authenticated
-    using (user_id = auth.uid() or (auth.in_store(store_id) and auth.has_perm('user.manage')));
+    using (user_id = auth.uid() or (pos.in_store(store_id) and pos.has_perm('user.manage')));
 
 create policy tax_codes_select on public.tax_codes
-    for select to authenticated using (auth.has_perm('product.read'));
+    for select to authenticated using (pos.has_perm('product.read'));
 create policy categories_select on public.categories
-    for select to authenticated using (auth.has_perm('product.read'));
+    for select to authenticated using (pos.has_perm('product.read'));
 create policy products_select on public.products
-    for select to authenticated using (auth.has_perm('product.read'));
+    for select to authenticated using (pos.has_perm('product.read'));
 create policy product_barcodes_select on public.product_barcodes
-    for select to authenticated using (auth.has_perm('product.read'));
+    for select to authenticated using (pos.has_perm('product.read'));
 
 create policy product_prices_select on public.product_prices
     for select to authenticated
-    using (auth.in_store(store_id) and auth.has_perm('product.read'));
+    using (pos.in_store(store_id) and pos.has_perm('product.read'));
 
 create policy promotions_select on public.promotions
     for select to authenticated
-    using (store_id is null or auth.in_store(store_id));
+    using (store_id is null or pos.in_store(store_id));
 
 create policy products_write on public.products
     for insert to authenticated
-    with check (auth.has_perm('product.create'));
+    with check (pos.has_perm('product.create'));
 create policy products_update on public.products
     for update to authenticated
-    using (auth.has_perm('product.edit')) with check (auth.has_perm('product.edit'));
+    using (pos.has_perm('product.edit')) with check (pos.has_perm('product.edit'));
 
 create policy product_barcodes_write on public.product_barcodes
     for insert to authenticated
-    with check (auth.has_perm('product.create') or auth.has_perm('product.edit'));
+    with check (pos.has_perm('product.create') or pos.has_perm('product.edit'));
 
 -- ── Transactional: insert-only, scoped to your store ──────────────────────
 
 create policy register_sessions_insert on public.register_sessions
     for insert to authenticated
-    with check (auth.in_store(store_id) and auth.has_perm('sale.create')
+    with check (pos.in_store(store_id) and pos.has_perm('sale.create')
                 and user_id = auth.uid());
 
 create policy register_sessions_select on public.register_sessions
     for select to authenticated
-    using (auth.in_store(store_id)
-           and (user_id = auth.uid() or auth.has_perm('report.sales.store')));
+    using (pos.in_store(store_id)
+           and (user_id = auth.uid() or pos.has_perm('report.sales.store')));
 
 -- Closing a session is the one permitted mutation of an open row, and it is
 -- gated on shift.close rather than on ownership.
 create policy register_sessions_close on public.register_sessions
     for update to authenticated
-    using (auth.in_store(store_id) and auth.has_perm('shift.close'))
-    with check (auth.in_store(store_id) and auth.has_perm('shift.close'));
+    using (pos.in_store(store_id) and pos.has_perm('shift.close'))
+    with check (pos.in_store(store_id) and pos.has_perm('shift.close'));
 
 create policy sales_insert on public.sales
     for insert to authenticated
-    with check (auth.in_store(store_id)
-                and auth.has_perm('sale.create')
+    with check (pos.in_store(store_id)
+                and pos.has_perm('sale.create')
                 and cashier_id = auth.uid());
 
 create policy sales_select on public.sales
     for select to authenticated
-    using (auth.in_store(store_id)
-           and (cashier_id = auth.uid() or auth.has_perm('report.sales.store')));
+    using (pos.in_store(store_id)
+           and (cashier_id = auth.uid() or pos.has_perm('report.sales.store')));
 
 -- No update or delete policy on sales. A void is a new row referencing
 -- original_sale_id, so the history stays intact and the sync stays merge-free.
@@ -177,76 +196,76 @@ create policy sales_select on public.sales
 create policy sale_lines_insert on public.sale_lines
     for insert to authenticated
     with check (exists (select 1 from public.sales s
-                         where s.id = sale_id and auth.in_store(s.store_id)
-                           and auth.has_perm('sale.create')));
+                         where s.id = sale_id and pos.in_store(s.store_id)
+                           and pos.has_perm('sale.create')));
 
 create policy sale_lines_select on public.sale_lines
     for select to authenticated
     using (exists (select 1 from public.sales s
-                    where s.id = sale_id and auth.in_store(s.store_id)));
+                    where s.id = sale_id and pos.in_store(s.store_id)));
 
 create policy payment_attempts_insert on public.payment_attempts
     for insert to authenticated
     with check (exists (select 1 from public.sales s
-                         where s.id = sale_id and auth.in_store(s.store_id)
-                           and auth.has_perm('sale.create')));
+                         where s.id = sale_id and pos.in_store(s.store_id)
+                           and pos.has_perm('sale.create')));
 
 create policy payment_attempts_select on public.payment_attempts
     for select to authenticated
     using (exists (select 1 from public.sales s
-                    where s.id = sale_id and auth.in_store(s.store_id)));
+                    where s.id = sale_id and pos.in_store(s.store_id)));
 
 create policy payments_insert on public.payments
     for insert to authenticated
     with check (exists (select 1 from public.sales s
-                         where s.id = sale_id and auth.in_store(s.store_id)
-                           and auth.has_perm('sale.create')));
+                         where s.id = sale_id and pos.in_store(s.store_id)
+                           and pos.has_perm('sale.create')));
 
 create policy payments_select on public.payments
     for select to authenticated
     using (exists (select 1 from public.sales s
-                    where s.id = sale_id and auth.in_store(s.store_id)));
+                    where s.id = sale_id and pos.in_store(s.store_id)));
 
 create policy stock_ledger_insert on public.stock_ledger
     for insert to authenticated
-    with check (auth.in_store(store_id)
-                and (auth.has_perm('sale.create')
-                     or auth.has_perm('stock.receive')
-                     or auth.has_perm('stock.count')
-                     or auth.has_perm('stock.adjust')));
+    with check (pos.in_store(store_id)
+                and (pos.has_perm('sale.create')
+                     or pos.has_perm('stock.receive')
+                     or pos.has_perm('stock.count')
+                     or pos.has_perm('stock.adjust')));
 
 create policy stock_ledger_select on public.stock_ledger
     for select to authenticated
-    using (auth.in_store(store_id) and auth.has_perm('product.read'));
+    using (pos.in_store(store_id) and pos.has_perm('product.read'));
 
 -- Derived server-side; a terminal reads it and never writes it.
 create policy stock_levels_select on public.stock_levels
     for select to authenticated
-    using (auth.in_store(store_id) and auth.has_perm('product.read'));
+    using (pos.in_store(store_id) and pos.has_perm('product.read'));
 
 create policy cash_movements_insert on public.cash_movements
     for insert to authenticated
-    with check (auth.has_perm('cash.payout') and actor_id = auth.uid());
+    with check (pos.has_perm('cash.payout') and actor_id = auth.uid());
 
 create policy cash_movements_select on public.cash_movements
     for select to authenticated
     using (exists (select 1 from public.register_sessions rs
-                    where rs.id = session_id and auth.in_store(rs.store_id)));
+                    where rs.id = session_id and pos.in_store(rs.store_id)));
 
 -- Anyone may write an audit row — that is the point of an audit log. Reading
 -- it is a manager's privilege.
 create policy audit_log_insert on public.audit_log
     for insert to authenticated
-    with check (store_id is null or auth.in_store(store_id));
+    with check (store_id is null or pos.in_store(store_id));
 
 create policy audit_log_select on public.audit_log
     for select to authenticated
-    using (auth.in_store(store_id) and auth.has_perm('user.manage'));
+    using (pos.in_store(store_id) and pos.has_perm('user.manage'));
 
 create policy unknown_scans_insert on public.unknown_scans
     for insert to authenticated
-    with check (auth.in_store(store_id) and auth.has_perm('sale.create'));
+    with check (pos.in_store(store_id) and pos.has_perm('sale.create'));
 
 create policy unknown_scans_select on public.unknown_scans
     for select to authenticated
-    using (auth.in_store(store_id) and auth.has_perm('product.read'));
+    using (pos.in_store(store_id) and pos.has_perm('product.read'));

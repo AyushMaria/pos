@@ -122,11 +122,21 @@ class SupabaseAuthClient:
             raise InvalidCredentials("invalid employee code or PIN")
         if response.status_code == 403:
             raise AccountDisabled(response.json().get("error", "account_disabled"))
-        if response.status_code >= 500:
-            # A broken function is an outage, not a rejection — the till should
-            # fall back to the cache rather than refusing to open.
+        if response.status_code != 200:
+            # Everything that is not an explicit decision about this PIN is an
+            # outage, and the till falls back to the cache rather than
+            # refusing to open. 5xx is a broken function; 404 is the Edge
+            # Function not deployed to this project at all; 400 and 429 come
+            # from the gateway. None of them are a judgement about whether
+            # this cashier may sign in.
+            #
+            # This used to be `raise_for_status()`, which turned a 404 into an
+            # httpx.HTTPStatusError that nothing up the stack caught — so a
+            # project missing the Edge Function did not fall back offline, it
+            # returned 500 from /auth/login and the till would not open at
+            # all. The one deployment mistake most likely to happen on a new
+            # project was also the one that bricked the shop.
             raise AuthUnavailable(f"authenticate-pin returned {response.status_code}")
-        response.raise_for_status()
 
         return _session_from_payload(response.json())
 

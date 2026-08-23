@@ -26,14 +26,14 @@ alter table public.sale_reviews enable row level security;
 create policy sale_reviews_insert on public.sale_reviews
     for insert to authenticated
     with check (exists (select 1 from public.sales s
-                         where s.id = sale_id and auth.in_store(s.store_id))
-                and auth.has_perm('sale.review.resolve')
+                         where s.id = sale_id and pos.in_store(s.store_id))
+                and pos.has_perm('sale.review.resolve')
                 and resolved_by = auth.uid());
 
 create policy sale_reviews_select on public.sale_reviews
     for select to authenticated
     using (exists (select 1 from public.sales s
-                    where s.id = sale_id and auth.in_store(s.store_id)));
+                    where s.id = sale_id and pos.in_store(s.store_id)));
 
 -- No update or delete policy. A resolution that turns out to be wrong is a
 -- conversation with the manager, not an edit.

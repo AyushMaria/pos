@@ -31,6 +31,102 @@ insert into auth.users (id, email) values
     ('018f0000-0000-7000-8000-000000000003', 'm001@st01.pos.local')
 on conflict (id) do nothing;
 
+-- Make those rows readable by GoTrue.
+--
+-- The insert above is enough for `supabase/test/00_shim.sql`, whose auth.users
+-- is a four-column stand-in, and it is why the test suite never caught this.
+-- A hosted project's auth.users is GoTrue's own table, and GoTrue scans its
+-- token columns into plain Go strings: a NULL where it expects '' fails the
+-- scan, so `auth.admin.getUserById` cannot read a user that SQL will happily
+-- show you. On a real project the symptom is a 500 from authenticate-pin
+-- reading `employee_not_provisioned`, with three perfectly healthy-looking
+-- rows in auth.users.
+--
+-- Written as a loop over columns that actually exist so that this runs
+-- unchanged against the shim (where it finds none and does nothing) and
+-- against whatever GoTrue schema a hosted project happens to be on.
+do $$
+declare
+    col   text;
+    staff constant text := '%@st01.pos.local';
+begin
+    foreach col in array array[
+        'confirmation_token', 'recovery_token', 'email_change',
+        'email_change_token_new', 'email_change_token_current',
+        'phone_change', 'phone_change_token', 'reauthentication_token'
+    ]
+    loop
+        if exists (select 1 from information_schema.columns
+                    where table_schema = 'auth' and table_name = 'users'
+                      and column_name = col) then
+            execute format(
+                'update auth.users set %I = '''' where %I is null and email like $1',
+                col, col
+            ) using staff;
+        end if;
+    end loop;
+end
+$$;
+
+-- The rest of what the Auth API would have filled in. Without `aud` and
+-- `role` the user is `authenticated` to nothing; without `email_confirmed_at`,
+-- generateLink refuses to issue a link at all.
+do $$
+begin
+    if exists (select 1 from information_schema.columns
+                where table_schema = 'auth' and table_name = 'users'
+                  and column_name = 'instance_id') then
+        update auth.users
+           set instance_id = coalesce(instance_id,
+                                      '00000000-0000-0000-0000-000000000000'::uuid)
+         where email like '%@st01.pos.local';
+    end if;
+
+    if exists (select 1 from information_schema.columns
+                where table_schema = 'auth' and table_name = 'users'
+                  and column_name = 'aud') then
+        update auth.users
+           set aud  = coalesce(aud,  'authenticated'),
+               role = coalesce(role, 'authenticated')
+         where email like '%@st01.pos.local';
+    end if;
+
+    if exists (select 1 from information_schema.columns
+                where table_schema = 'auth' and table_name = 'users'
+                  and column_name = 'email_confirmed_at') then
+        update auth.users
+           set email_confirmed_at = coalesce(email_confirmed_at, now()),
+               updated_at         = coalesce(updated_at, now())
+         where email like '%@st01.pos.local';
+    end if;
+
+    if exists (select 1 from information_schema.columns
+                where table_schema = 'auth' and table_name = 'users'
+                  and column_name = 'email_change_confirm_status') then
+        update auth.users
+           set email_change_confirm_status = coalesce(email_change_confirm_status, 0)
+         where email like '%@st01.pos.local';
+    end if;
+
+    if exists (select 1 from information_schema.columns
+                where table_schema = 'auth' and table_name = 'users'
+                  and column_name = 'raw_app_meta_data') then
+        update auth.users
+           set raw_app_meta_data = coalesce(raw_app_meta_data,
+                                   '{"provider":"email","providers":["email"]}'::jsonb)
+         where email like '%@st01.pos.local';
+    end if;
+
+    if exists (select 1 from information_schema.columns
+                where table_schema = 'auth' and table_name = 'users'
+                  and column_name = 'raw_user_meta_data') then
+        update auth.users
+           set raw_user_meta_data = coalesce(raw_user_meta_data, '{}'::jsonb)
+         where email like '%@st01.pos.local';
+    end if;
+end
+$$;
+
 insert into public.employees (user_id, employee_code, full_name, pin_hash, status) values
     ('018f0000-0000-7000-8000-000000000001', 'C001', 'Anita Rao',
      '$argon2id$v=19$m=65536,t=12,p=4$3IE7eHs9K9YpmpfFUcBi3w$A7U/ORMqOsDsKHIB/YswSGy5k4BiUkovJN4CiH8VVuk',

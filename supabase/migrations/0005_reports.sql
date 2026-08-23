@@ -29,8 +29,8 @@ from public.product_prices pp
 join public.products p on p.id = pp.product_id
 where pp.deleted_at is null
   and pp.valid_to is null
-  and auth.has_perm('report.margin')
-  and auth.in_store(pp.store_id);
+  and pos.has_perm('report.margin')
+  and pos.in_store(pp.store_id);
 
 grant select on reports.product_margin to authenticated;
 

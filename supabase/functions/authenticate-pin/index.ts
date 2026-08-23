@@ -143,15 +143,36 @@ Deno.serve(async (req: Request): Promise<Response> => {
   // Mint a genuine session. generateLink + verifyOtp is the supported way to
   // sign a user in without their password; the resulting access token goes
   // through custom_access_token_hook like any other login.
-  const { data: authUser } = await admin.auth.admin.getUserById(employee.user_id);
+  // The three failures below are the only 500s this function returns, and
+  // each one is logged before it is returned. The response stays generic —
+  // the caller is a till at a counter and has no use for a GoTrue message —
+  // but the cause has to be recoverable from the Edge Function logs, or the
+  // person debugging is left with a status code and a shrug.
+  //
+  // Learned the hard way: `getUserById` had its `error` discarded, so an
+  // Admin API failure surfaced as "employee_not_provisioned" — which reads
+  // as a data problem and sent the investigation to entirely the wrong place.
+  const { data: authUser, error: lookupError } = await admin.auth.admin
+    .getUserById(employee.user_id);
   const email = authUser?.user?.email;
-  if (!email) return json({ error: "employee_not_provisioned" }, 500);
+  if (lookupError || !email) {
+    console.error("authenticate-pin: cannot read the auth user", {
+      employee_code: employeeCode,
+      user_id: employee.user_id,
+      error: lookupError?.message ?? "the auth user has no email address",
+    });
+    return json({ error: "employee_not_provisioned" }, 500);
+  }
 
   const { data: link, error: linkError } = await admin.auth.admin.generateLink({
     type: "magiclink",
     email,
   });
   if (linkError || !link?.properties?.hashed_token) {
+    console.error("authenticate-pin: generateLink failed", {
+      employee_code: employeeCode,
+      error: linkError?.message ?? "no hashed_token in the generated link",
+    });
     return json({ error: "session_mint_failed" }, 500);
   }
 
@@ -163,6 +184,12 @@ Deno.serve(async (req: Request): Promise<Response> => {
     type: "email",
   });
   if (verifyError || !verified?.session) {
+    // This step runs custom_access_token_hook, so a broken hook lands here
+    // rather than anywhere that mentions hooks.
+    console.error("authenticate-pin: verifyOtp failed", {
+      employee_code: employeeCode,
+      error: verifyError?.message ?? "no session came back from verifyOtp",
+    });
     return json({ error: "session_mint_failed" }, 500);
   }
 
