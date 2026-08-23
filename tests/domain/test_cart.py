@@ -8,6 +8,7 @@ re-priced quantity, a mixed-rate basket at the till.
 from __future__ import annotations
 
 import pytest
+from dataclasses import replace
 from hypothesis import given
 from hypothesis import strategies as st
 
@@ -241,3 +242,103 @@ def test_an_empty_cart_rounds_to_nothing() -> None:
 def test_a_cart_must_number_every_line() -> None:
     with pytest.raises(CartError, match="line number"):
         Cart(lines=(), line_numbers=(1,))
+
+
+# ── Merging repeat scans ────────────────────────────────────────────────────
+
+
+def test_scanning_the_same_thing_twice_makes_one_line_of_two() -> None:
+    cart = Cart().add(item(), merge=True).add(item(), merge=True)
+
+    assert cart.item_count == 1
+    assert cart.line(1).line.qty_milli == 2000
+    assert cart.total_before_rounding == Money(20000)
+
+
+def test_merging_is_off_unless_asked_for() -> None:
+    """Every existing caller keeps the old behaviour."""
+    cart = Cart().add(item()).add(item())
+
+    assert cart.item_count == 2
+
+
+def test_a_merged_line_keeps_its_number() -> None:
+    """A cashier reading a number to a supervisor must be reading the number
+    the audit row will carry."""
+    cart = (
+        Cart()
+        .add(item(product_id="p1"), merge=True)
+        .add(item(product_id="p2"), merge=True)
+        .add(item(product_id="p1"), merge=True)
+    )
+
+    assert cart.line_numbers == (1, 2)
+    assert cart.line(1).line.qty_milli == 2000
+    assert cart.line(2).line.qty_milli == 1000
+
+
+def test_a_different_product_starts_its_own_line() -> None:
+    cart = Cart().add(item(product_id="p1"), merge=True).add(
+        item(product_id="p2"), merge=True
+    )
+
+    assert cart.item_count == 2
+
+
+def test_the_same_product_at_a_different_price_does_not_merge() -> None:
+    """Two prices for one product means somebody chose one of them."""
+    cart = Cart().add(item(unit_paise=10000), merge=True).add(
+        item(unit_paise=9000), merge=True
+    )
+
+    assert cart.item_count == 2
+    assert cart.total_before_rounding == Money(19000)
+
+
+def test_a_discounted_line_does_not_absorb_an_undiscounted_scan() -> None:
+    """Folding them together would silently spread the discount over both, or
+    lose it — and the cashier would see neither happen."""
+    discounted = replace(item(), discounts=(Discount("percentage", 1000, source="manual"),))
+    cart = Cart().add(discounted, merge=True).add(item(), merge=True)
+
+    assert cart.item_count == 2
+    assert cart.line(1).discount_total == Money(1000)
+    assert cart.line(2).discount_total.is_zero
+
+
+def test_an_overridden_price_does_not_absorb_a_scan() -> None:
+    overridden = replace(item(), overridden_by="018f-supervisor", override_reason="damaged")
+    cart = Cart().add(overridden, merge=True).add(item(), merge=True)
+
+    assert cart.item_count == 2
+
+
+def test_merging_reprices_rather_than_adding_totals() -> None:
+    """The line is priced again at the new quantity, so tax is computed on the
+    whole line — not summed from two half-computed ones, which is where a
+    paisa goes missing."""
+    single = Cart().add(item(unit_paise=3333), merge=True)
+    merged = single.add(item(unit_paise=3333), merge=True)
+    keyed = Cart().add(item(unit_paise=3333, qty_milli=2000), merge=True)
+
+    assert merged.line(1).tax_amount == keyed.line(1).tax_amount
+    assert merged.total_before_rounding == keyed.total_before_rounding
+
+
+def test_voiding_a_merged_line_removes_the_whole_quantity() -> None:
+    """The cost of merging: one void now takes both scans. That is the
+    behaviour asked for, and it is why the line shows a quantity."""
+    cart = Cart().add(item(), merge=True).add(item(), merge=True).void_line(1)
+
+    assert cart.is_empty
+
+
+@given(st.integers(min_value=1, max_value=40))
+def test_n_scans_of_one_product_cost_n_times_one(scans: int) -> None:
+    cart = Cart()
+    for _ in range(scans):
+        cart = cart.add(item(unit_paise=4999), merge=True)
+
+    assert cart.item_count == 1
+    assert cart.line(1).line.qty_milli == scans * 1000
+    assert cart.total_before_rounding == Money(4999 * scans)

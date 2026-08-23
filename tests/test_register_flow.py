@@ -35,7 +35,12 @@ def test_a_barcode_puts_a_line_on_the_screen(till: TestClient) -> None:
 
 
 def test_ten_items_by_barcode_and_by_search(till: TestClient, catalog: dict) -> None:
-    """Exit criterion: enter 10 items, by barcode *and* by search."""
+    """Exit criterion: enter 10 items, by barcode *and* by search.
+
+    Ten *items*, which since repeat scans merge is no longer ten *lines*: the
+    five colgates are one line at quantity 5. The criterion was always about
+    what the cashier can get into the basket, so this counts units.
+    """
     cart_id = open_cart(till)
 
     for barcode in [p[5] for p in PRODUCTS]:
@@ -52,7 +57,21 @@ def test_ten_items_by_barcode_and_by_search(till: TestClient, catalog: dict) -> 
         assert response.status_code == 200, response.text
 
     cart = till.get(f"/register/carts/{cart_id}").json()
-    assert cart["item_count"] == 10
+    units = sum(line["qty_milli"] for line in cart["lines"]) // 1000
+    assert units == 10
+
+
+def test_scanning_one_thing_five_times_is_one_line_of_five(till: TestClient) -> None:
+    """What a cashier at a queue actually does, and why the basket now folds
+    it: five scans of a book is one line to read and one line to void."""
+    cart_id = open_cart(till)
+
+    for _ in range(5):
+        cart = add_barcode(till, cart_id, "8901262010016")
+
+    assert cart["item_count"] == 1
+    assert cart["lines"][0]["qty_milli"] == 5000
+    assert cart["lines"][0]["line_total"]["paise"] == 3300 * 5
 
 
 def test_search_finds_products_with_no_barcode(till: TestClient, db: Database) -> None:

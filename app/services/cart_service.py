@@ -169,7 +169,15 @@ class CartService:
             # Scanning a case of 24 receives 24 units (architecture §10.2).
             qty_milli = product.pack_size * QUANTITY_SCALE
 
-        return self._append(open_cart, product, qty_milli, barcode=raw)
+        # A weighed line is one weighing. Two bags of tomatoes at 1.250 and
+        # 0.750 come to the same money either way, but folding them together
+        # keeps only one of the two `22…` codes, and the line then claims a
+        # weight no scale ever produced. Everything else merges: scanning the
+        # same book four times is four of that book.
+        return self._append(
+            open_cart, product, qty_milli, barcode=raw,
+            merge=not scan.carries_quantity,
+        )
 
     def add_product(
         self, cart_id: str, product_id: str, qty_milli: int = QUANTITY_SCALE
@@ -180,7 +188,7 @@ class CartService:
         product = self.catalog.by_id(product_id)
         if product is None:
             raise UnknownBarcode(product_id, "no such product")
-        return self._append(open_cart, product, qty_milli, barcode=None)
+        return self._append(open_cart, product, qty_milli, barcode=None, merge=True)
 
     def _append(
         self,
@@ -188,6 +196,7 @@ class CartService:
         product: CatalogProduct,
         qty_milli: int,
         barcode: str | None,
+        merge: bool = False,
     ) -> OpenCart:
         self._require_open_basket(open_cart)
         line = LineInput(
@@ -198,7 +207,7 @@ class CartService:
             tax_code=product.tax_code,
             barcode_scanned=barcode,
         )
-        open_cart.cart = open_cart.cart.add(line)
+        open_cart.cart = open_cart.cart.add(line, merge=merge)
         return open_cart
 
     def change_quantity(self, cart_id: str, line_no: int, qty_milli: int) -> OpenCart:

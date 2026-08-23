@@ -52,14 +52,61 @@ class Cart:
 
     # ── Building ────────────────────────────────────────────────────────────
 
-    def add(self, line: LineInput) -> Cart:
-        """Price a line and append it."""
+    def add(self, line: LineInput, *, merge: bool = False) -> Cart:
+        """Price a line and append it.
+
+        With `merge`, a scan of something already in the basket raises that
+        line's quantity instead of starting another one: four scans of the
+        same book become one line at 4, not four lines at 1. Shorter receipt,
+        one line to void if the customer changes their mind, and a screen a
+        cashier can read at a glance.
+
+        Off by default, so every existing caller and every existing test keeps
+        the old behaviour and has to ask for the new one.
+
+        A line only absorbs another that is genuinely the same thing: same
+        product, same unit price, same tax code, and neither side carrying a
+        discount or a price override. Those are the cases where folding two
+        lines together would quietly lose a figure someone chose deliberately
+        — an overridden price, a line discount a supervisor approved — and the
+        cashier would have no way to see it had happened.
+
+        The first match wins, so a line keeps the number it was given. A
+        cashier reading a number off the screen to a supervisor must be
+        reading the same number the audit row will carry.
+        """
+        if merge:
+            index = self._mergeable_index(line)
+            if index is not None:
+                return self._replace_line(
+                    self.line_numbers[index],
+                    lambda current: replace(
+                        current.line,
+                        qty_milli=current.line.qty_milli + line.qty_milli,
+                    ),
+                )
+
         return replace(
             self,
             lines=(*self.lines, price_line(line)),
             line_numbers=(*self.line_numbers, self.next_line_no),
             next_line_no=self.next_line_no + 1,
         )
+
+    def _mergeable_index(self, line: LineInput) -> int | None:
+        for index, priced in enumerate(self.lines):
+            current = priced.line
+            if (
+                current.product_id == line.product_id
+                and current.unit_price == line.unit_price
+                and current.tax_code == line.tax_code
+                and not current.discounts
+                and not line.discounts
+                and current.overridden_by is None
+                and line.overridden_by is None
+            ):
+                return index
+        return None
 
     def void_line(self, line_no: int) -> Cart:
         """Remove a line. Requires `sale.void` at the layer above."""
