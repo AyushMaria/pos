@@ -234,14 +234,6 @@ priced as (
         case
             when s.mrp is null or s.mrp < 0 then null
             when (s.mrp * 100) <> trunc(s.mrp * 100) then null
-            -- `product_prices.price` is an `integer`, so the ceiling is
-            -- 2,147,483,647 paise — a shade over two crore rupees. One real
-            -- row holds 8,351,262,172,680, which is a barcode typed into the
-            -- price field, and without this guard it does not import badly:
-            -- it aborts the whole migration on the insert with `integer out
-            -- of range`. Refused and reported, like every other price this
-            -- file will not vouch for.
-            when (s.mrp * 100) > 2147483647 then null
             else (s.mrp * 100)::bigint
         end as price_paise
     from source s
@@ -257,7 +249,6 @@ select
     case
         when sc.name = ''                         then 'no name'
         when sc.mrp is null                       then 'no usable price'
-        when sc.mrp * 100 > 2147483647            then 'price out of range'
         when sc.price_paise is null               then 'no usable price'
         else null
     end as product_skip_reason,
@@ -326,7 +317,7 @@ on conflict do nothing;
 
 insert into public.products
     (id, sku, name, short_name, category_id, uom, is_weighed, track_stock,
-     tax_code, is_active)
+     tax_code, is_active, updated_at)
 select
     n.product_id,
     n.sku,
@@ -343,14 +334,33 @@ select
     false,          -- weighed items are configured in the admin screens, not guessed here
     true,
     n.tax_code,
-    true
+    true,
+    -- One watermark per row, not one for the whole import.
+    --
+    -- The puller walks this table by `updated_at`, a page at a time, and
+    -- stops when a page fails to advance the cursor. Insert 19,000 rows in
+    -- one transaction and they all carry that transaction's now(): page one
+    -- comes back full, its last timestamp equals the cursor, and the pull
+    -- halts having fetched 1000 products. The terminal then fails its
+    -- product_barcodes pull with `FOREIGN KEY constraint failed`, because
+    -- barcodes arrive for products it was never sent.
+    --
+    -- A microsecond per row. 32,000 products spans 32 ms.
+    date_trunc('second', now())
+        + (row_number() over (order by n.legacy_id) * interval '1 microsecond')
 from numbered n
 on conflict (id) do nothing;
 
 -- ── Prices ────────────────────────────────────────────────────────────────
 
-insert into public.product_prices (product_id, store_id, price, cost, valid_from)
-select n.product_id, s.id, n.price_paise, null, now()
+-- `valid_from` is this table's watermark, not `updated_at`. Both are spread.
+insert into public.product_prices
+    (product_id, store_id, price, cost, valid_from, updated_at)
+select n.product_id, s.id, n.price_paise, null,
+       date_trunc('second', now())
+           + (row_number() over (order by n.legacy_id) * interval '1 microsecond'),
+       date_trunc('second', now())
+           + (row_number() over (order by n.legacy_id) * interval '1 microsecond')
 from numbered n
 cross join (select id from public.stores where code = 'ST01') s
 on conflict do nothing;
@@ -358,8 +368,10 @@ on conflict do nothing;
 -- ── Barcodes ──────────────────────────────────────────────────────────────
 
 insert into public.product_barcodes
-    (product_id, barcode, symbology, pack_size, is_primary)
-select n.product_id, n.raw_barcode, n.symbology, 1, true
+    (product_id, barcode, symbology, pack_size, is_primary, updated_at)
+select n.product_id, n.raw_barcode, n.symbology, 1, true,
+       date_trunc('second', now())
+           + (row_number() over (order by n.legacy_id) * interval '1 microsecond')
 from numbered n
 where n.final_barcode_reason is null
 on conflict do nothing;

@@ -8,10 +8,13 @@ is checked instead: both implementations run over the 308 real codes in
 `tests/fixtures/barcode_corpus.json` and every verdict must match.
 
     pip install -e ".[pg]"
-    POS_TEST_PG_DSN=postgresql://postgres:postgres@localhost:5432/postgres \
-        python scripts/check_sql_barcode_parity.py
+    python scripts/check_sql_barcode_parity.py
 
-Skips (exit 0) when POS_TEST_PG_DSN is unset, matching tests/test_rls.py.
+With no `POS_TEST_PG_DSN` set it starts the bundled Postgres itself, the same
+way `scripts/run_rls_tests.py` does — Docker Desktop is not installed on every
+Windows machine in a small shop's dev setup, and a check nobody can run is a
+check nobody runs. Set `POS_TEST_PG_DSN` to point it at your own Postgres
+instead; CI does exactly that.
 
 The one deliberate disagreement is GS1-128. The Python parser reads
 application identifiers; the SQL declines and routes those codes to
@@ -25,6 +28,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import tempfile
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -69,11 +73,45 @@ def sql_function_source() -> str:
     return text[start:end]
 
 
-def main() -> int:
+def resolve_dsn() -> str | None:
+    """An explicit DSN, or a Postgres started for the occasion."""
     dsn = os.environ.get("POS_TEST_PG_DSN")
-    if not dsn:
-        print("POS_TEST_PG_DSN unset — skipping SQL/Python barcode parity check")
-        return 0
+
+    if dsn:
+        # A placeholder pasted verbatim out of a runbook produces a confusing
+        # psycopg parse error several frames deep. Say so here instead.
+        if "<" in dsn or "://" not in dsn:
+            print(
+                f"POS_TEST_PG_DSN does not look like a connection string: {dsn!r}\n"
+                "Unset it to let this script start its own Postgres.",
+                file=sys.stderr,
+            )
+            return None
+        return dsn
+
+    try:
+        import pgserver
+    except ImportError:
+        print(
+            'No POS_TEST_PG_DSN and pgserver is not installed.\n'
+            '  pip install -e ".[pg]"\n'
+            "Or point POS_TEST_PG_DSN at any Postgres.",
+            file=sys.stderr,
+        )
+        return None
+
+    # The same directory run_rls_tests.py uses, so the two share one server
+    # rather than starting a second.
+    data_dir = Path(tempfile.gettempdir()) / "pos_rls_pgdata"
+    data_dir.mkdir(parents=True, exist_ok=True)
+    print(f"starting postgres in {data_dir} ...")
+    return str(pgserver.get_server(str(data_dir)).get_uri())
+
+
+def main() -> int:
+    dsn = resolve_dsn()
+    if dsn is None:
+        return 1
 
     import psycopg
 
