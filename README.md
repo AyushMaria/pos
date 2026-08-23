@@ -45,6 +45,12 @@ python scripts/import_catalog.py      # products to sell (needs the legacy .env)
 python -m app.main                    # opens the till
 ```
 
+**`import_catalog.py` is for a terminal with no cloud behind it.** It generates
+its own product ids, so running it against a terminal that already syncs leaves
+two unrelated catalogues and every sale is refused with a foreign key error on
+`sale_lines`. Once a Supabase project is configured the catalogue arrives by
+itself — see `docs/existing-project-setup.md`.
+
 Sign in with one of the seeded accounts:
 
 | Code | PIN  | Role       |
@@ -54,7 +60,7 @@ Sign in with one of the seeded accounts:
 | M001 | 5820 | manager    |
 
 These are development credentials, published in this repository. They exist so
-phase 1 can be demonstrated before the sync engine does; real staff arrive from
+the till can be demonstrated with no cloud behind it; real staff arrive from
 the cloud on first online login.
 
 The React bundle is optional — if `app/ui/` is empty, FastAPI serves a plain
@@ -65,15 +71,29 @@ To build the real one:
 cd ui-src && npm install && npm run build
 ```
 
+## Point it at a Supabase project
+
+`docs/existing-project-setup.md` — including a project that already holds other
+tables, which is what `0000_legacy_rehome` is for. Then
+`docs/m2-test-guide.md` proves it works: sell with the network unplugged, plug
+it back in, and count.
+
 ## Test it
 
 ```bash
-pytest                                # 513 tests, ~10s
+pytest                                # 665 tests, ~15s
 pytest tests/domain                   # the money rules alone, ~1s, no fixtures
 HYPOTHESIS_PROFILE=ci pytest          # search the properties far harder
 pytest -m "not slow"                  # skips the argon2 timing check
 python scripts/run_rls_tests.py       # RLS against a bundled Postgres, no Docker
+python scripts/check_sql_barcode_parity.py   # the SQL barcode reader still agrees with the domain one
 ```
+
+The last one exists because `scripts/migrate_legacy_catalog.sql` contains a
+plpgsql translation of `app/domain/barcode.py`. A fork of domain logic is a
+place for two copies to drift, so both run over the 308-code corpus plus
+twelve synthetic codes and every verdict must match. It starts its own
+Postgres if you do not give it one.
 
 The RLS suite skips unless `POS_TEST_PG_DSN` points at a Postgres. Either use
 the script above (`pip install -e ".[pg]"` first) or bring your own:
@@ -106,14 +126,16 @@ app/
   domain/            PURE. No I/O, no imports from any other app package.
   data/              SQLite connections, forward-only migrations, repositories
   security/          session token, Host/Origin guard, argon2id PINs, single-instance lock
+  sync/              outbox drain, keyset pullers, envelopes, backoff
   ui/                built React bundle (generated, not committed)
 ui-src/              React + TypeScript + Vite
 supabase/
-  migrations/        Postgres schema, RLS, permission seed, access token hook
+  migrations/        Postgres schema, RLS, permission seed, access token hook, sync_push
   functions/         Edge Functions (authenticate-pin)
   seed/              development data
   test/              auth-schema shim, for running RLS tests on plain Postgres
-scripts/             seeding, argon2 tuning, code generation
+scripts/             seeding, argon2 tuning, code generation, catalogue migration
+docs/                setting a project up, and proving M2 against it
 ```
 
 **The dependency rule** is `api → services → {domain, data}`, and `domain`
@@ -138,6 +160,64 @@ sales, payments or stock movements. A correction is a compensating row, which
 is also what makes the phase 5 sync merge-free.
 
 ---
+
+## What phase 5 delivered
+
+The terminal stops being an island.
+
+| Track | Delivered |
+|---|---|
+| Outbox | Drain with backoff, idempotent replay, quarantine to `sync_failures`, and a manager-only retry once the cause is fixed |
+| Pull | Per-entity keyset cursors, tombstone handling, the polling loop |
+| Cloud | `sync_push` as one `security invoker` transaction, `on conflict do nothing` throughout, stock ledger deltas |
+| UI | Sync badge and backlog count, **Send now**, and a refusal shown in red rather than buried in a tooltip |
+
+**Exit criteria — the chaos test, all four passing as tests:** 200 sales
+offline and exactly 200 arrive; a push that lands but is never acknowledged
+replays without duplicating; the cashier never waits on the cloud; a payload
+the server refuses quarantines and the queue keeps moving.
+
+**Milestone M2 passed on real hardware**, against a live Supabase project, with
+a day of selling on an unplugged network. That half cannot be automated and it
+is where the seven defects below came from — every one in the seam between the
+terminal and a hosted Supabase, none reachable by the suite as it stood.
+
+| Symptom | Cause |
+|---|---|
+| `permission denied for schema auth` on `db push` | Supabase reserves `auth`; the claim helpers moved to a private `pos` schema |
+| `Request failed (500)` on sign-in | A 404 from an undeployed Edge Function escaped unhandled instead of falling back offline |
+| `employee_not_provisioned`, with healthy-looking rows | Seeded `auth.users` left GoTrue's token columns NULL, so the Admin API could not read a user SQL shows you |
+| Backlog frozen, retried forever, failures list empty | `cashier_id = auth.uid()` made a mixed-cashier batch unpushable by anyone |
+| `column "entity_id" is of type uuid` | A missing cast in the audit branch took the whole sale with it |
+| Catalogue stopped at exactly 1000 products | Every imported row shared one `updated_at`; a watermark cannot page past that |
+| `table stock_levels has no column named store_id` | The cloud keys it on the pair; the terminal, being one store, does not carry a store id |
+
+Each has a test now. `docs/m2-test-guide.md` carries them as the shapes to
+watch for on the next terminal.
+
+## What phase 4 delivered
+
+UPI, without a QR on the screen. The shops already have a printed standee and
+there is no customer-facing display, so the till records that a payment
+happened rather than asking for one.
+
+| Track | Delivered |
+|---|---|
+| Payments | `UpiProvider`, attestation-only; attempt expiry and auto-cancel |
+| Attestation | Manual, with an audit row, the UTR, and **the amount actually paid** |
+| Review | `requires_review` queue and supervisor resolution, appended not edited |
+| Tender | Split cash + UPI end to end, including where rounding lands when only part of the basket is cash |
+
+**Exit criteria, all met:** all three tender combinations complete; a short UPI
+payment leaves a balance settleable in cash without leaving the sale; an
+expired attempt releases the cart; an attested sale is visibly distinct from a
+verified one (`verified = 0`); a UPI-only sale carries no cash rounding.
+
+Because the QR is static the payment carries no `tr`, so nothing in the bank
+statement points back at a sale. Reconciliation is by amount and time, and the
+customer types the amount themselves — so the attested amount is an input
+defaulting to the outstanding balance, never an assumption. Architecture §13.3
+before touching any of it.
 
 ## What phase 3 delivered
 
@@ -257,6 +337,24 @@ amount with complete confidence.
 - **Python floor** — the plan says 3.14+ for stdlib `uuid7`. `app/domain/ids.py`
   generates RFC 9562 v7 identifiers itself on older interpreters, so the code
   runs on 3.10+; CI covers 3.12 and 3.14.
-- **argon2 parameters** are tuned to this development machine
-  (~87 ms). Re-run `python scripts/tune_argon2.py` on the actual till hardware
-  before the pilot, and keep the Edge Function's parameters in step.
+- **argon2 parameters** are tuned to this development machine (~87 ms), and
+  the same parameters run as WebAssembly inside `authenticate-pin`, where a
+  real sign-in measured **3.7–5.3 seconds** — near Supabase's per-invocation
+  CPU cap. Re-run `python scripts/tune_argon2.py` on the actual till hardware
+  before the pilot, and move the Edge Function in step: they must match
+  exactly or a hash made by one will not verify in the other, and every stored
+  hash moves with them. **This is the one to do before a pilot.**
+- **Per-terminal identity.** `0009` dropped `cashier_id = auth.uid()` from the
+  sales insert policy because a terminal pushes a day's backlog under whichever
+  session is signed in, so one cashier's sale was unpushable by any other. The
+  actor id is now provenance rather than an authorization claim. The proper
+  repair is a terminal that authenticates as itself, which is phase 9; the
+  trade is written into `tests/test_rls.py` so it is not quietly forgotten.
+- **Opening stock.** `stock_levels` starts empty. The catalogue migration
+  deliberately does not import the legacy `quantity` column: a count copied out
+  of a retired system is a number nobody has verified standing in front of a
+  shelf. A stock-take is phase 6.
+- **Repeat scans merge, weighed items do not.** Four scans of one book make one
+  line at quantity four. Two weighings do not merge, because folding them keeps
+  only one of the two `22…` codes and the line would claim a weight no scale
+  produced. Worth confirming against a real counter.
