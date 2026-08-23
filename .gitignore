@@ -23,3 +23,9 @@ ui-src/dist/
 
 # TypeScript build cache
 ui-src/*.tsbuildinfo
+
+# Supabase CLI scratch state (link details, cached versions)
+supabase/.temp/
+
+# Database dumps (never committed — real catalogue data)
+backup-*
