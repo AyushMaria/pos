@@ -75,6 +75,15 @@ disallow_any_explicit = true
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+# The repo root on sys.path, so `from tests.conftest import ...` resolves.
+#
+# `tests/` is not a package and there is no __init__.py, so pytest inserts
+# `tests/` itself and the `tests` package is not importable. A bare `pytest`
+# got away with it because an editable install happened to expose the project
+# root; CI's editable install does not, so `pytest tests/test_rls.py` failed at
+# collection with `No module named 'tests'` — and so did naming any single test
+# file locally.
+pythonpath = ["."]
 markers = [
     "postgres: requires a local Postgres/Supabase (set POS_TEST_PG_DSN)",
     "slow: measures real argon2id cost; excluded with -m 'not slow'",

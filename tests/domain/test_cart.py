@@ -7,8 +7,9 @@ re-priced quantity, a mixed-rate basket at the till.
 
 from __future__ import annotations
 
-import pytest
 from dataclasses import replace
+
+import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
