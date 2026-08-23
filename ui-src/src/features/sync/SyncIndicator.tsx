@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { ApiError } from "../../core/api/client";
 import { sync } from "../../core/api/register";
-import type { SyncStatusResponse } from "../../core/api/contract";
+import type { SessionResponse, SyncStatusResponse } from "../../core/api/contract";
+import { PermissionGate } from "../../core/rbac/PermissionGate";
 
 /**
  * What the counter sees about the cloud — architecture §9, §4.
@@ -15,10 +16,11 @@ import type { SyncStatusResponse } from "../../core/api/contract";
  * has lost its line keeps selling, and finds out from a badge rather than
  * from something it has to dismiss.
  */
-export function SyncIndicator() {
+export function SyncIndicator({ session }: { session?: SessionResponse | null }) {
   const [status, setStatus] = useState<SyncStatusResponse | null>(null);
   const [unavailable, setUnavailable] = useState(false);
   const [pushing, setPushing] = useState(false);
+  const [retrying, setRetrying] = useState(false);
 
   const refresh = useCallback(async () => {
     try {
@@ -39,13 +41,32 @@ export function SyncIndicator() {
   if (unavailable || !status) return null;
 
   const waiting = status.backlog > 0;
-  const tone = status.needs_update
+  // A quarantined sale is not in the backlog — it has been set aside, not
+  // queued — so backlog alone said "Synced" while a sale sat in the cloud's
+  // reject pile, with the only hint a sentence in a tooltip. The badge read
+  // green and the two halves of that tooltip contradicted each other:
+  // "Everything has been sent. 1 could not be sent and need a manager."
+  const failures = status.failures ?? 0;
+  const tone = status.needs_update || failures > 0
     ? "bad"
     : !status.online
       ? "warn"
       : waiting
         ? "busy"
         : "ok";
+
+  async function retryFailures() {
+    setRetrying(true);
+    try {
+      setStatus((await sync.retryFailures()).status);
+    } catch {
+      // The badge is about to be refreshed anyway, and a failed retry is
+      // still a failure the manager can see — no separate complaint.
+    } finally {
+      setRetrying(false);
+      void refresh();
+    }
+  }
 
   async function pushNow() {
     setPushing(true);
@@ -69,12 +90,39 @@ export function SyncIndicator() {
           {pushing ? "Sending…" : "Send now"}
         </button>
       )}
+      {/*
+        Only for someone who could read the failures list in the first place.
+        This is UX, not security — the endpoint checks the same permission —
+        but a cashier offered a button that will only refuse them learns
+        nothing except that the till is broken.
+      */}
+      {failures > 0 && status.online && (
+        <PermissionGate session={session ?? null} permission="report.sales.store">
+          <button
+            type="button"
+            className="link"
+            disabled={retrying}
+            onClick={() => void retryFailures()}
+          >
+            {retrying ? "Trying…" : "Try again"}
+          </button>
+        </PermissionGate>
+      )}
     </span>
   );
 }
 
 function summary(status: SyncStatusResponse): string {
   if (status.needs_update) return "Update needed";
+  // Before the backlog, because a refused sale outranks a sent one: the day's
+  // takings differ between this till and the cloud until somebody looks at it.
+  // Claim 5 of the M2 test is that a refusal is *visible*, and a green badge
+  // is not visible.
+  const failures = status.failures ?? 0;
+  if (failures > 0) {
+    // Both words move: "1 sale needs", "2 sales need".
+    return `${failures} ${failures === 1 ? "sale needs" : "sales need"} a manager`;
+  }
   if (status.backlog === 0) return status.online ? "Synced" : "Offline";
   // The plural is worth getting right: this is the number a shopkeeper reads
   // when deciding whether to worry.
@@ -86,17 +134,27 @@ function detail(status: SyncStatusResponse): string {
   if (status.needs_update) {
     return "The server no longer accepts this version. Sales are safe on this machine, but they cannot be sent until the till is updated.";
   }
-  const lines = [
-    status.online ? "Connected." : "No connection to the cloud.",
-    status.backlog > 0
-      ? `${status.backlog} sale(s) held on this terminal — nothing is lost.`
-      : "Everything has been sent.",
-  ];
   // Optional in the schema because it has a server-side default; the UI
   // still has to say what it means when it is absent, which is "none".
   const failures = status.failures ?? 0;
+
+  const lines = [status.online ? "Connected." : "No connection to the cloud."];
+
+  if (status.backlog > 0) {
+    lines.push(`${status.backlog} sale(s) held on this terminal — nothing is lost.`);
+  } else if (failures === 0) {
+    lines.push("Everything has been sent.");
+  } else {
+    // Never "Everything has been sent." alongside a refusal. That sentence
+    // and the next one used to appear together and flatly contradict.
+    lines.push("Everything else has been sent.");
+  }
+
   if (failures > 0) {
-    lines.push(`${failures} could not be sent and need a manager.`);
+    lines.push(
+      `${failures} sale(s) refused by the cloud, still on this terminal. ` +
+        "A manager can see why in the failures list.",
+    );
   }
   if (status.last_push_at) lines.push(`Last sent ${status.last_push_at}.`);
   if (status.last_error) lines.push(status.last_error);

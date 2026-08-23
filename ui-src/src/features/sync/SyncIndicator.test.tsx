@@ -1,7 +1,7 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { SyncStatusResponse } from "../../core/api/contract";
+import type { SessionResponse, SyncStatusResponse } from "../../core/api/contract";
 
 /**
  * The sync badge — architecture §9.
@@ -16,6 +16,7 @@ const api = {
   status: vi.fn(),
   pushNow: vi.fn(),
   failures: vi.fn(),
+  retryFailures: vi.fn(),
 };
 
 vi.mock("../../core/api/register", () => ({
@@ -23,6 +24,7 @@ vi.mock("../../core/api/register", () => ({
     status: (...args: unknown[]) => api.status(...args),
     pushNow: (...args: unknown[]) => api.pushNow(...args),
     failures: (...args: unknown[]) => api.failures(...args),
+    retryFailures: (...args: unknown[]) => api.retryFailures(...args),
   },
 }));
 
@@ -93,6 +95,37 @@ describe("what the counter is told", () => {
     const badge = await screen.findByTitle(/nothing is lost/i);
     expect(badge).toBeDefined();
   });
+
+  it("does not say Synced while a sale has been refused", async () => {
+    // A quarantined sale is not in the backlog — it is set aside, not queued —
+    // so the badge read "Synced" with a refused sale in the cloud's reject
+    // pile, and the tooltip contradicted itself: "Everything has been sent.
+    // 1 could not be sent and need a manager."
+    //
+    // M2 claim 5 is that a refusal is visible. A green badge is not.
+    api.status.mockResolvedValue(status({ backlog: 0, failures: 1 }));
+    render(<SyncIndicator />);
+
+    expect(await screen.findByText("1 sale needs a manager")).toBeDefined();
+    expect(screen.queryByText("Synced")).toBeNull();
+  });
+
+  it("does not claim everything was sent when something was not", async () => {
+    api.status.mockResolvedValue(status({ backlog: 0, failures: 2 }));
+    render(<SyncIndicator />);
+
+    const badge = await screen.findByText("2 sales need a manager");
+    const title = badge.closest("span[title]")?.getAttribute("title") ?? "";
+    expect(title).not.toMatch(/^.*\bEverything has been sent\./);
+    expect(title).toMatch(/refused by the cloud/i);
+  });
+
+  it("shows a refusal even while more sales are queued behind it", async () => {
+    api.status.mockResolvedValue(status({ backlog: 3, failures: 1 }));
+    render(<SyncIndicator />);
+
+    expect(await screen.findByText("1 sale needs a manager")).toBeDefined();
+  });
 });
 
 describe("sending now", () => {
@@ -138,6 +171,78 @@ describe("sending now", () => {
     await user.click(await screen.findByRole("button", { name: /send now/i }));
 
     await waitFor(() => expect(api.pushNow).toHaveBeenCalled());
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+});
+
+describe("retrying what was set aside", () => {
+  function aSession(permissions: string[]): SessionResponse {
+    return {
+      user_id: "018f0000-0000-7000-8000-000000000003",
+      employee_code: "M001",
+      full_name: "Priya Nair",
+      store_id: "018f0000-0000-7000-8000-000000000100",
+      roles: ["manager"],
+      permissions,
+      authenticated_at: "2026-08-23T11:00:00+00:00",
+      offline: false,
+    } as SessionResponse;
+  }
+
+  it("offers a manager a way out", async () => {
+    api.status.mockResolvedValue(status({ backlog: 0, failures: 1 }));
+    render(<SyncIndicator session={aSession(["report.sales.store"])} />);
+
+    expect(await screen.findByRole("button", { name: "Try again" })).toBeDefined();
+  });
+
+  it("does not offer it to a cashier", async () => {
+    // The endpoint refuses them anyway; a button that only ever says no
+    // teaches a cashier that the till is broken.
+    api.status.mockResolvedValue(status({ backlog: 0, failures: 1 }));
+    render(<SyncIndicator session={aSession(["sale.create"])} />);
+
+    await screen.findByText("1 sale needs a manager");
+    expect(screen.queryByRole("button", { name: "Try again" })).toBeNull();
+  });
+
+  it("is not offered when nothing was set aside", async () => {
+    api.status.mockResolvedValue(status({ backlog: 2, failures: 0 }));
+    render(<SyncIndicator session={aSession(["report.sales.store"])} />);
+
+    await screen.findByText("Sending 2 sales");
+    expect(screen.queryByRole("button", { name: "Try again" })).toBeNull();
+  });
+
+  it("re-queues and shows what came back", async () => {
+    api.status.mockResolvedValue(status({ backlog: 0, failures: 1 }));
+    api.retryFailures.mockImplementation(async () => {
+      // The retry cleared it server-side, so /sync/status has moved on too.
+      // Leaving the old mock in place makes the fake contradict itself: the
+      // component re-reads the status after every action, which is exactly
+      // what it should do, and would read a failure that no longer exists.
+      api.status.mockResolvedValue(status({ backlog: 0, failures: 0 }));
+      return { requeued: 1, status: status({ backlog: 0, failures: 0 }) };
+    });
+    render(<SyncIndicator session={aSession(["report.sales.store"])} />);
+
+    await userEvent.click(await screen.findByRole("button", { name: "Try again" }));
+
+    expect(api.retryFailures).toHaveBeenCalled();
+    await waitFor(() => expect(screen.queryByText("Synced")).not.toBeNull());
+  });
+
+  it("stays quiet when the retry itself fails", async () => {
+    // A sale still being refused is not a reason to interrupt the counter.
+    api.status.mockResolvedValue(status({ backlog: 0, failures: 1 }));
+    api.retryFailures.mockRejectedValue(new ApiError(403, "permission_denied"));
+    render(<SyncIndicator session={aSession(["report.sales.store"])} />);
+
+    await userEvent.click(await screen.findByRole("button", { name: "Try again" }));
+
+    await waitFor(() =>
+      expect(screen.queryByText("1 sale needs a manager")).not.toBeNull(),
+    );
     expect(screen.queryByRole("alert")).toBeNull();
   });
 });

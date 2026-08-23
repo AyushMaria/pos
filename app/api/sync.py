@@ -15,9 +15,16 @@ import json
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi.concurrency import run_in_threadpool
 
 from app.api.deps import CurrentSession, require
-from app.api.schemas import SyncFailureOut, SyncFailuresResponse, SyncStatusResponse
+from app.api.schemas import (
+    SyncFailureOut,
+    SyncFailuresResponse,
+    SyncRetryRequest,
+    SyncRetryResponse,
+    SyncStatusResponse,
+)
 from app.domain import permissions
 from app.domain.identity import Session
 
@@ -82,6 +89,37 @@ def sync_failures(
             )
             for row in engine.outbox.failures()
         ]
+    )
+
+
+@router.post("/failures/retry", response_model=SyncRetryResponse)
+async def retry_failures(
+    request: Request,
+    body: SyncRetryRequest,
+    session: Annotated[Session, Depends(require(permissions.REPORT_SALES_STORE))],
+) -> SyncRetryResponse:
+    """Put quarantined sales back in the queue, and try them now.
+
+    The other half of `/sync/failures`. Seeing why a sale was refused is only
+    useful if something can be done once the cause is fixed, and until this
+    existed nothing could: `quarantine()` marks the outbox row synced, so the
+    drain loop steps over it forever. A sale refused by a bug that was later
+    corrected stayed on the terminal permanently.
+
+    Manager-gated on the same permission as the failures list. A cashier
+    should not be deciding that a refusal no longer applies.
+
+    Pushing immediately rather than waiting for the next cycle is the point:
+    whoever pressed this is standing there wanting to know whether the fix
+    worked, and a fresh failure is a more useful answer than a spinner.
+    """
+    engine = _engine(request)
+    requeued = await run_in_threadpool(engine.outbox.retry_failures, body.failure_ids)
+    if requeued:
+        await engine.cycle()
+    return SyncRetryResponse(
+        requeued=requeued,
+        status=SyncStatusResponse(**engine.snapshot().as_dict()),
     )
 
 

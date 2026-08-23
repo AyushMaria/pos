@@ -138,6 +138,60 @@ class OutboxRepository(Repository):
 
     # ── What the status endpoint reports ────────────────────────────────────
 
+    def retry_failures(self, ids: list[int] | None = None) -> int:
+        """Put quarantined rows back in the queue. Returns how many moved.
+
+        Quarantine was a one-way door: `quarantine()` marks the outbox row
+        synced so the drain loop steps over it, and nothing ever cleared that
+        again. So a sale refused for a reason that was later *fixed* — a
+        missing cast in `sync_push`, an RLS policy since corrected, a product
+        restored upstream — stayed on the terminal permanently. The failures
+        list could say what went wrong and never let anyone act on it, which
+        is half of what architecture §9.2 asks for.
+
+        Deliberately not automatic. A sale that keeps being refused should
+        keep being refused, loudly, rather than cycling through the queue
+        every ninety seconds and burying the reason. Someone has to fix the
+        cause and say so.
+
+        `attempts` resets because the count is a measure of this attempt at
+        sending, not a permanent mark against the sale; leaving it would put
+        a re-queued row straight into a long backoff.
+        """
+        with self.transaction() as conn:
+            if ids is None:
+                rows = conn.execute(
+                    "SELECT id, outbox_id FROM sync_failures WHERE acknowledged = 0"
+                ).fetchall()
+            else:
+                if not ids:
+                    return 0
+                marks = ",".join("?" for _ in ids)
+                rows = conn.execute(
+                    f"SELECT id, outbox_id FROM sync_failures "
+                    f"WHERE acknowledged = 0 AND id IN ({marks})",
+                    tuple(ids),
+                ).fetchall()
+
+            requeued = 0
+            for row in rows:
+                # A failure with no outbox row behind it — one that could not
+                # even be built into an envelope — has nothing to re-queue.
+                # Acknowledge it so it stops being counted, but do not claim
+                # it was sent.
+                if row["outbox_id"] is not None:
+                    conn.execute(
+                        "UPDATE outbox SET synced_at = NULL, last_error = NULL, "
+                        "attempts = 0 WHERE id = ?",
+                        (row["outbox_id"],),
+                    )
+                    requeued += 1
+                conn.execute(
+                    "UPDATE sync_failures SET acknowledged = 1 WHERE id = ?",
+                    (row["id"],),
+                )
+            return requeued
+
     def backlog(self) -> int:
         return int(
             self._scalar("SELECT COUNT(*) FROM outbox WHERE synced_at IS NULL") or 0

@@ -315,3 +315,16 @@ class SyncFailureOut(ApiModel):
 
 class SyncFailuresResponse(ApiModel):
     items: list[SyncFailureOut]
+
+
+class SyncRetryRequest(ApiModel):
+    #: Which failures to re-queue. Omitted or null means all of them, which is
+    #: what a manager wants after fixing one shared cause.
+    failure_ids: list[int] | None = None
+
+
+class SyncRetryResponse(ApiModel):
+    #: Rows put back in the queue. Fewer than asked for is normal: a failure
+    #: with no outbox row behind it is acknowledged but cannot be re-sent.
+    requeued: int
+    status: SyncStatusResponse

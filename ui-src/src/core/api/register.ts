@@ -5,6 +5,7 @@ import type {
   PostSaleResponse,
   SearchResponse,
   SyncFailuresResponse,
+  SyncRetryResponse,
   SyncStatusResponse,
   TenderQuote,
   TenderResponse,
@@ -112,6 +113,19 @@ export const sync = {
   pushNow: () => request<SyncStatusResponse>("/sync/push", { method: "POST" }),
 
   failures: () => request<SyncFailuresResponse>("/sync/failures"),
+
+  /**
+   * Put quarantined sales back in the queue and try them now.
+   *
+   * Manager-only, and deliberately manual: a sale the cloud keeps refusing
+   * should keep being refused visibly, not cycle through the queue every
+   * ninety seconds burying the reason. Someone fixes the cause and says so.
+   */
+  retryFailures: (failureIds?: number[]) =>
+    request<SyncRetryResponse>("/sync/failures/retry", {
+      method: "POST",
+      body: JSON.stringify({ failure_ids: failureIds ?? null }),
+    }),
 };
 
 export const catalog = {

@@ -171,6 +171,13 @@ export interface SyncFailureOut {
 export interface SyncFailuresResponse {
   items: SyncFailureOut[];
 }
+export interface SyncRetryRequest {
+  failure_ids?: number[] | null;
+}
+export interface SyncRetryResponse {
+  requeued: number;
+  status: SyncStatusResponse;
+}
 export interface SyncStatusResponse {
   online: boolean;
   backlog: number;

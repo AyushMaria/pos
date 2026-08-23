@@ -202,7 +202,7 @@ export function RegisterScreen({ session }: { session: SessionResponse }) {
     <div className="register">
       <header className="bar">
         <span className="who">{session.full_name}</span>
-        <SyncIndicator />
+        <SyncIndicator session={session} />
         <span className="till">{session.employee_code}</span>
       </header>
 

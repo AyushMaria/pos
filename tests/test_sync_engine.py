@@ -88,6 +88,98 @@ async def test_a_cycle_pushes_and_reports(
     assert engine.status.last_pull_at is not None
 
 
+# ── Retrying what was set aside ─────────────────────────────────────────────
+
+
+async def _quarantine_one(
+    till: TestClient, db: Database, outbox: OutboxRepository, cloud: FakeCloud
+) -> SyncEngine:
+    """Sell, then have the cloud refuse it in a way that is permanent."""
+    sell(till)
+    cloud.fail_times = 1
+    cloud.fail_with = httpx.Response(
+        400, json={"message": 'column "entity_id" is of type uuid'}
+    )
+    engine = an_engine(db, outbox, cloud)
+    await engine.cycle()
+    assert outbox.unacknowledged_failures() == 1
+    assert outbox.backlog() == 0
+    return engine
+
+
+@pytest.mark.asyncio
+async def test_a_quarantined_sale_can_be_sent_again_once_the_cause_is_fixed(
+    till: TestClient, db: Database, outbox: OutboxRepository, cloud: FakeCloud
+) -> None:
+    """The gap this closes.
+
+    `quarantine()` marks the outbox row synced so the drain loop steps over
+    it, and before this nothing ever cleared that. A sale refused by a bug
+    that was later fixed — a missing cast in `sync_push`, an RLS policy since
+    corrected — stayed on the terminal for good, with the failures list able
+    to say why and nobody able to do anything about it.
+
+    Found the hard way: a real sale needed hand-written SQL against the
+    terminal's SQLite to get it moving again.
+    """
+    engine = await _quarantine_one(till, db, outbox, cloud)
+
+    requeued = outbox.retry_failures()
+
+    assert requeued == 1
+    assert outbox.backlog() == 1
+    assert outbox.unacknowledged_failures() == 0
+
+    # The cloud is behaving now, so the next cycle gets it through.
+    await engine.cycle()
+
+    assert outbox.backlog() == 0
+    assert len(cloud.sales) == 1
+
+
+@pytest.mark.asyncio
+async def test_retrying_a_still_broken_sale_quarantines_it_again(
+    till: TestClient, db: Database, outbox: OutboxRepository, cloud: FakeCloud
+) -> None:
+    """Retry is not forgiveness. If the cause was not fixed, the sale comes
+    straight back to the failures list rather than cycling quietly forever."""
+    engine = await _quarantine_one(till, db, outbox, cloud)
+
+    outbox.retry_failures()
+    cloud.fail_times = 1
+    cloud.fail_with = httpx.Response(400, json={"message": "still broken"})
+    await engine.cycle()
+
+    assert outbox.unacknowledged_failures() == 1
+    assert outbox.backlog() == 0
+
+
+@pytest.mark.asyncio
+async def test_retrying_one_failure_leaves_the_others_alone(
+    till: TestClient, db: Database, outbox: OutboxRepository, cloud: FakeCloud
+) -> None:
+    engine = await _quarantine_one(till, db, outbox, cloud)
+    sell(till)
+    cloud.fail_times = 1
+    cloud.fail_with = httpx.Response(400, json={"message": "nope"})
+    await engine.cycle()
+    assert outbox.unacknowledged_failures() == 2
+
+    first = outbox.failures()[-1]["id"]
+    requeued = outbox.retry_failures([int(first)])
+
+    assert requeued == 1
+    assert outbox.unacknowledged_failures() == 1
+
+
+def test_retrying_nothing_is_not_retrying_everything(
+    db: Database, outbox: OutboxRepository
+) -> None:
+    """An empty list means "these none", not "all of them". The difference
+    matters because `None` is the all-of-them case."""
+    assert outbox.retry_failures([]) == 0
+
+
 @pytest.mark.asyncio
 async def test_a_failed_push_does_not_pull(
     till: TestClient, db: Database, outbox: OutboxRepository, cloud: FakeCloud
@@ -242,6 +334,29 @@ def test_a_manager_can_read_the_failure_list(
 
     assert response.status_code == 200
     assert response.json()["items"] == []
+
+
+def test_a_cashier_cannot_retry_a_failure(cloud_till: TestClient) -> None:
+    """Deciding that a refusal no longer applies is the same judgement as
+    reading why it happened, and gated on the same permission."""
+    response = cloud_till.post("/sync/failures/retry", json={})
+
+    assert response.status_code == 403
+
+
+def test_a_manager_can_retry_and_is_told_how_many_moved(
+    cloud_till: TestClient, seeded_manager: dict
+) -> None:
+    cloud_till.post("/auth/login", json=seeded_manager)
+
+    response = cloud_till.post("/sync/failures/retry", json={})
+
+    assert response.status_code == 200
+    body = response.json()
+    # Nothing was quarantined, so nothing moved — and the endpoint says so
+    # rather than reporting a success that did nothing.
+    assert body["requeued"] == 0
+    assert body["status"]["failures"] == 0
 
 
 def test_status_needs_a_signed_in_session(cloud_settings: Settings, db: Database) -> None:

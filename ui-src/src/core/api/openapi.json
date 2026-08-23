@@ -822,6 +822,45 @@
         "title": "SyncFailuresResponse",
         "type": "object"
       },
+      "SyncRetryRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "failure_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "integer"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Failure Ids"
+          }
+        },
+        "title": "SyncRetryRequest",
+        "type": "object"
+      },
+      "SyncRetryResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "requeued": {
+            "title": "Requeued",
+            "type": "integer"
+          },
+          "status": {
+            "$ref": "#/components/schemas/SyncStatusResponse"
+          }
+        },
+        "required": [
+          "requeued",
+          "status"
+        ],
+        "title": "SyncRetryResponse",
+        "type": "object"
+      },
       "SyncStatusResponse": {
         "additionalProperties": false,
         "properties": {
@@ -2063,6 +2102,48 @@
           }
         },
         "summary": "Sync Failures",
+        "tags": [
+          "sync"
+        ]
+      }
+    },
+    "/sync/failures/retry": {
+      "post": {
+        "description": "Put quarantined sales back in the queue, and try them now.\n\nThe other half of `/sync/failures`. Seeing why a sale was refused is only\nuseful if something can be done once the cause is fixed, and until this\nexisted nothing could: `quarantine()` marks the outbox row synced, so the\ndrain loop steps over it forever. A sale refused by a bug that was later\ncorrected stayed on the terminal permanently.\n\nManager-gated on the same permission as the failures list. A cashier\nshould not be deciding that a refusal no longer applies.\n\nPushing immediately rather than waiting for the next cycle is the point:\nwhoever pressed this is standing there wanting to know whether the fix\nworked, and a fresh failure is a more useful answer than a spinner.",
+        "operationId": "retry_failures_sync_failures_retry_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SyncRetryRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SyncRetryResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Retry Failures",
         "tags": [
           "sync"
         ]
