@@ -227,19 +227,46 @@ def test_a_sale_cannot_be_written_into_another_store(pg: Any) -> None:
         )
 
 
-def test_a_cashier_cannot_post_a_sale_as_someone_else(pg: Any) -> None:
-    """`cashier_id = auth.uid()` is what makes the audit trail mean anything."""
-    with pytest.raises(Denied, match="row-level security"):
-        run_as(
-            pg, claims(CASHIER_ID, perms.CASHIER),
-            """
-            insert into public.sales
-                (id, store_id, terminal_id, cashier_id, status, client_created_at)
-            values (gen_random_uuid(), %s,
-                    '018f0000-0000-7000-8000-000000000200', %s, 'completed', now())
-            """,
-            (STORE_ID, MANAGER_ID),
-        )
+def test_a_sale_may_be_posted_on_behalf_of_another_cashier(pg: Any) -> None:
+    """A guarantee 0009 gave up on purpose. Read the reasoning before restoring it.
+
+    This test used to assert the opposite, on the grounds that
+    `cashier_id = auth.uid()` is what makes the audit trail mean anything. It
+    is a fair principle and it was unenforceable here.
+
+    A terminal takes sales offline all day, often across a shift change, and
+    pushes the backlog under whichever session is signed in when the network
+    returns. `sync_push` sends up to 200 envelopes as one transaction, so a
+    single sale rung up by anybody else aborted the whole batch. Found on a
+    real till: four queued sales, one by C001 and three by M001. As M001,
+    C001's row was refused and took the other three with it; as C001, the
+    reverse. Neither cashier could drain the queue, and because the pusher
+    treats 403 as transient it retried forever and never quarantined, so
+    /sync/failures — the one place built to show a refusal — stayed empty.
+
+    What still holds is below and in the tests either side of this one: the
+    caller must belong to the store and hold `sale.create`. What is given up
+    is attribution, which the terminal composes anyway — it is trusted to
+    report who was at the counter exactly as it is trusted to report the
+    total.
+
+    The real repair is a per-terminal identity, so a push authenticates as the
+    machine and `cashier_id` goes back to being pure provenance. That arrives
+    with device registration in phase 9. Until then this is the trade, and it
+    is written down here rather than left as an absence.
+    """
+    affected = rowcount_as(
+        pg, claims(CASHIER_ID, perms.CASHIER),
+        """
+        insert into public.sales
+            (id, store_id, terminal_id, cashier_id, status, client_created_at)
+        values (gen_random_uuid(), %s,
+                '018f0000-0000-7000-8000-000000000200', %s, 'completed', now())
+        """,
+        (STORE_ID, MANAGER_ID),
+    )
+
+    assert affected == 1
 
 
 def test_a_cashier_can_post_their_own_sale(pg: Any) -> None:
@@ -535,16 +562,40 @@ def test_sync_push_is_not_a_way_around_rls(pg: Any) -> None:
 
     A `security definer` here would be a hole straight through the only real
     trust boundary in the system.
+
+    The probe is a store the caller does not belong to. It used to be a sale
+    attributed to another cashier, which 0009 deliberately stopped refusing —
+    see test_a_sale_may_be_posted_on_behalf_of_another_cashier. Store scoping
+    is the guarantee that survived, and it is the one worth probing: a push
+    that could cross stores would let any till read and write every shop's
+    takings.
     """
     sale_id = "018f0000-0000-7000-8000-00000000a004"
     envelope = json.loads(_sale_envelope(sale_id))
-    envelope[0]["data"]["cashier_id"] = MANAGER_ID  # not the caller
+    envelope[0]["data"]["store_id"] = OTHER_STORE_ID  # not the caller's store
 
     with (
         pytest.raises(psycopg.errors.InsufficientPrivilege),
         pg.transaction(force_rollback=True),
     ):
         _push(pg, json.dumps(envelope))
+
+
+def test_sync_push_still_needs_the_permission(pg: Any) -> None:
+    """The other half of what 0009 left standing.
+
+    Dropping the actor check left `in_store` and `sale.create`. If the
+    permission were not enforced, 0009 would have removed the policy rather
+    than narrowed it.
+    """
+    sale_id = "018f0000-0000-7000-8000-00000000a006"
+
+    # `inventory` is signed in and in the store, and holds no `sale.create`.
+    with (
+        pytest.raises(psycopg.errors.InsufficientPrivilege),
+        pg.transaction(force_rollback=True),
+    ):
+        _push(pg, _sale_envelope(sale_id), role=perms.INVENTORY)
 
 
 def test_an_outdated_terminal_is_refused_by_name(pg: Any) -> None:
