@@ -129,13 +129,13 @@ $$;
 
 insert into public.employees (user_id, employee_code, full_name, pin_hash, status) values
     ('018f0000-0000-7000-8000-000000000001', 'C001', 'Anita Rao',
-     '$argon2id$v=19$m=65536,t=12,p=4$3IE7eHs9K9YpmpfFUcBi3w$A7U/ORMqOsDsKHIB/YswSGy5k4BiUkovJN4CiH8VVuk',
+     '$argon2id$v=19$m=65536,t=3,p=4$UmVc/uP7jCayYl7iR/6ZMw$dFYiBKfuI+gTErCE1SfNa2+C5QWM77XZ7iiR7eyAs3Q',
      'active'),
     ('018f0000-0000-7000-8000-000000000002', 'S001', 'Vikram Shah',
-     '$argon2id$v=19$m=65536,t=12,p=4$DZcEK7lNz6/8JjDFsqqsMw$f1Vlicu3pnGDrfgBbbYXmcH0UjFxe5uOydD/YmKwGRw',
+     '$argon2id$v=19$m=65536,t=3,p=4$4ZYm+HV3DJd3iJrBDfuGVg$pPeMQ5WPA2C1LO0HOGR5925PurjnGE0MQ2MrvidKtlw',
      'active'),
     ('018f0000-0000-7000-8000-000000000003', 'M001', 'Priya Nair',
-     '$argon2id$v=19$m=65536,t=12,p=4$Szb2KNf5F61GESkNsgVKGw$ULij2XFBbN7vEjvdX1tcUxpEQdo2lt1lkGfY0KyE+ms',
+     '$argon2id$v=19$m=65536,t=3,p=4$nMf7FPLE9p4LEIVn/XWvVA$7lfDoR87YjHS9JwOutCQzJPWozek+RoOrormxF5UoZs',
      'active')
 on conflict (user_id) do update set
     employee_code = excluded.employee_code,

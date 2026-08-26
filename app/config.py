@@ -68,12 +68,27 @@ class Settings(BaseSettings):
     #: Boot the shell with no Supabase project configured (offline dev only).
     allow_offline_bootstrap: bool = False
 
-    # ── argon2id, tuned to ~100 ms on target hardware (§11.4) ───────────────
-    # Measured at ~87 ms with these values on a 2024 desktop. Memory is held
-    # at 64 MiB rather than pushed higher because the authenticate-pin Edge
-    # Function must verify with identical parameters inside a 256 MB runtime.
-    # Re-run scripts/tune_argon2.py on the actual till before the pilot.
-    argon2_time_cost: int = 12
+    # ── argon2id (§11.4) ────────────────────────────────────────────────────
+    #
+    # The binding constraint is not this machine. It is `authenticate-pin`,
+    # where argon2 runs as WebAssembly in a Deno isolate — roughly 50× slower
+    # than the native library. At t=12 a real sign-in against a hosted project
+    # measured **3.7–5.3 seconds**, close enough to Supabase's per-invocation
+    # CPU cap that a busy counter would eventually cross it and nobody could
+    # sign in. Native cost was ~87 ms for the same parameters, which is why
+    # tuning on the till alone would never have found it.
+    #
+    # Memory stays at 64 MiB: it is what makes a GPU attack expensive, and the
+    # Edge Function has the RAM. Passes come down instead, cost being roughly
+    # linear in `t`.
+    #
+    # These parameters are cheap to revise. An argon2 hash carries its own
+    # parameters, so changing them cannot break an existing account, and
+    # `authenticate-pin` re-mints any hash it verifies that does not match —
+    # every account migrates itself on next sign-in. Measure on the real
+    # project (docs/argon2-tuning.md) and adjust; `scripts/remint_pin_hashes.py`
+    # keeps the Edge Function's decoy and the seed in step.
+    argon2_time_cost: int = 3
     argon2_memory_cost_kib: int = 65536
     argon2_parallelism: int = 4
 

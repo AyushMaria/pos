@@ -16,7 +16,7 @@
 // gates it, and the rate limit below does the rest.)
 
 import { createClient } from "jsr:@supabase/supabase-js@2";
-import { argon2Verify } from "npm:hash-wasm@4";
+import { argon2id, argon2Verify } from "npm:hash-wasm@4";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -26,6 +26,38 @@ const ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
 // authentication is required (architecture §11.4). This bounds how long a
 // dismissed employee can keep opening a till.
 const SNAPSHOT_TTL_DAYS = 14;
+
+// ── argon2id ────────────────────────────────────────────────────────────────
+//
+// Must match app/config.py. `scripts/remint_pin_hashes.py` writes both the
+// constants below and the decoy from those settings, and a test fails if they
+// drift — because nothing else would notice.
+//
+// Verification never reads these: an argon2 hash carries its own parameters,
+// so a hash minted at any cost verifies correctly. They are used for two
+// things only — minting a replacement for a hash that was made at some other
+// cost, and keeping the decoy honest.
+const ARGON2 = { memoryKiB: 65536, timeCost: 3, parallelism: 4 } as const;
+const ARGON2_PARAMS = `m=${ARGON2.memoryKiB},t=${ARGON2.timeCost},p=${ARGON2.parallelism}`;
+
+// A decoy for an unknown employee code, so a missing code and a wrong PIN cost
+// the same wall-clock time. **It has to carry the same parameters as a real
+// hash**, or it is not a decoy: it previously said `t=2` while real hashes
+// said `t=12`, so an unknown code answered roughly six times faster and
+// employee codes could be enumerated with a stopwatch. Generated, not typed.
+const DECOY_HASH = "$argon2id$v=19$m=65536,t=3,p=4$5EGpi0dpbH7a2BemXBBVwg$MuglEN3+wAVgYzNtkw7mzMl9SScqMEG7OoEXAkhDF3U";
+
+async function mintPinHash(pin: string): Promise<string> {
+  return await argon2id({
+    password: pin,
+    salt: crypto.getRandomValues(new Uint8Array(16)),
+    parallelism: ARGON2.parallelism,
+    iterations: ARGON2.timeCost,
+    memorySize: ARGON2.memoryKiB,
+    hashLength: 32,
+    outputType: "encoded",
+  });
+}
 
 // A till types a PIN wrong occasionally; a script types thousands. Ten
 // attempts per code per five minutes leaves the cashier alone and stops
@@ -101,11 +133,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
     .eq("employee_code", employeeCode)
     .maybeSingle();
 
-  // Verify against a decoy hash when the employee is unknown, so that a
-  // missing code and a wrong PIN cost the caller the same wall-clock time.
-  const hash = employee?.pin_hash ??
-    "$argon2id$v=19$m=65536,t=2,p=4$AAAAAAAAAAAAAAAAAAAAAA$" +
-      "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+  const hash = employee?.pin_hash ?? DECOY_HASH;
 
   let pinOk = false;
   try {
@@ -114,6 +142,38 @@ Deno.serve(async (req: Request): Promise<Response> => {
     pinOk = false;
   }
   if (!employee || !pinOk) return reject();
+
+  // Re-mint a hash made at some other cost. This is the only moment anyone
+  // holds the plaintext PIN, so it is the only moment a rehash is possible.
+  //
+  // Without it, changing the parameters changes nothing: an argon2 hash
+  // carries its own, so `authenticate-pin` would keep paying the old cost
+  // forever on every account that already exists. Each one migrates itself on
+  // next sign-in instead, with no announcement and no forced reset.
+  //
+  // Deliberately not awaited into the response path beyond the update itself,
+  // and deliberately not fatal: a cashier whose rehash failed is a cashier who
+  // signed in, and the next sign-in will try again.
+  if (!employee.pin_hash.includes(ARGON2_PARAMS)) {
+    try {
+      const reminted = await mintPinHash(pin);
+      const { error: rehashError } = await admin
+        .from("employees")
+        .update({ pin_hash: reminted })
+        .eq("user_id", employee.user_id);
+      if (rehashError) {
+        console.error("authenticate-pin: rehash could not be stored", {
+          employee_code: employeeCode,
+          error: rehashError.message,
+        });
+      }
+    } catch (cause) {
+      console.error("authenticate-pin: rehash failed", {
+        employee_code: employeeCode,
+        error: cause instanceof Error ? cause.message : String(cause),
+      });
+    }
+  }
 
   if (employee.status !== "active") {
     return json({ error: "account_disabled" }, 403);
