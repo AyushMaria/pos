@@ -22,6 +22,7 @@ from app.api import auth as auth_router
 from app.api import catalog as catalog_router
 from app.api import events as events_router
 from app.api import health as health_router
+from app.api import inventory as inventory_router
 from app.api import register as register_router
 from app.api import reports as reports_router
 from app.api import sync as sync_router
@@ -30,6 +31,7 @@ from app.config import Settings, get_settings
 from app.data.db import Database
 from app.data.migrations import migrate
 from app.data.repositories.catalog import CatalogRepository
+from app.data.repositories.inventory import InventoryRepository
 from app.data.repositories.outbox import OutboxRepository
 from app.data.repositories.sales import SalesRepository
 from app.data.repositories.terminal import TerminalRepository
@@ -37,6 +39,7 @@ from app.data.repositories.users import CachedUserRepository
 from app.security.local_auth import HostGuardMiddleware, SessionTokenMiddleware
 from app.services.auth_service import AuthService, SessionStore
 from app.services.cart_service import CartService
+from app.services.inventory_service import InventoryService
 from app.services.payment_providers import default_registry
 from app.services.sale_service import SaleService
 from app.services.supabase_auth import SupabaseAuthClient
@@ -66,6 +69,7 @@ def build_app(
 
     users = CachedUserRepository(db)
     catalog = CatalogRepository(db)
+    inventory = InventoryRepository(db)
     sales = SalesRepository(db)
     terminal = TerminalRepository(db)
     sessions = SessionStore()
@@ -124,6 +128,9 @@ def build_app(
         providers=default_registry(),
         settings=settings,
     )
+    app.state.inventory_service = InventoryService(
+        catalog, inventory, terminal_code=settings.terminal_code
+    )
     app.state.auth_service = AuthService(
         users=users,
         sessions=sessions,
@@ -143,6 +150,7 @@ def build_app(
     app.include_router(auth_router.router)
     app.include_router(catalog_router.router)
     app.include_router(events_router.router)
+    app.include_router(inventory_router.router)
     app.include_router(register_router.router)
     app.include_router(reports_router.router)
     app.include_router(sync_router.router)

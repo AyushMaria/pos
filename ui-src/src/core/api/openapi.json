@@ -42,6 +42,32 @@
         "title": "AddLineRequest",
         "type": "object"
       },
+      "AdjustmentRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "delta_milli": {
+            "title": "Delta Milli",
+            "type": "integer"
+          },
+          "note": {
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Note",
+            "type": "string"
+          },
+          "product_id": {
+            "title": "Product Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "product_id",
+          "delta_milli",
+          "note"
+        ],
+        "title": "AdjustmentRequest",
+        "type": "object"
+      },
       "AttemptOut": {
         "additionalProperties": false,
         "properties": {
@@ -440,6 +466,24 @@
         "title": "MoneyOut",
         "type": "object"
       },
+      "MovementsResponse": {
+        "additionalProperties": false,
+        "description": "The ledger rows written. Empty when a count matched everywhere.",
+        "properties": {
+          "movement_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Movement Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "movement_ids"
+        ],
+        "title": "MovementsResponse",
+        "type": "object"
+      },
       "PostSaleResponse": {
         "additionalProperties": false,
         "properties": {
@@ -555,6 +599,51 @@
         "title": "ProductOut",
         "type": "object"
       },
+      "ReceiptLineOut": {
+        "additionalProperties": false,
+        "description": "What that scan would receive, for the running list on the screen.",
+        "properties": {
+          "barcode": {
+            "title": "Barcode",
+            "type": "string"
+          },
+          "delta_milli": {
+            "title": "Delta Milli",
+            "type": "integer"
+          },
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "pack_size": {
+            "title": "Pack Size",
+            "type": "integer"
+          },
+          "packs": {
+            "title": "Packs",
+            "type": "integer"
+          },
+          "product_id": {
+            "title": "Product Id",
+            "type": "string"
+          },
+          "units": {
+            "title": "Units",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "product_id",
+          "description",
+          "barcode",
+          "packs",
+          "pack_size",
+          "units",
+          "delta_milli"
+        ],
+        "title": "ReceiptLineOut",
+        "type": "object"
+      },
       "ReceiptPdfResponse": {
         "additionalProperties": false,
         "properties": {
@@ -577,6 +666,46 @@
           "path"
         ],
         "title": "ReceiptPdfResponse",
+        "type": "object"
+      },
+      "ReceiptPreviewRequest": {
+        "additionalProperties": false,
+        "description": "One scan of a delivery, before it is committed.",
+        "properties": {
+          "barcode": {
+            "title": "Barcode",
+            "type": "string"
+          },
+          "packs": {
+            "maximum": 10000.0,
+            "minimum": 1.0,
+            "title": "Packs",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "barcode",
+          "packs"
+        ],
+        "title": "ReceiptPreviewRequest",
+        "type": "object"
+      },
+      "ReceiptRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "lines": {
+            "items": {
+              "$ref": "#/components/schemas/ReceiptPreviewRequest"
+            },
+            "minItems": 1,
+            "title": "Lines",
+            "type": "array"
+          }
+        },
+        "required": [
+          "lines"
+        ],
+        "title": "ReceiptRequest",
         "type": "object"
       },
       "ResolveReviewRequest": {
@@ -757,6 +886,44 @@
           "offline"
         ],
         "title": "SessionResponse",
+        "type": "object"
+      },
+      "StockCountLine": {
+        "additionalProperties": false,
+        "properties": {
+          "counted_milli": {
+            "minimum": 0.0,
+            "title": "Counted Milli",
+            "type": "integer"
+          },
+          "product_id": {
+            "title": "Product Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "product_id",
+          "counted_milli"
+        ],
+        "title": "StockCountLine",
+        "type": "object"
+      },
+      "StockCountRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "lines": {
+            "items": {
+              "$ref": "#/components/schemas/StockCountLine"
+            },
+            "minItems": 1,
+            "title": "Lines",
+            "type": "array"
+          }
+        },
+        "required": [
+          "lines"
+        ],
+        "title": "StockCountRequest",
         "type": "object"
       },
       "SyncFailureOut": {
@@ -1347,6 +1514,174 @@
         "summary": "Health",
         "tags": [
           "health"
+        ]
+      }
+    },
+    "/inventory/adjustments": {
+      "post": {
+        "description": "A manual correction \u2014 breakage, theft, a gift, a mistake undone.\n\nThe only movement with no document behind it, which is why the reason is\nrequired rather than optional. An adjustment column full of blanks is\nwhere shrinkage goes to be forgotten about.",
+        "operationId": "adjust_inventory_adjustments_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdjustmentRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MovementsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Adjust",
+        "tags": [
+          "inventory"
+        ]
+      }
+    },
+    "/inventory/counts": {
+      "post": {
+        "description": "A stock count for a section.\n\nThe correction is written, not the count: `delta = counted \u2212 expected`,\nwith `expected` read in the same transaction so a sale landing mid-count\nis not silently reversed. A product that matches expected produces no row.",
+        "operationId": "count_inventory_counts_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StockCountRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MovementsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Count",
+        "tags": [
+          "inventory"
+        ]
+      }
+    },
+    "/inventory/receipts": {
+      "post": {
+        "description": "Commit a delivery. One transaction \u2014 all lines or none.\n\nHalf a delivery is worse than none: the shelf and the screen disagree and\nnothing says which half arrived.",
+        "operationId": "receive_inventory_receipts_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReceiptRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MovementsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Receive",
+        "tags": [
+          "inventory"
+        ]
+      }
+    },
+    "/inventory/receipts/preview": {
+      "post": {
+        "description": "What scanning this code that many times would receive.\n\nExists so the screen can show a running list before anything is written.\nA delivery entered wrong and committed is a correction with a reason\nattached; caught here it is a keystroke.",
+        "operationId": "preview_line_inventory_receipts_preview_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReceiptPreviewRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReceiptLineOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Preview Line",
+        "tags": [
+          "inventory"
         ]
       }
     },

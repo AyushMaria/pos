@@ -10,6 +10,11 @@ export interface AddLineRequest {
   /** Integer thousandths; 1.250 kg is 1250 */
   qty_milli?: number | null;
 }
+export interface AdjustmentRequest {
+  product_id: string;
+  delta_milli: number;
+  note: string;
+}
 export interface AttemptOut {
   attempt_id: string;
   method: string;
@@ -96,6 +101,10 @@ export interface MoneyOut {
   paise: number;
   text: string;
 }
+/** The ledger rows written. Empty when a count matched everywhere. */
+export interface MovementsResponse {
+  movement_ids: string[];
+}
 export interface PostSaleResponse {
   sale_id: string;
   receipt_no: string;
@@ -119,10 +128,28 @@ export interface ProductOut {
   pack_size?: number;
   barcode?: string | null;
 }
+/** What that scan would receive, for the running list on the screen. */
+export interface ReceiptLineOut {
+  product_id: string;
+  description: string;
+  barcode: string;
+  packs: number;
+  pack_size: number;
+  units: number;
+  delta_milli: number;
+}
 export interface ReceiptPdfResponse {
   sale_id: string;
   receipt_no: string;
   path: string;
+}
+/** One scan of a delivery, before it is committed. */
+export interface ReceiptPreviewRequest {
+  barcode: string;
+  packs: number;
+}
+export interface ReceiptRequest {
+  lines: ReceiptPreviewRequest[];
 }
 export interface ResolveReviewRequest {
   /** 'paid' if the money was there after all, 'not_paid' if it never arrived. Never a bare 'resolved': a variance nobody can name is one nobody can act on at shift close. */
@@ -160,6 +187,13 @@ export interface SessionResponse {
   authenticated_at: string;
   /** True when authenticated against the local cache */
   offline: boolean;
+}
+export interface StockCountLine {
+  product_id: string;
+  counted_milli: number;
+}
+export interface StockCountRequest {
+  lines: StockCountLine[];
 }
 export interface SyncFailureOut {
   id: number;

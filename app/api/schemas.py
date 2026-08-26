@@ -328,3 +328,60 @@ class SyncRetryResponse(ApiModel):
     #: with no outbox row behind it is acknowledged but cannot be re-sent.
     requeued: int
     status: SyncStatusResponse
+
+
+# ── /inventory ──────────────────────────────────────────────────────────────
+
+
+class ReceiptPreviewRequest(ApiModel):
+    """One scan of a delivery, before it is committed."""
+
+    barcode: str
+    #: How many of the thing were scanned. A case counts as one pack; how many
+    #: units that is comes from the barcode row's `pack_size`.
+    packs: int = Field(ge=1, le=10_000)
+
+
+class ReceiptLineOut(ApiModel):
+    """What that scan would receive, for the running list on the screen."""
+
+    product_id: str
+    description: str
+    barcode: str
+    packs: int
+    pack_size: int
+    #: Whole units, which is what the person counting off the pallet sees.
+    units: int
+    #: Thousandths, which is what lands in the ledger. Both are shown because
+    #: a receipt three orders of magnitude out looks plausible in either one
+    #: alone.
+    delta_milli: int
+
+
+class ReceiptRequest(ApiModel):
+    lines: list[ReceiptPreviewRequest] = Field(min_length=1)
+
+
+class StockCountLine(ApiModel):
+    product_id: str
+    #: What was actually on the shelf, in thousandths. The correction is
+    #: computed against what the terminal expected, inside one transaction.
+    counted_milli: int = Field(ge=0)
+
+
+class StockCountRequest(ApiModel):
+    lines: list[StockCountLine] = Field(min_length=1)
+
+
+class AdjustmentRequest(ApiModel):
+    product_id: str
+    #: Signed: negative for breakage or shrinkage, positive for stock found.
+    delta_milli: int
+    #: Required. The only stock movement with no document behind it.
+    note: str = Field(min_length=1, max_length=500)
+
+
+class MovementsResponse(ApiModel):
+    """The ledger rows written. Empty when a count matched everywhere."""
+
+    movement_ids: list[str]
