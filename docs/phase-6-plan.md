@@ -32,9 +32,9 @@ More than it looks. Checked, not assumed:
 So the ledger, the permissions and the security boundary are already in place.
 Phase 6 is mostly application code on top of them.
 
-## Two decisions before any code
+## The two decisions, settled
 
-### 1. Can stock move while the terminal is offline?
+### 1. Stock moves while the terminal is offline
 
 It has to. A delivery arrives when it arrives, and the shop that cannot receive
 it without the internet is the shop the offline-first premise was for.
@@ -48,45 +48,39 @@ a stock count produces ledger rows with **no sale behind them**, and there is
 no way to push one today. It would sit in the outbox and be refused as
 `unknown entity`.
 
-So phase 6 starts server-side, not in the UI.
+So phase 6 starts server-side, not in the UI. That is slice 1.
 
-### 2. Are products created on the terminal, or only in the cloud?
+### 2. Admin is online-only; quick-create is not
 
-Products are currently **pull-only**: the puller writes them, "server wins,
-always", and nothing local edits them. Quick-create from an unknown scan breaks
-that — the cashier is holding an item with a barcode nothing recognises, and
-the answer cannot be "wait for the internet".
+Products are **pull-only** today: the puller writes them, "server wins,
+always", and nothing local edits them.
 
-Two routes, and this is a genuine choice:
+The alternative was making products two-way — a new envelope kind,
+terminal-generated ids, and a pull that stops clobbering local rows not yet
+pushed. That is roughly a second phase 6, and it waits until a second terminal
+makes it unavoidable.
 
-**(a) Products become two-way.** A new envelope kind, terminal-generated UUIDv7
-ids so a create is idempotent, and the pull must stop clobbering a local row
-that has not yet been pushed. Most work, and the only one that lets a shop run
-a day without the cloud.
+**So the admin screens talk to Supabase directly and are unavailable offline.**
+Adding a product properly needs the internet, and the owner should be told so
+in those words.
 
-**(b) Admin is online-only; quick-create is offline-capable but minimal.** The
-admin screens talk to Supabase directly and are simply unavailable offline. A
-quick-create offline writes an `unknown_scans` row and a provisional local
-product, which a manager confirms later. Less machinery, and it matches how the
-plan describes `unknown_scans` — a queue someone works through, not a
+**Quick-create is the exception, and it is the one that matters.** A cashier
+holding an item the till has never seen cannot be told to wait for the
+internet — the basket is open and a customer is standing there. Offline, an
+unknown scan writes a provisional local product and an `unknown_scans` row; the
+sale completes; a manager resolves the queue later. A queue someone works
+through, which is exactly how the plan describes `unknown_scans` — not a
 full-fidelity offline catalogue editor.
 
-**Decided: (b).** Admin screens are online-only; quick-create works offline and
-feeds `unknown_scans` for a manager to confirm. (a) waits until a second
-terminal makes it unavoidable.
-
-What this commits to, and it is worth being straight with the owner about:
-**adding a product properly needs the internet.** What still works with the
-line down is selling something the till has never seen — a provisional local
-product so the basket can complete, and a row in the queue saying it needs
-attention. That is the case the offline-first premise actually exists for.
+The line to hold: **selling something unrecognised works offline. Cataloguing
+it properly does not.**
 
 ---
 
 ## Build order
 
-Five slices, each shippable and provable on its own. Do them in this order —
-each one's proof depends on the one before.
+Six slices, one per deliverable, each shippable and provable on its own. Do
+them in this order — each one's proof depends on the one before.
 
 ### Slice 1 — Push a ledger row that has no sale behind it
 
@@ -160,15 +154,46 @@ a product *sellable*, not *scannable* — nothing prints these labels. A package
 good needs a printed label; something sold loose needs the weighed flow
 instead. The triage is per product and is the owner's, not the software's.
 
-### Slice 5 — Unknown scans, quick-create, low stock
+### Slice 5 — Unknown scans and quick-create
 
-1. Write an `unknown_scans` row whenever a lookup misses. The table has been
-   waiting since phase 1 and would already have been collecting evidence.
-2. A quick-create from that queue: name, price, tax code, and either the
-   scanned barcode or a fresh internal one.
+The first place decision 2 becomes code.
+
+1. **Write an `unknown_scans` row whenever a lookup misses.** The table has
+   been waiting since phase 1 and would already have been collecting evidence
+   about the real catalogue. Cheap, and it is the input to everything else
+   here.
+2. **Offline quick-create** — enough to finish the sale and no more: a
+   description the cashier types, a price, a tax code, and the scanned barcode.
+   The product is local, provisional, and marked as such. It must not be
+   pushed as a catalogue row; it is a sale line with a name attached and a
+   queue entry saying somebody needs to look.
+3. **Resolution, online** — a manager takes a queue entry and either matches it
+   to an existing product or creates a real one. This is where the provisional
+   record is reconciled, and it is the only path by which a quick-create
+   becomes a catalogue product.
+
+**Prove it:** offline, scan something unknown, complete the sale. The sale
+syncs. The queue entry survives. Resolving it does not create a duplicate
+product, and does not retroactively alter the sale — a sold line records what
+was charged, whatever the catalogue later says the item is called.
+
+### Slice 6 — Admin screens and low stock
+
+The first real admin UI, and — by decision 2 — the simplest thing in the phase,
+because it is online-only. It talks to Supabase through the same RLS every
+other client does, so `product.create` and `product.edit` are already enforced.
+
+1. Product list, search, and an edit form: name, short name, category, UOM,
+   tax code, `is_weighed`, `track_stock`.
+2. Barcodes and prices as sub-editors. `ux_product_barcodes_barcode` will
+   refuse a duplicate code — surface that as a message about *which* product
+   already holds it, not as a constraint name.
 3. Low stock is a query, not a feature: `on_hand <= reorder_point` where
    `reorder_point > 0`. Put it on the manager's screen and leave alerting alone
-   until someone asks.
+   until somebody asks for it.
+
+**Prove it:** create a product, give it a barcode and a price, sell it. Then
+try to give a second product the same barcode and read what the screen says.
 
 ---
 
@@ -194,19 +219,28 @@ product_id)` in the cloud and on `product_id` alone on the terminal. That
 asymmetry is already handled in the puller, and it will bite again anywhere
 this phase writes a level rather than a delta. Write deltas.
 
+**A provisional product is not a catalogue product.** Slice 5 creates rows the
+puller knows nothing about, in a table the puller overwrites with "server wins,
+always". Whatever marks a row provisional has to survive a pull, or the first
+catalogue refresh after a quick-create silently deletes the thing the cashier
+just sold. This is the sharp edge of decision 2 and the place to be most
+careful.
+
 ---
 
 ## Before starting
 
-Two things from earlier phases are worth closing first, because both touch code
-this phase will build on:
+**Nothing is blocking.** Both prerequisites this document originally listed are
+resolved:
 
 - ~~**argon2 re-tuning**~~ — **done.** 5,274 ms to 1,808 ms in the Edge
   Function, and a timing oracle closed along the way
-  (`docs/argon2-tuning.md`). It mattered here because a supervisor override
-  for an adjustment is a PIN check with a customer waiting, and phase 6 adds
-  more of them.
-- **Opening stock** is not a prerequisite — it is the reverse. `stock_levels`
-  is empty by design and slice 3's count flow is what seeds it, so phase 6 is
-  what makes an opening count possible at all. Sequence it before go-live
-  rather than after (plan §6 step 6).
+  (`docs/argon2-tuning.md`). It mattered here because a supervisor override on
+  an adjustment is a PIN check with a customer waiting, and phase 6 adds more
+  of them.
+- **Opening stock** was never a prerequisite — it is the reverse.
+  `stock_levels` is empty by design and slice 3's count flow is what seeds it,
+  so phase 6 is what makes an opening count possible at all. Sequence it before
+  go-live rather than after (plan §6 step 6).
+
+Start at slice 1.
