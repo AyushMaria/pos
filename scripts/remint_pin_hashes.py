@@ -74,7 +74,9 @@ def remint_seed(text: str, settings, minted: dict[str, str]) -> str:  # type: ig
             r"('" + re.escape(code) + r"',\s*'[^']*',\s*\n?\s*')\$argon2id\$[^']*(')",
             re.MULTILINE,
         )
-        text, count = pattern.subn(lambda m: m.group(1) + fresh + m.group(2), text)
+        text, count = pattern.subn(
+            lambda m, fresh=fresh: m.group(1) + fresh + m.group(2), text
+        )
         if count != 1:
             raise SystemExit(
                 f"expected exactly one pin_hash for {code} in {SEED.name}, found {count}"

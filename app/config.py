@@ -71,9 +71,9 @@ class Settings(BaseSettings):
     # ── argon2id (§11.4) ────────────────────────────────────────────────────
     #
     # The binding constraint is not this machine. It is `authenticate-pin`,
-    # where argon2 runs as WebAssembly in a Deno isolate — roughly 50× slower
+    # where argon2 runs as WebAssembly in a Deno isolate — roughly 50x slower
     # than the native library. At t=12 a real sign-in against a hosted project
-    # measured **3.7–5.3 seconds**, close enough to Supabase's per-invocation
+    # measured **3.7-5.3 seconds**, close enough to Supabase's per-invocation
     # CPU cap that a busy counter would eventually cross it and nobody could
     # sign in. Native cost was ~87 ms for the same parameters, which is why
     # tuning on the till alone would never have found it.

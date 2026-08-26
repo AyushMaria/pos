@@ -87,8 +87,8 @@ def test_shipped_parameters_cost_roughly_100ms() -> None:
     """Guards the tuning, not the security. Re-tune on the till before pilot.
 
     The floor is low because the binding constraint is not this machine: the
-    same parameters run as WebAssembly inside `authenticate-pin`, roughly 50×
-    slower, and t=12 measured 3.7–5.3 s there against ~87 ms here. Native cost
+    same parameters run as WebAssembly inside `authenticate-pin`, roughly 50x
+    slower, and t=12 measured 3.7-5.3 s there against ~87 ms here. Native cost
     is now a few milliseconds and that is expected — 5 ms still fails on
     parameters set to nothing, which is all this bound is for.
     """
