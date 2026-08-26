@@ -56,6 +56,7 @@ class PayloadBuilder:
         builders = {
             "sale": self._sale,
             "sale_review": self._sale_review,
+            "stock_movement": self._stock_movement,
         }
         builder = builders.get(entity)
         if builder is None:
@@ -115,6 +116,46 @@ class PayloadBuilder:
             for row in self.db.query(
                 "SELECT * FROM audit_log WHERE entity = 'sale' AND entity_id = ?",
                 (sale_id,),
+            )
+        ]
+        return record
+
+    def _stock_movement(self, movement_id: str) -> dict[str, Any]:
+        """One ledger row, pushed on its own.
+
+        A receipt, a count or an adjustment — a delta with no sale behind it.
+        Deltas belonging to a sale are *not* pushed this way: they travel
+        inside the sale envelope, with the sale that caused them, because they
+        were written in the same transaction and mean nothing apart from it.
+        Pushing one twice, once here and once nested, would move stock twice.
+        `_sale` selects `WHERE ref_type = 'sale'`, and nothing enqueues a
+        movement whose `ref_type` is `sale`, which is what keeps the two sets
+        disjoint.
+        """
+        movement = self.db.query_one(
+            "SELECT * FROM stock_ledger WHERE id = ?", (movement_id,)
+        )
+        if movement is None:
+            raise PayloadError(
+                f"stock movement {movement_id} is queued but no longer exists"
+            )
+
+        record = _dict(movement)
+        # Local rows carry the terminal *code*; the cloud keys terminals by
+        # UUID. Same translation the sale path makes, for the same reason.
+        record["terminal_id"] = self._terminal()
+
+        # An adjustment's reason lives in an audit row, and this is the only
+        # route it has to the cloud — `_sale` gathers audit rows by
+        # `entity = 'sale'`, so a movement's would never be picked up. Without
+        # this the cloud records that stock moved and not why, which is
+        # precisely the column shrinkage hides in.
+        record["audit"] = [
+            _dict(row)
+            for row in self.db.query(
+                "SELECT * FROM audit_log WHERE entity = 'stock_ledger' "
+                "AND entity_id = ?",
+                (movement_id,),
             )
         ]
         return record

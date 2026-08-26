@@ -39,6 +39,10 @@ class FakeCloud:
 
     def __init__(self) -> None:
         self.sales: dict[str, dict[str, Any]] = {}
+        #: Stock movements pushed on their own — a receipt, a count, an
+        #: adjustment. Kept separate from `sales` because a sale's deltas
+        #: travel inside its envelope, and the two sets must stay disjoint.
+        self.movements: dict[str, dict[str, Any]] = {}
         self.calls = 0
         self.fail_with: httpx.Response | Exception | None = None
         #: Fail this many times, then behave. For testing recovery.
@@ -58,6 +62,8 @@ class FakeCloud:
             if item["entity"] == "sale":
                 # do-nothing-on-conflict, the whole point.
                 self.sales.setdefault(item["id"], item["data"])
+            elif item["entity"] == "stock_movement":
+                self.movements.setdefault(item["id"], item["data"])
         return httpx.Response(200, json={"accepted": len(body["items"])})
 
     @property
@@ -491,6 +497,136 @@ def test_marking_synced_is_idempotent(outbox: OutboxRepository) -> None:
     outbox.mark_synced([], at=utcnow())
 
     assert outbox.backlog() == 0
+
+
+# ── Stock movements that no sale produced ───────────────────────────────────
+
+STORE_ID = "018f0000-0000-7000-8000-000000000100"
+PRODUCT_ID = "018f0000-0000-7000-8000-000000001001"
+
+
+def a_stock_movement(
+    db: Database,
+    *,
+    movement_id: str = "019300aa-0000-7000-8000-00000000c001",
+    delta_milli: int = 24000,
+    reason: str = "receipt",
+    ref_type: str | None = "receipt",
+) -> str:
+    """A receipt, a count or an adjustment: a delta with no sale behind it."""
+    with db.write() as conn:
+        conn.execute(
+            """
+            INSERT INTO stock_ledger (
+                id, store_id, product_id, delta_milli, reason, ref_type,
+                ref_id, occurred_at, terminal_id, user_id
+            ) VALUES (?, ?, ?, ?, ?, ?, NULL, ?, 'T1', NULL)
+            """,
+            (
+                movement_id,
+                STORE_ID,
+                PRODUCT_ID,
+                delta_milli,
+                reason,
+                ref_type,
+                utcnow().isoformat(),
+            ),
+        )
+        conn.execute(
+            "INSERT INTO outbox (entity, entity_id, op, payload_json, client_seq, "
+            "created_at) VALUES ('stock_movement', ?, 'insert', '{}', 1, ?)",
+            (movement_id, utcnow().isoformat()),
+        )
+    return movement_id
+
+
+@pytest.mark.asyncio
+async def test_a_receipt_reaches_the_cloud_on_its_own(
+    db: Database, outbox: OutboxRepository, cloud: FakeCloud
+) -> None:
+    """The gap phase 6 opens with.
+
+    Before `stock_movement` existed, the only ledger rows that reached the
+    cloud were the ones nested inside a sale envelope, because a sale was the
+    only thing that produced one. A goods receipt had no route at all: it sat
+    in the outbox and came back as `unknown entity`, which the pusher treats as
+    permanent and quarantines — correctly, for a reason that was never the
+    shopkeeper's fault.
+    """
+    movement_id = a_stock_movement(db)
+
+    result = await pusher(db, outbox, cloud).drain()
+
+    assert result.pushed == 1
+    assert result.quarantined == 0
+    assert outbox.backlog() == 0
+    assert cloud.movements[movement_id]["delta_milli"] == 24000
+
+
+@pytest.mark.asyncio
+async def test_a_movement_names_the_terminal_by_uuid(
+    db: Database, outbox: OutboxRepository, cloud: FakeCloud
+) -> None:
+    """Local rows carry the terminal *code*; the cloud keys terminals by UUID.
+    The same translation the sale path makes, for the same reason — and the
+    thing that silently broke sync the first time it was missed."""
+    movement_id = a_stock_movement(db)
+
+    await pusher(db, outbox, cloud).drain()
+
+    assert cloud.movements[movement_id]["terminal_id"] == TERMINAL_ID
+
+
+@pytest.mark.asyncio
+async def test_resending_a_movement_does_not_move_stock_twice(
+    db: Database, outbox: OutboxRepository, cloud: FakeCloud
+) -> None:
+    """A dropped acknowledgement makes the terminal re-send. Server-side that
+    is `on conflict (id) do nothing` on a terminal-generated id; here it is the
+    fake keeping one row per id, which is the property that matters."""
+    movement_id = a_stock_movement(db)
+    await pusher(db, outbox, cloud).drain()
+
+    with db.write() as conn:
+        conn.execute("UPDATE outbox SET synced_at = NULL WHERE entity = 'stock_movement'")
+    await pusher(db, outbox, cloud).drain()
+
+    assert len(cloud.movements) == 1
+    assert cloud.movements[movement_id]["delta_milli"] == 24000
+
+
+@pytest.mark.asyncio
+async def test_a_sale_still_carries_its_own_deltas(
+    till: Any, db: Database, outbox: OutboxRepository, cloud: FakeCloud
+) -> None:
+    """The two paths must stay disjoint, or a sale moves stock twice.
+
+    A sale's ledger rows travel *inside* the sale envelope, because they were
+    written in the same transaction and mean nothing apart from it. Nothing
+    enqueues a `stock_movement` whose ref_type is `sale`, and `_sale` selects
+    only `WHERE ref_type = 'sale'` — that is what keeps them apart.
+    """
+    sale_id = sell(till)
+
+    await pusher(db, outbox, cloud).drain()
+
+    assert cloud.movements == {}, "a sale's deltas must not push as movements"
+    assert cloud.sales[sale_id]["stock_ledger"], "a sale must carry its deltas"
+
+
+@pytest.mark.asyncio
+async def test_a_movement_that_vanished_is_quarantined(
+    db: Database, outbox: OutboxRepository, cloud: FakeCloud
+) -> None:
+    """A pointer whose row is gone will never build. Quarantine, do not spin."""
+    movement_id = a_stock_movement(db)
+    with db.write() as conn:
+        conn.execute("DELETE FROM stock_ledger WHERE id = ?", (movement_id,))
+
+    result = await pusher(db, outbox, cloud).drain()
+
+    assert result.quarantined == 1
+    assert movement_id in outbox.failures()[0]["error"]
 
 
 @pytest.mark.asyncio
