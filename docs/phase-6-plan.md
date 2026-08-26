@@ -71,10 +71,15 @@ product, which a manager confirms later. Less machinery, and it matches how the
 plan describes `unknown_scans` — a queue someone works through, not a
 full-fidelity offline catalogue editor.
 
-**(b) is the smaller phase 6 and the one I would build**, keeping (a) for when
-a second terminal makes it unavoidable. But it means telling the owner that
-adding a product needs the internet, and that is their call, not a technical
-one.
+**Decided: (b).** Admin screens are online-only; quick-create works offline and
+feeds `unknown_scans` for a manager to confirm. (a) waits until a second
+terminal makes it unavoidable.
+
+What this commits to, and it is worth being straight with the owner about:
+**adding a product properly needs the internet.** What still works with the
+line down is selling something the till has never seen — a provisional local
+product so the basket can complete, and a row in the queue saying it needs
+attention. That is the case the offline-first premise actually exists for.
 
 ---
 
@@ -196,10 +201,12 @@ this phase writes a level rather than a delta. Write deltas.
 Two things from earlier phases are worth closing first, because both touch code
 this phase will build on:
 
-- **argon2 re-tuning** (`docs/argon2-tuning.md`) — a supervisor override for an
-  adjustment is a PIN check with a customer waiting, and phase 6 adds more of
-  them.
-- **Opening stock.** `stock_levels` is empty by design. The count flow in
-  slice 3 is what seeds it, so phase 6 is the phase that makes an opening
-  count possible — worth sequencing before go-live rather than after
-  (plan §6 step 6).
+- ~~**argon2 re-tuning**~~ — **done.** 5,274 ms to 1,808 ms in the Edge
+  Function, and a timing oracle closed along the way
+  (`docs/argon2-tuning.md`). It mattered here because a supervisor override
+  for an adjustment is a PIN check with a customer waiting, and phase 6 adds
+  more of them.
+- **Opening stock** is not a prerequisite — it is the reverse. `stock_levels`
+  is empty by design and slice 3's count flow is what seeds it, so phase 6 is
+  what makes an opening count possible at all. Sequence it before go-live
+  rather than after (plan §6 step 6).
