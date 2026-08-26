@@ -557,6 +557,99 @@ def test_the_ledger_maintains_stock_levels(pg: Any) -> None:
         assert cur.fetchone()[0] == before - 1000
 
 
+def test_a_received_delivery_reconciles(pg: Any) -> None:
+    """Phase 6's exit criterion, where the trigger that decides it lives.
+
+    `stock_levels` is derived from `stock_ledger` by `stock_ledger_apply`, so
+    the sum of a product's deltas must equal its level — for every product,
+    always. 0008 shipped a second trigger over the same function and every
+    sale moved stock twice; this is the general form of the check that caught
+    it, and the reason phase 6 could safely add three more ways of writing to
+    that ledger.
+
+    Deliberately not a terminal-side test. The terminal has no such trigger:
+    its level is a pulled cache and its ledger is what this till did, so the
+    gap between them is the queue rather than a fault.
+    """
+    movement_id = "019300aa-0000-7000-8000-00000000e001"
+    envelope = json.dumps(
+        [
+            {
+                "schema_version": 3,
+                "entity": "stock_movement",
+                "op": "insert",
+                "id": movement_id,
+                "client_seq": 1,
+                "data": {
+                    "id": movement_id,
+                    "store_id": STORE_ID,
+                    "product_id": PRODUCT_ID,
+                    "delta_milli": 24_000,
+                    "reason": "receipt",
+                    "ref_type": "receipt",
+                    "occurred_at": "2026-08-24T09:00:00+00:00",
+                    "terminal_id": TERMINAL_UUID,
+                    "user_id": CASHIER_ID,
+                },
+            }
+        ]
+    )
+
+    with pg.transaction(force_rollback=True):
+        _push(pg, envelope, role=perms.INVENTORY)
+
+        cur = pg.cursor()
+        cur.execute(
+            """
+            SELECT COALESCE(s.on_hand, 0), COALESCE(SUM(l.delta_milli), 0)
+              FROM public.stock_ledger l
+              LEFT JOIN public.stock_levels s
+                     ON s.product_id = l.product_id AND s.store_id = l.store_id
+             WHERE l.product_id = %s
+             GROUP BY s.on_hand
+            """,
+            (PRODUCT_ID,),
+        )
+        level, ledger = cur.fetchone()
+
+        assert ledger == 24_000, "the delivery did not land whole"
+        assert level == ledger, f"level {level} disagrees with ledger {ledger}"
+
+
+def test_a_stock_movement_needs_a_stock_permission(pg: Any) -> None:
+    """`sale.create` is not enough to receive a delivery. Selling and
+    restocking are different acts of trust and the matrix separates them."""
+    movement_id = "019300aa-0000-7000-8000-00000000e002"
+    envelope = json.dumps(
+        [
+            {
+                "schema_version": 3,
+                "entity": "stock_movement",
+                "op": "insert",
+                "id": movement_id,
+                "client_seq": 1,
+                "data": {
+                    "id": movement_id,
+                    "store_id": STORE_ID,
+                    "product_id": PRODUCT_ID,
+                    "delta_milli": 1_000,
+                    "reason": "receipt",
+                    "ref_type": "receipt",
+                    "occurred_at": "2026-08-24T09:00:00+00:00",
+                    "terminal_id": TERMINAL_UUID,
+                    "user_id": CASHIER_ID,
+                },
+            }
+        ]
+    )
+
+    with (
+        pytest.raises(psycopg.errors.InsufficientPrivilege),
+        pg.transaction(force_rollback=True),
+    ):
+        _push(pg, envelope, role=perms.CASHIER)
+
+
 def test_sync_push_is_not_a_way_around_rls(pg: Any) -> None:
     """`security invoker`, so the RPC is exactly as privileged as its caller.
 
