@@ -1,6 +1,8 @@
 -- assign_internal_codes.sql - give every uncoded product a way in.
 --
--- Run in the Supabase SQL editor, after `supabase db push` has applied 0013.
+-- Run in the Supabase SQL editor, after `supabase db push` has applied 0013
+-- and 0015 (0015 defines `pos.unlisted_product()`, which every query here
+-- filters on).
 --
 -- 38.6% of the pilot catalogue - 12,431 products - has no barcode at all.
 -- Each one is currently unsellable: the register can find it by name, but
@@ -27,12 +29,25 @@
 -- Budget time for that triage, and for renaming: the names are what the
 -- fallback search matches on, and for a third of the shop search is the only
 -- way in.
+--
+-- ## The placeholder is skipped
+--
+-- `SKU-UNLISTED` (0014) is a product row that stands in for many real items,
+-- not a thing on a shelf. A first run of this script gave it a `21…` code and
+-- put "Unlisted item" on the print-a-label worklist, which is a label nobody
+-- can usefully stick to anything. Worse, a code makes it *scannable*: it has
+-- no price today, so a scan lands on the unknown-item path, but the day
+-- somebody adds one it becomes a ringable ₹X line named "Unlisted item".
+--
+-- Every query below skips it, and skips it the same way — otherwise step 3's
+-- "must be zero" would contradict step 2 and never pass.
 
 -- ── 1. How many, before anything changes ──────────────────────────────────
 
 select count(*) as products_with_no_code
 from public.products p
 where p.deleted_at is null
+  and p.id <> pos.unlisted_product()
   and not exists (
       select 1 from public.product_barcodes b
        where b.product_id = p.id and b.deleted_at is null
@@ -49,6 +64,7 @@ begin;
 select public.assign_internal_barcode(p.id)
 from public.products p
 where p.deleted_at is null
+  and p.id <> pos.unlisted_product()
   and not exists (
       select 1 from public.product_barcodes b
        where b.product_id = p.id and b.deleted_at is null
@@ -64,6 +80,7 @@ commit;
 select count(*) as still_with_no_code
 from public.products p
 where p.deleted_at is null
+  and p.id <> pos.unlisted_product()
   and not exists (
       select 1 from public.product_barcodes b
        where b.product_id = p.id and b.deleted_at is null
@@ -101,6 +118,7 @@ from public.products p
 join public.product_barcodes b
   on b.product_id = p.id and b.symbology = 'INTERNAL' and b.deleted_at is null
 where p.deleted_at is null and p.is_weighed
+  and p.id <> pos.unlisted_product()
 union all
 -- Packaged goods with no manufacturer code: these need something printed for
 -- the shelf edge before the code helps anybody at the till.
@@ -109,7 +127,8 @@ select 'packaged - needs a printed label',
 from public.products p
 join public.product_barcodes b
   on b.product_id = p.id and b.symbology = 'INTERNAL' and b.deleted_at is null
-where p.deleted_at is null and not p.is_weighed;
+where p.deleted_at is null and not p.is_weighed
+  and p.id <> pos.unlisted_product();
 
 -- The list itself, to work through.
 select p.sku,
@@ -121,4 +140,5 @@ from public.products p
 join public.product_barcodes b
   on b.product_id = p.id and b.symbology = 'INTERNAL' and b.deleted_at is null
 where p.deleted_at is null
+  and p.id <> pos.unlisted_product()
 order by p.is_weighed, p.name;

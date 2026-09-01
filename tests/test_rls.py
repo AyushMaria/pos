@@ -955,6 +955,35 @@ def test_the_placeholder_does_not_accumulate_stock(pg: Any) -> None:
     assert cur.fetchone() == (False,)
 
 
+def test_the_placeholder_cannot_be_given_a_barcode(pg: Any) -> None:
+    """`assign_internal_codes.sql` gave it one on the first live run.
+
+    A code makes a product scannable. The placeholder stands in for many real
+    products, so a scan of it is meaningless at best and - the day somebody
+    gives it a price - a ringable line reading "Unlisted item" at whatever
+    that price is, bypassing the whole design. The script now skips it; this
+    is the fence for when somebody re-runs an older copy.
+    """
+    with (
+        pytest.raises(psycopg.errors.RaiseException),
+        pg.transaction(force_rollback=True),
+    ):
+        cur = pg.cursor()
+        cur.execute(
+            "insert into public.product_barcodes "
+            "(product_id, barcode, symbology, pack_size, is_primary) "
+            "values (%s, '2100000118670', 'INTERNAL', 1, true)",
+            (UNLISTED_PRODUCT_ID,),
+        )
+
+
+def test_the_sql_and_python_agree_on_the_placeholder(pg: Any) -> None:
+    """Two copies of one UUID, in two languages. This is the seam."""
+    cur = pg.cursor()
+    cur.execute("select pos.unlisted_product()::text")
+    assert cur.fetchone()[0] == UNLISTED_PRODUCT_ID
+
+
 def test_a_cashier_may_file_a_code_that_matched_nothing(pg: Any) -> None:
     """`sale.create`, not `product.edit`.
 
