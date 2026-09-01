@@ -136,6 +136,43 @@ class CatalogRepository(Repository):
         )
         return None if row is None else _to_product(row)
 
+    def tax_code(self, code: str) -> TaxCode | None:
+        """One tax code by its key.
+
+        Needed because an unlisted item has no product to inherit a rate from -
+        the cashier chooses one, and the rate must come from the catalogue
+        rather than from anything the client sends. A client-supplied rate is a
+        client-supplied tax bill.
+        """
+        row = self._row(
+            "SELECT code, name, rate_bp, is_inclusive FROM tax_codes "
+            "WHERE code = ? AND deleted_at IS NULL",
+            (code,),
+        )
+        if row is None:
+            return None
+        return TaxCode(
+            code=row["code"],
+            name=row["name"],
+            rate_bp=int(row["rate_bp"]),
+            is_inclusive=bool(row["is_inclusive"]),
+        )
+
+    def tax_codes(self) -> list[TaxCode]:
+        """Every rate a cashier may pick from, for the quick-create form."""
+        return [
+            TaxCode(
+                code=row["code"],
+                name=row["name"],
+                rate_bp=int(row["rate_bp"]),
+                is_inclusive=bool(row["is_inclusive"]),
+            )
+            for row in self._rows(
+                "SELECT code, name, rate_bp, is_inclusive FROM tax_codes "
+                "WHERE deleted_at IS NULL ORDER BY rate_bp"
+            )
+        ]
+
     def search(self, query: str, limit: int = SEARCH_LIMIT) -> list[CatalogProduct]:
         """Name and SKU search, for when a code is unreadable or absent.
 

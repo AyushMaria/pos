@@ -19,6 +19,8 @@ pos.lock
 # UI build output is generated into the Python package
 app/ui/
 ui-src/node_modules/
+# Vite writes one of these per run and does not always clean up after itself.
+ui-src/vitest.config.ts.timestamp-*
 ui-src/dist/
 
 # TypeScript build cache

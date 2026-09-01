@@ -72,11 +72,23 @@ function posted(overrides: Partial<PostSaleResponse> = {}): PostSaleResponse {
   };
 }
 
+const catalogApi = {
+  search: vi.fn(),
+  lookup: vi.fn(),
+  taxCodes: vi.fn(),
+};
+
+const RATES = [
+  { code: "GST0", name: "GST 0%", rate_bp: 0, is_inclusive: true },
+  { code: "GST12", name: "GST 12%", rate_bp: 1200, is_inclusive: true },
+];
+
 const api = {
   openCart: vi.fn(),
   readCart: vi.fn(),
   addBarcode: vi.fn(),
   addProduct: vi.fn(),
+  addUnlisted: vi.fn(),
   setQuantity: vi.fn(),
   voidLine: vi.fn(),
   abandon: vi.fn(),
@@ -94,10 +106,15 @@ vi.mock("../../core/api/register", () => ({
     {},
     { get: (_target, name: string) => (...args: unknown[]) => api[name as keyof typeof api](...args) },
   ),
-  catalog: { search: vi.fn(), lookup: vi.fn() },
+  catalog: {
+    search: (...args: unknown[]) => catalogApi.search(...args),
+    lookup: (...args: unknown[]) => catalogApi.lookup(...args),
+    taxCodes: () => catalogApi.taxCodes(),
+  },
 }));
 
 const { RegisterScreen } = await import("./RegisterScreen");
+const { ApiError } = await import("../../core/api/client");
 
 const session: SessionResponse = {
   user_id: "u1",
@@ -116,8 +133,10 @@ async function openRegister() {
 
 beforeEach(() => {
   for (const fn of Object.values(api)) fn.mockReset();
+  for (const fn of Object.values(catalogApi)) fn.mockReset();
   api.openCart.mockResolvedValue(cart());
   api.post.mockResolvedValue(posted());
+  catalogApi.taxCodes.mockResolvedValue({ tax_codes: RATES });
 });
 
 // ── Cash ────────────────────────────────────────────────────────────────────
@@ -343,5 +362,100 @@ describe("change", () => {
     await user.click(await screen.findByRole("button", { name: /take payment/i }));
 
     expect(await screen.findByText(/change ₹13\.00/i)).toBeDefined();
+  });
+});
+
+// ── Items the catalogue does not have ───────────────────────────────────────
+
+describe("an unlisted item", () => {
+  /**
+   * A customer at the counter with something nothing recognises, and a queue.
+   * The alternative to this dialog is not "the cashier adds a product": it is
+   * the item rung up as something else at roughly the right price, which is
+   * wrong stock, wrong tax and no record that anything was ever missing.
+   */
+  const missing = "8901999000014";
+
+  async function reachTheForm() {
+    api.addBarcode.mockRejectedValue(
+      new ApiError(404, `No product found for ${missing}.`),
+    );
+    const user = await openRegister();
+    await user.type(screen.getByPlaceholderText(/scan, type a barcode/i), missing);
+    await user.click(screen.getByRole("button", { name: "Add" }));
+    await screen.findByRole("dialog", { name: /unlisted/i });
+    return user;
+  }
+
+  it("offers a way through when a readable code is not stocked", async () => {
+    await reachTheForm();
+
+    const dialog = screen.getByRole("dialog", { name: /unlisted/i });
+    expect(within(dialog).getByText(new RegExp(missing))).toBeDefined();
+    // Said plainly, because it is the one thing the cashier gives up.
+    expect(within(dialog).getByText(/stock will not be tracked/i)).toBeDefined();
+  });
+
+  it("does not offer it for a mistyped code", async () => {
+    // A 422 is a code that failed its check digit. Offering the form here
+    // would teach cashiers to hand-key items they could simply rescan.
+    api.addBarcode.mockRejectedValue(
+      new ApiError(422, "That code could not be read."),
+    );
+    const user = await openRegister();
+
+    await user.type(screen.getByPlaceholderText(/scan, type a barcode/i), "8901999000013");
+    await user.click(screen.getByRole("button", { name: "Add" }));
+
+    await screen.findByText(/could not be read/i);
+    expect(screen.queryByRole("dialog", { name: /unlisted/i })).toBeNull();
+  });
+
+  it("sends paise, and the code that started it", async () => {
+    // Rupees on screen, paise on the wire — the one conversion this screen
+    // owns. ₹195.00 typed is 19500, not 195.
+    api.addUnlisted.mockResolvedValue(cart());
+    const user = await reachTheForm();
+
+    await user.type(screen.getByLabelText(/what is it/i), "Kissan Jam 500g");
+    await user.type(screen.getByLabelText("Price"), "195");
+    await user.selectOptions(screen.getByLabelText("Tax"), "GST12");
+    await user.click(screen.getByRole("button", { name: /sell it anyway/i }));
+
+    await waitFor(() =>
+      expect(api.addUnlisted).toHaveBeenCalledWith("cart-1", {
+        description: "Kissan Jam 500g",
+        unit_price_paise: 19500,
+        tax_code: "GST12",
+        barcode: missing,
+      }),
+    );
+  });
+
+  it("will not sell a nameless line, or a free one", async () => {
+    // A line with no description is an anonymous amount of money on a
+    // receipt; a price of zero is a giveaway that looks like a normal sale.
+    const user = await reachTheForm();
+    const sell = screen.getByRole("button", { name: /sell it anyway/i });
+
+    await user.type(screen.getByLabelText("Price"), "195");
+    expect(sell).toHaveProperty("disabled", true);
+
+    await user.type(screen.getByLabelText(/what is it/i), "Jam");
+    await waitFor(() => expect(sell).toHaveProperty("disabled", false));
+
+    await user.clear(screen.getByLabelText("Price"));
+    await waitFor(() => expect(sell).toHaveProperty("disabled", true));
+  });
+
+  it("offers the shop's own rates rather than a hardcoded list", async () => {
+    // A rate the client invented would be a tax bill the client invented.
+    await reachTheForm();
+
+    const tax = screen.getByLabelText("Tax") as HTMLSelectElement;
+    expect([...tax.options].map((option) => option.value)).toEqual([
+      "GST0",
+      "GST12",
+    ]);
   });
 });

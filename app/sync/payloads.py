@@ -57,6 +57,7 @@ class PayloadBuilder:
             "sale": self._sale,
             "sale_review": self._sale_review,
             "stock_movement": self._stock_movement,
+            "unknown_scan": self._unknown_scan,
         }
         builder = builders.get(entity)
         if builder is None:
@@ -158,6 +159,24 @@ class PayloadBuilder:
                 (movement_id,),
             )
         ]
+        return record
+
+    def _unknown_scan(self, scan_id: str) -> dict[str, Any]:
+        """A code that matched nothing, on its way to somebody who can fix it.
+
+        The queue is only useful if it outlives the terminal: a shop that loses
+        a machine should not also lose the list of things it could not
+        identify, and whoever resolves them is not necessarily at the till.
+        """
+        scan = self.db.query_one(
+            "SELECT * FROM unknown_scans WHERE id = ?", (scan_id,)
+        )
+        if scan is None:
+            raise PayloadError(f"unknown scan {scan_id} is queued but has gone")
+
+        record = _dict(scan)
+        record["terminal_id"] = self._terminal()
+        record["resolved"] = bool(record.get("resolved"))
         return record
 
     def _sale_review(self, review_id: str) -> dict[str, Any]:

@@ -16,7 +16,14 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Query
 
 from app.api.deps import CurrentSession, get_catalog_repository, require
-from app.api.schemas import LookupResponse, MoneyOut, ProductOut, SearchResponse
+from app.api.schemas import (
+    LookupResponse,
+    MoneyOut,
+    ProductOut,
+    SearchResponse,
+    TaxCodeOut,
+    TaxCodesResponse,
+)
 from app.data.repositories.catalog import CatalogProduct, CatalogRepository
 from app.domain import permissions
 from app.domain.barcode import parse
@@ -87,6 +94,27 @@ def search(
     return SearchResponse(
         query=q,
         results=[_to_product_out(product) for product in catalog.search(q, limit)],
+    )
+
+
+@router.get("/tax-codes", response_model=TaxCodesResponse)
+def tax_codes(catalog: CatalogRepo, session: CurrentSession) -> TaxCodesResponse:
+    """The rates the unlisted-item form may offer.
+
+    Read by anyone with a session rather than gated on `product.read`: a
+    cashier who can sell an unlisted item has to be able to pick its rate, and
+    the list of GST slabs is not sensitive.
+    """
+    return TaxCodesResponse(
+        tax_codes=[
+            TaxCodeOut(
+                code=rate.code,
+                name=rate.name,
+                rate_bp=rate.rate_bp,
+                is_inclusive=rate.is_inclusive,
+            )
+            for rate in catalog.tax_codes()
+        ]
     )
 
 

@@ -35,6 +35,7 @@ from app.api.schemas import (
     TenderRequest,
     TenderResponse,
     UnknownPaymentRequest,
+    UnlistedLineRequest,
 )
 from app.domain import permissions
 from app.domain.identity import Session, utcnow
@@ -49,6 +50,7 @@ from app.services.cart_service import (
     CartService,
     OpenCart,
     UnknownBarcode,
+    UnlistedItemRejected,
     UnreadableBarcode,
 )
 from app.services.receipt_render import receipt_path, render_html, render_pdf, render_text
@@ -190,6 +192,45 @@ def add_line(
         raise HTTPException(
             status.HTTP_404_NOT_FOUND,
             f"No product found for {exc.barcode}. Try searching by name.",
+        ) from exc
+    except CartLocked as exc:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "This sale has already taken payment; the basket cannot change.",
+        ) from exc
+
+    return _to_cart_out(updated)
+
+
+@router.post("/carts/{cart_id}/lines/unlisted", response_model=CartOut)
+def add_unlisted_line(
+    cart_id: str,
+    body: UnlistedLineRequest,
+    carts: CartSvc,
+    session: Annotated[Session, Depends(require(permissions.SALE_CREATE))],
+) -> CartOut:
+    """Take money for something the catalogue has never heard of.
+
+    Gated on `sale.create` alone, deliberately. The alternative is a cashier
+    who cannot complete a sale until a manager walks over, and the realistic
+    outcome of that is the item rung up as something else at roughly the right
+    price - which is worse in every direction: wrong stock, wrong tax, and no
+    record that anything was ever missing.
+    """
+    _found(cart_id, carts)
+
+    try:
+        updated = carts.add_unlisted(
+            cart_id,
+            description=body.description,
+            unit_price=Money(body.unit_price_paise),
+            tax_code=body.tax_code,
+            barcode=body.barcode,
+            qty_milli=body.qty_milli or QUANTITY_SCALE,
+        )
+    except UnlistedItemRejected as exc:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc)
         ) from exc
     except CartLocked as exc:
         raise HTTPException(

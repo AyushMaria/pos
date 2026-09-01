@@ -6,6 +6,7 @@ import type {
   PostSaleResponse,
   ProductOut,
   SessionResponse,
+  TaxCodeOut,
   TenderQuote,
   TenderResponse,
 } from "../../core/api/contract";
@@ -37,6 +38,10 @@ export function RegisterScreen({
   const [upi, setUpi] = useState<TenderResponse | null>(null);
   const [sale, setSale] = useState<PostSaleResponse | null>(null);
   const [busy, setBusy] = useState(false);
+  //: The code the catalogue could not answer, while the cashier decides
+  //: whether to sell it anyway. `""` means they opened the form by hand.
+  const [unlisted, setUnlisted] = useState<string | null>(null);
+  const [rates, setRates] = useState<TaxCodeOut[]>([]);
   const entryRef = useRef<HTMLInputElement>(null);
 
   const focusEntry = useCallback(() => entryRef.current?.focus(), []);
@@ -70,6 +75,11 @@ export function RegisterScreen({
         // server has already phrased each one for a cashier. Pass it through
         // rather than replacing it with something generic.
         say(error instanceof ApiError ? error.message : "Could not add that item", true);
+        // 404 is "a readable code for a product this shop does not have" — the
+        // one case where selling it anyway is the right answer. A 422 is a
+        // mistyped code and offering the form there would train cashiers to
+        // hand-key items they could simply rescan.
+        if (error instanceof ApiError && error.status === 404) setUnlisted(code);
       } finally {
         setBusy(false);
         setEntry("");
@@ -81,6 +91,43 @@ export function RegisterScreen({
 
   // A scan anywhere on the page lands in the basket, even with a dialog open.
   useBarcodeCapture({ onScan: addCode });
+
+  // Fetched once and kept. The form must open instantly with a queue waiting,
+  // and GST slabs do not change during a shift.
+  useEffect(() => {
+    catalog
+      .taxCodes()
+      .then((response) => setRates(response.tax_codes))
+      .catch(() => setRates([]));
+  }, []);
+
+  async function sellUnlisted(item: {
+    description: string;
+    rupees: string;
+    tax_code: string;
+  }) {
+    if (!cart) return;
+    setBusy(true);
+    try {
+      setCart(
+        await register.addUnlisted(cart.cart_id, {
+          description: item.description,
+          // Rupees on screen, paise on the wire. The one conversion this
+          // screen owns, and the only place a decimal is allowed to exist.
+          unit_price_paise: Math.round(Number(item.rupees) * 100),
+          tax_code: item.tax_code,
+          barcode: unlisted || null,
+        }),
+      );
+      setUnlisted(null);
+      setMessage(null);
+    } catch (error) {
+      say(error instanceof ApiError ? error.message : "Could not add that item", true);
+    } finally {
+      setBusy(false);
+      focusEntry();
+    }
+  }
 
   async function onEntrySubmit(event: React.FormEvent) {
     event.preventDefault();
@@ -287,6 +334,19 @@ export function RegisterScreen({
         />
       )}
 
+      {unlisted !== null && rates.length > 0 && (
+        <UnlistedDialog
+          barcode={unlisted}
+          rates={rates}
+          busy={busy}
+          onCancel={() => {
+            setUnlisted(null);
+            focusEntry();
+          }}
+          onConfirm={(item) => void sellUnlisted(item)}
+        />
+      )}
+
       {upi && (
         <UpiDialog
           attempt={upi}
@@ -355,6 +415,90 @@ function Totals({ cart }: { cart: CartOut | null }) {
         <span>Total</span>
         <span>{cart.total_before_rounding.text}</span>
       </p>
+    </div>
+  );
+}
+
+function UnlistedDialog({
+  barcode,
+  rates,
+  busy,
+  onCancel,
+  onConfirm,
+}: {
+  barcode: string;
+  rates: TaxCodeOut[];
+  busy: boolean;
+  onCancel: () => void;
+  onConfirm: (item: {
+    description: string;
+    rupees: string;
+    tax_code: string;
+  }) => void;
+}) {
+  const [description, setDescription] = useState("");
+  const [rupees, setRupees] = useState("");
+  const [taxCode, setTaxCode] = useState(rates[0]?.code ?? "");
+
+  // Both, or the sale is wrong in a way nobody can reconstruct later: a line
+  // with no description is an anonymous amount of money, and a price of zero
+  // is a giveaway that looks like a completed sale.
+  const ready =
+    description.trim().length > 0 && Number(rupees) > 0 && taxCode.length > 0;
+
+  return (
+    <div className="dialog" role="dialog" aria-label="Sell an unlisted item">
+      <h3>Not in the catalogue</h3>
+      {barcode && <p className="rounding">Code {barcode} matched nothing.</p>}
+      <p className="rounding">
+        Sell it now and it goes on the list for someone to add properly. Stock
+        will not be tracked for it.
+      </p>
+
+      <label htmlFor="unlisted-name">What is it?</label>
+      <input
+        id="unlisted-name"
+        value={description}
+        onChange={(event) => setDescription(event.target.value)}
+        placeholder="Read it off the packet"
+        autoFocus
+        autoComplete="off"
+      />
+
+      <label htmlFor="unlisted-price">Price</label>
+      <input
+        id="unlisted-price"
+        inputMode="decimal"
+        value={rupees}
+        onChange={(event) => setRupees(event.target.value)}
+        placeholder="in rupees"
+      />
+
+      <label htmlFor="unlisted-tax">Tax</label>
+      <select
+        id="unlisted-tax"
+        value={taxCode}
+        onChange={(event) => setTaxCode(event.target.value)}
+      >
+        {rates.map((rate) => (
+          <option key={rate.code} value={rate.code}>
+            {rate.name}
+          </option>
+        ))}
+      </select>
+
+      <div className="row">
+        <button
+          type="button"
+          disabled={!ready || busy}
+          onClick={() => onConfirm({ description, rupees, tax_code: taxCode })}
+        >
+          Sell it anyway
+        </button>
+        <button type="button" className="secondary" onClick={onCancel}>
+          Cancel
+        </button>
+      </div>
     </div>
   );
 }

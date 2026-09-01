@@ -19,6 +19,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 
 from app.data.repositories.catalog import CatalogProduct, CatalogRepository
+from app.data.repositories.unknown_scans import UnknownScanRepository
 from app.domain.barcode import ScanResult, parse
 from app.domain.cart import Cart
 from app.domain.identity import Session, utcnow
@@ -34,6 +35,7 @@ from app.domain.payments import (
 )
 from app.domain.pricing import Discount, LineInput
 from app.domain.tender import CashRounding, TenderMethod, rounding_for
+from app.domain.unlisted import UNLISTED_PRODUCT_ID
 
 
 class CartNotFound(KeyError):
@@ -56,6 +58,14 @@ class UnreadableBarcode(ValueError):
         super().__init__(reason)
         self.barcode = barcode
         self.reason = reason
+
+
+class UnlistedItemRejected(ValueError):
+    """The quick-create form was not filled in well enough to sell from.
+
+    A separate type from `UnreadableBarcode` because the fix is different: the
+    cashier has to type something, not rescan something.
+    """
 
 
 @dataclass
@@ -83,8 +93,18 @@ class OpenCart:
 
 
 class CartService:
-    def __init__(self, catalog: CatalogRepository) -> None:
+    def __init__(
+        self,
+        catalog: CatalogRepository,
+        unknown_scans: UnknownScanRepository | None = None,
+        *,
+        terminal_code: str = "",
+    ) -> None:
         self.catalog = catalog
+        #: Optional so every existing test that builds a CartService with a
+        #: catalogue alone keeps working. A till always has one.
+        self.unknown_scans = unknown_scans
+        self.terminal_code = terminal_code
         self._carts: dict[str, OpenCart] = {}
         self._lock = threading.Lock()
 
@@ -140,7 +160,9 @@ class CartService:
 
     # ── Building the basket ─────────────────────────────────────────────────
 
-    def resolve(self, raw: str) -> tuple[CatalogProduct, ScanResult]:
+    def resolve(
+        self, raw: str, store_id: str | None = None
+    ) -> tuple[CatalogProduct, ScanResult]:
         """Turn a typed or scanned code into something sellable.
 
         Parsing is pure and lives in the domain; resolution needs the
@@ -153,13 +175,23 @@ class CartService:
 
         product = self.catalog.by_lookup_key(scan.lookup_key)
         if product is None:
+            # The table has existed since phase 1 with nothing writing to it,
+            # and it holds the most useful evidence in the project: which codes
+            # real customers present that this catalogue cannot answer.
+            if self.unknown_scans is not None:
+                self.unknown_scans.record(
+                    raw,
+                    store_id=store_id or "",
+                    terminal_id=self.terminal_code,
+                    at=utcnow(),
+                )
             raise UnknownBarcode(raw)
         return product, scan
 
     def add_scanned(self, cart_id: str, raw: str) -> OpenCart:
         """Add a line from a code, honouring pack size and embedded weight."""
         open_cart = self.get(cart_id)
-        product, scan = self.resolve(raw)
+        product, scan = self.resolve(raw, store_id=open_cart.store_id)
 
         if scan.carries_quantity and scan.qty_milli is not None:
             # A weighed code carries its own quantity, so the cashier is not
@@ -178,6 +210,67 @@ class CartService:
             open_cart, product, qty_milli, barcode=raw,
             merge=not scan.carries_quantity,
         )
+
+    def add_unlisted(
+        self,
+        cart_id: str,
+        *,
+        description: str,
+        unit_price: Money,
+        tax_code: str,
+        barcode: str | None = None,
+        qty_milli: int = QUANTITY_SCALE,
+    ) -> OpenCart:
+        """Sell something the catalogue has never heard of.
+
+        There is a customer at the counter and a queue behind them. The line
+        points at the one placeholder product (0014 explains why it cannot
+        point at a newly invented one); the item's real identity rides on the
+        line, in `description` and `barcode_scanned`, and the money is exactly
+        right. Somebody with `product.edit` turns it into a real product later,
+        from `unknown_scans`, not in front of a customer.
+
+        The rate is looked up rather than accepted from the caller. A
+        client-supplied tax rate is a client-supplied tax bill.
+        """
+        open_cart = self.get(cart_id)
+        self._require_open_basket(open_cart)
+
+        described = description.strip()
+        if not described:
+            raise UnlistedItemRejected("an unlisted item needs a description")
+        if unit_price.paise <= 0:
+            raise UnlistedItemRejected("an unlisted item needs a price")
+
+        rate = self.catalog.tax_code(tax_code)
+        if rate is None:
+            raise UnlistedItemRejected(f"no such tax code: {tax_code}")
+
+        if barcode and self.unknown_scans is not None:
+            # Selling it anyway is itself the report. Recorded here as well as
+            # in `resolve`, because a cashier may reach this form by typing
+            # rather than scanning, and because a code sold against is more
+            # urgent than one merely scanned.
+            self.unknown_scans.record(
+                barcode,
+                store_id=open_cart.store_id,
+                terminal_id=self.terminal_code,
+                at=utcnow(),
+            )
+
+        line = LineInput(
+            product_id=UNLISTED_PRODUCT_ID,
+            description=described,
+            unit_price=unit_price,
+            qty_milli=qty_milli,
+            tax_code=rate,
+            barcode_scanned=barcode,
+            # Never merged: two unlisted lines are two different real products
+            # that happen to share a placeholder. Folding them would keep one
+            # description and lose the other.
+        )
+        open_cart.cart = open_cart.cart.add(line, merge=False)
+        return open_cart
 
     def add_product(
         self, cart_id: str, product_id: str, qty_milli: int = QUANTITY_SCALE

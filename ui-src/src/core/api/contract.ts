@@ -222,6 +222,17 @@ export interface SyncStatusResponse {
   last_error?: string | null;
   needs_update?: boolean;
 }
+/** A rate the quick-create form may offer. */
+export interface TaxCodeOut {
+  code: string;
+  name: string;
+  /** Basis points; 18% is 1800 */
+  rate_bp: number;
+  is_inclusive: boolean;
+}
+export interface TaxCodesResponse {
+  tax_codes: TaxCodeOut[];
+}
 export interface TaxComponentOut {
   tax_code: string;
   rate_bp: number;
@@ -252,6 +263,22 @@ export interface TenderResponse {
 }
 export interface UnknownPaymentRequest {
   reason?: string | null;
+}
+/** Sell an item the catalogue does not have (architecture 9.2, phase 6).
+
+No `product_id`: the line goes against the one placeholder product and
+carries its real identity itself. `tax_code` is a key into `tax_codes`,
+never a rate — a rate the client chose is a tax bill the client chose. */
+export interface UnlistedLineRequest {
+  /** What the cashier read off the packet */
+  description: string;
+  /** Integer paise, never a float */
+  unit_price_paise: number;
+  tax_code: string;
+  /** The code that matched nothing, if there was one */
+  barcode?: string | null;
+  /** Integer thousandths; 1.250 kg is 1250 */
+  qty_milli?: number | null;
 }
 
 /**

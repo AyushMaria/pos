@@ -1101,6 +1101,54 @@
         "title": "SyncStatusResponse",
         "type": "object"
       },
+      "TaxCodeOut": {
+        "additionalProperties": false,
+        "description": "A rate the quick-create form may offer.",
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "is_inclusive": {
+            "title": "Is Inclusive",
+            "type": "boolean"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "rate_bp": {
+            "description": "Basis points; 18% is 1800",
+            "title": "Rate Bp",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "code",
+          "name",
+          "rate_bp",
+          "is_inclusive"
+        ],
+        "title": "TaxCodeOut",
+        "type": "object"
+      },
+      "TaxCodesResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "tax_codes": {
+            "items": {
+              "$ref": "#/components/schemas/TaxCodeOut"
+            },
+            "title": "Tax Codes",
+            "type": "array"
+          }
+        },
+        "required": [
+          "tax_codes"
+        ],
+        "title": "TaxCodesResponse",
+        "type": "object"
+      },
       "TaxComponentOut": {
         "additionalProperties": false,
         "properties": {
@@ -1244,6 +1292,58 @@
           }
         },
         "title": "UnknownPaymentRequest",
+        "type": "object"
+      },
+      "UnlistedLineRequest": {
+        "additionalProperties": false,
+        "description": "Sell an item the catalogue does not have (architecture 9.2, phase 6).\n\nNo `product_id`: the line goes against the one placeholder product and\ncarries its real identity itself. `tax_code` is a key into `tax_codes`,\nnever a rate \u2014 a rate the client chose is a tax bill the client chose.",
+        "properties": {
+          "barcode": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The code that matched nothing, if there was one",
+            "title": "Barcode"
+          },
+          "description": {
+            "description": "What the cashier read off the packet",
+            "title": "Description",
+            "type": "string"
+          },
+          "qty_milli": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Integer thousandths; 1.250 kg is 1250",
+            "title": "Qty Milli"
+          },
+          "tax_code": {
+            "title": "Tax Code",
+            "type": "string"
+          },
+          "unit_price_paise": {
+            "description": "Integer paise, never a float",
+            "exclusiveMinimum": 0.0,
+            "title": "Unit Price Paise",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "description",
+          "unit_price_paise",
+          "tax_code"
+        ],
+        "title": "UnlistedLineRequest",
         "type": "object"
       },
       "ValidationError": {
@@ -1491,6 +1591,28 @@
           }
         },
         "summary": "Catalog Size",
+        "tags": [
+          "catalog"
+        ]
+      }
+    },
+    "/catalog/tax-codes": {
+      "get": {
+        "description": "The rates the unlisted-item form may offer.\n\nRead by anyone with a session rather than gated on `product.read`: a\ncashier who can sell an unlisted item has to be able to pick its rate, and\nthe list of GST slabs is not sensitive.",
+        "operationId": "tax_codes_catalog_tax_codes_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaxCodesResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Tax Codes",
         "tags": [
           "catalog"
         ]
@@ -1828,6 +1950,59 @@
           }
         },
         "summary": "Add Line",
+        "tags": [
+          "register"
+        ]
+      }
+    },
+    "/register/carts/{cart_id}/lines/unlisted": {
+      "post": {
+        "description": "Take money for something the catalogue has never heard of.\n\nGated on `sale.create` alone, deliberately. The alternative is a cashier\nwho cannot complete a sale until a manager walks over, and the realistic\noutcome of that is the item rung up as something else at roughly the right\nprice - which is worse in every direction: wrong stock, wrong tax, and no\nrecord that anything was ever missing.",
+        "operationId": "add_unlisted_line_register_carts__cart_id__lines_unlisted_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "cart_id",
+            "required": true,
+            "schema": {
+              "title": "Cart Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UnlistedLineRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CartOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Add Unlisted Line",
         "tags": [
           "register"
         ]

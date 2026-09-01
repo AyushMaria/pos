@@ -173,6 +173,38 @@ class AddLineRequest(ApiModel):
     )
 
 
+class UnlistedLineRequest(ApiModel):
+    """Sell an item the catalogue does not have (architecture 9.2, phase 6).
+
+    No `product_id`: the line goes against the one placeholder product and
+    carries its real identity itself. `tax_code` is a key into `tax_codes`,
+    never a rate — a rate the client chose is a tax bill the client chose.
+    """
+
+    description: str = Field(description="What the cashier read off the packet")
+    unit_price_paise: int = Field(gt=0, description="Integer paise, never a float")
+    tax_code: str
+    barcode: str | None = Field(
+        default=None, description="The code that matched nothing, if there was one"
+    )
+    qty_milli: int | None = Field(
+        default=None, description="Integer thousandths; 1.250 kg is 1250"
+    )
+
+
+class TaxCodeOut(ApiModel):
+    """A rate the quick-create form may offer."""
+
+    code: str
+    name: str
+    rate_bp: int = Field(description="Basis points; 18% is 1800")
+    is_inclusive: bool
+
+
+class TaxCodesResponse(ApiModel):
+    tax_codes: list[TaxCodeOut]
+
+
 class ChangeQuantityRequest(ApiModel):
     qty_milli: int
 

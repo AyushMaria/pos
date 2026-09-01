@@ -35,6 +35,7 @@ from app.data.repositories.inventory import InventoryRepository
 from app.data.repositories.outbox import OutboxRepository
 from app.data.repositories.sales import SalesRepository
 from app.data.repositories.terminal import TerminalRepository
+from app.data.repositories.unknown_scans import UnknownScanRepository
 from app.data.repositories.users import CachedUserRepository
 from app.security.local_auth import HostGuardMiddleware, SessionTokenMiddleware
 from app.services.auth_service import AuthService, SessionStore
@@ -70,6 +71,7 @@ def build_app(
     users = CachedUserRepository(db)
     catalog = CatalogRepository(db)
     inventory = InventoryRepository(db)
+    unknown_scans = UnknownScanRepository(db)
     sales = SalesRepository(db)
     terminal = TerminalRepository(db)
     sessions = SessionStore()
@@ -119,7 +121,10 @@ def build_app(
     app.state.session_token = token
     app.state.events = events_router.EventHub()
     app.state.catalog = catalog
-    cart_service = CartService(catalog)
+    app.state.unknown_scans = unknown_scans
+    cart_service = CartService(
+        catalog, unknown_scans, terminal_code=settings.terminal_code
+    )
     app.state.cart_service = cart_service
     app.state.sale_service = SaleService(
         carts=cart_service,

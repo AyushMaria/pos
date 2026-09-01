@@ -1,0 +1,12 @@
+-- 004_unknown_scan_store - the column the cloud keys on.
+--
+-- `public.unknown_scans.store_id` is `not null references stores(id)`; the
+-- terminal's copy had no such column, on the same reasoning as `stock_levels`
+-- - a till serves one store, so the column would hold one value.
+--
+-- That reasoning holds for reading and breaks for pushing. The payload has to
+-- name the store, and the alternatives were worse: threading it through the
+-- PayloadBuilder means a second source of truth for something the row already
+-- knows, and `stock_ledger` already carries its own store_id locally for
+-- exactly this reason. Consistency wins.
+ALTER TABLE unknown_scans ADD COLUMN store_id TEXT;

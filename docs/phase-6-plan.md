@@ -82,7 +82,7 @@ it properly does not.**
 Six slices, one per deliverable, each shippable and provable on its own. Do
 them in this order — each one's proof depends on the one before.
 
-### Slice 1 — Push a ledger row that has no sale behind it
+### Slice 1 — Push a ledger row that has no sale behind it — **done**
 
 Nothing else in this phase can reach the cloud until this works.
 
@@ -102,7 +102,7 @@ Nothing else in this phase can reach the cloud until this works.
 `public.stock_ledger`, and `stock_levels` moved by exactly the delta. Push it
 twice and the level moves once.
 
-### Slice 2 — Receiving
+### Slice 2 — Receiving — **done**
 
 1. **Domain** — `app/domain/receiving.py`, pure: given a scan result and a
    quantity, produce the ledger delta. `delta = +qty × pack_size` (architecture
@@ -120,7 +120,7 @@ twice and the level moves once.
 **Prove it:** receive 24 of a case-coded product and `on_hand` rises by 24000
 thousandths — not 1000, and not 24.
 
-### Slice 3 — Counts and adjustments
+### Slice 3 — Counts and adjustments — **done**
 
 `delta = counted − expected` (§9.4). The subtlety is *when* "expected" is read:
 between reading it and committing the count, a sale can happen. Read expected
@@ -138,7 +138,7 @@ and write the delta in one transaction, or the count silently reverses a sale.
 the cloud, for every product touched. That query is the phase's acceptance
 test and belongs in the suite.
 
-### Slice 4 — Codes for the 38.6%
+### Slice 4 — Codes for the 38.6% — **done**
 
 `internal_barcode()` already generates a valid `21…` EAN-13. It needs a caller
 and an allocator.
@@ -154,30 +154,63 @@ a product *sellable*, not *scannable* — nothing prints these labels. A package
 good needs a printed label; something sold loose needs the weighed flow
 instead. The triage is per product and is the owner's, not the software's.
 
-### Slice 5 — Unknown scans and quick-create
+### Slice 5 — Unknown scans and unlisted items — **done**
 
-The first place decision 2 becomes code.
+The first place decision 2 became code, and the place the plan above turned out
+to be wrong. What shipped:
 
-1. **Write an `unknown_scans` row whenever a lookup misses.** The table has
-   been waiting since phase 1 and would already have been collecting evidence
-   about the real catalogue. Cheap, and it is the input to everything else
-   here.
-2. **Offline quick-create** — enough to finish the sale and no more: a
-   description the cashier types, a price, a tax code, and the scanned barcode.
-   The product is local, provisional, and marked as such. It must not be
-   pushed as a catalogue row; it is a sale line with a name attached and a
-   queue entry saying somebody needs to look.
-3. **Resolution, online** — a manager takes a queue entry and either matches it
-   to an existing product or creates a real one. This is where the provisional
-   record is reconciled, and it is the only path by which a quick-create
-   becomes a catalogue product.
+1. **Every missed lookup is filed.** `app/data/repositories/unknown_scans.py`
+   writes an `unknown_scans` row and an outbox row whenever `resolve()` finds
+   nothing. Deliberately not deduplicated: the same unknown code presented five
+   times in a week is a far stronger signal than the same code once.
+2. **`supabase/migrations/0014_unlisted_and_unknown_scans.sql`** — a `21…`-free
+   placeholder product (`SKU-UNLISTED`, `track_stock false`, fixed UUID) plus an
+   `unknown_scan` branch in `sync_push`.
+3. **`POST /register/carts/{id}/lines/unlisted`** and a register dialog behind
+   it, gated on `sale.create` alone. The cashier types what it is, a price, and
+   picks a rate from `GET /catalog/tax-codes`.
 
-**Prove it:** offline, scan something unknown, complete the sale. The sale
-syncs. The queue entry survives. Resolving it does not create a duplicate
-product, and does not retroactively alter the sale — a sold line records what
-was charged, whatever the catalogue later says the item is called.
+**What changed from the plan, and why.** This slice was written as *offline
+quick-create*: invent a local, provisional product row and point the sale line
+at it. That cannot work, and the schema says so —
 
-### Slice 6 — Admin screens and low stock
+```sql
+product_id uuid not null references public.products(id)
+```
+
+A line pointing at a product the cloud has never heard of fails that key, and
+it fails *after* the customer has paid: the sale is taken, printed, and then
+quarantined hours later by the pusher. This is exactly the sharp edge the
+"What to watch" section below predicted — a provisional row the puller knows
+nothing about, in a table it overwrites with "server wins, always" — and the
+fix was to not create the row at all.
+
+Instead one placeholder product carries every unlisted line, and the item's
+real identity rides on the line, in columns that have existed since phase 1:
+
+```
+sale_lines.description       what the cashier typed
+sale_lines.barcode_scanned   the code that matched nothing
+```
+
+The sale is right in money terms — right total, right GST, a legible receipt —
+and syncs like any other sale. `tests/test_rls.py` proves the reference holds
+against a real Postgres; that is the only place it could be proved.
+
+**What is given up:** stock is not tracked for an unlisted item. It cannot be.
+Once a manager creates the real product it needs an opening count, which is a
+stock-take either way.
+
+**Step 3 of the original plan — resolution — moves to slice 6**, where the
+admin screens are. Working the queue is a catalogue edit and belongs with the
+other catalogue edits.
+
+**Proved by:** `tests/test_unlisted_items.py` (16), four RLS tests, five
+component tests. Live check still to run: offline, scan something unknown,
+sell it anyway, complete the sale, then sync and confirm both the sale and the
+queue entry land.
+
+### Slice 6 — Admin screens, low stock, and the unknown-scan queue
 
 The first real admin UI, and — by decision 2 — the simplest thing in the phase,
 because it is online-only. It talks to Supabase through the same RLS every
@@ -188,7 +221,11 @@ other client does, so `product.create` and `product.edit` are already enforced.
 2. Barcodes and prices as sub-editors. `ux_product_barcodes_barcode` will
    refuse a duplicate code — surface that as a message about *which* product
    already holds it, not as a constraint name.
-3. Low stock is a query, not a feature: `on_hand <= reorder_point` where
+3. **Work the unknown-scan queue** (moved here from slice 5): a manager takes
+   an entry and either matches it to an existing product or creates a real one.
+   Resolving must not retroactively alter a sale — a sold line records what was
+   charged, whatever the catalogue later says the item is called.
+4. Low stock is a query, not a feature: `on_hand <= reorder_point` where
    `reorder_point > 0`. Put it on the manager's screen and leave alerting alone
    until somebody asks for it.
 

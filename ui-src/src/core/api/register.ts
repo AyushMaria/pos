@@ -9,6 +9,7 @@ import type {
   SyncFailuresResponse,
   SyncRetryResponse,
   SyncStatusResponse,
+  TaxCodesResponse,
   TenderQuote,
   TenderResponse,
 } from "./contract";
@@ -35,6 +36,29 @@ export const register = {
     request<CartOut>(`/register/carts/${cartId}/lines`, {
       method: "POST",
       body: JSON.stringify({ product_id: productId, qty_milli: qtyMilli ?? null }),
+    }),
+
+  /** Sell something the catalogue does not have. The line goes against the
+   *  placeholder product; the identity travels on the line itself. */
+  addUnlisted: (
+    cartId: string,
+    item: {
+      description: string;
+      unit_price_paise: number;
+      tax_code: string;
+      barcode?: string | null;
+      qty_milli?: number | null;
+    },
+  ) =>
+    request<CartOut>(`/register/carts/${cartId}/lines/unlisted`, {
+      method: "POST",
+      body: JSON.stringify({
+        description: item.description,
+        unit_price_paise: item.unit_price_paise,
+        tax_code: item.tax_code,
+        barcode: item.barcode ?? null,
+        qty_milli: item.qty_milli ?? null,
+      }),
     }),
 
   setQuantity: (cartId: string, lineNo: number, qtyMilli: number) =>
@@ -177,6 +201,10 @@ export const catalog = {
 
   search: (q: string) =>
     request<SearchResponse>(`/catalog/search?q=${encodeURIComponent(q)}&limit=25`),
+
+  /** GST slabs, for the unlisted-item form. A rate the client invented would
+   *  be a tax bill the client invented, so the codes come from the server. */
+  taxCodes: () => request<TaxCodesResponse>("/catalog/tax-codes"),
 };
 
 export { api };

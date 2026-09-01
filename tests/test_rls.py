@@ -23,6 +23,7 @@ from typing import Any
 import pytest
 
 from app.domain import permissions as perms
+from app.domain.unlisted import UNLISTED_PRODUCT_ID
 from tests.conftest import REPO_ROOT, pg_dsn, requires_postgres
 
 pytestmark = [pytest.mark.postgres, requires_postgres]
@@ -862,6 +863,168 @@ def test_every_public_table_has_rls_enabled(pg: Any) -> None:
 def test_sql_files_all_exist() -> None:
     missing = [str(path) for path in SQL_FILES if not path.exists()]
     assert missing == []
+
+
+# ── Items the catalogue does not have — phase 6, slice 5 ────────────────────
+
+
+def test_the_placeholder_product_can_hold_a_sale_line(pg: Any) -> None:
+    """The claim the whole design rests on, and only Postgres can settle it.
+
+    `sale_lines.product_id` is `not null references public.products(id)`. The
+    obvious design — invent a local product row and point the line at it —
+    fails that key, and it fails *after* the customer has paid: the sale is
+    taken, printed, and then quarantined hours later by the pusher. So the
+    line points at one placeholder that 0014 puts in the catalogue, and this
+    proves the reference actually holds.
+    """
+    sale_id = "018f0000-0000-7000-8000-00000000b101"
+    envelope = json.dumps(
+        [
+            {
+                "schema_version": 3,
+                "entity": "sale",
+                "op": "insert",
+                "id": sale_id,
+                "client_seq": 1,
+                "data": {
+                    "id": sale_id,
+                    "store_id": STORE_ID,
+                    "terminal_id": TERMINAL_UUID,
+                    "session_id": None,
+                    "receipt_no": "ST01-T1-000401",
+                    "cashier_id": CASHIER_ID,
+                    "type": "sale",
+                    "status": "completed",
+                    "subtotal": 19500,
+                    "discount_total": 0,
+                    "tax_total": 2089,
+                    "rounding_adjustment": 0,
+                    "grand_total": 19500,
+                    "original_sale_id": None,
+                    "client_created_at": "2026-08-24T09:00:00+00:00",
+                    "lines": [
+                        {
+                            "id": "018f0000-0000-7000-8000-00000000b102",
+                            "sale_id": sale_id,
+                            "line_no": 1,
+                            "product_id": UNLISTED_PRODUCT_ID,
+                            # The item's real identity, carried on the line.
+                            "description": "Kissan Mixed Fruit Jam 500g",
+                            "barcode_scanned": "8901999000014",
+                            "qty_milli": 1000,
+                            "unit_price": 19500,
+                            "discount_amount": 0,
+                            "tax_amount": 2089,
+                            "line_total": 19500,
+                            "tax_code": "GST12",
+                            "tax_rate_bp": 1200,
+                        }
+                    ],
+                    # No stock ledger: the placeholder does not track stock,
+                    # and it could not meaningfully - one row stands in for
+                    # many unrelated products.
+                    "stock_ledger": [],
+                },
+            }
+        ]
+    )
+
+    with pg.transaction(force_rollback=True):
+        _push(pg, envelope)
+
+        cur = pg.cursor()
+        cur.execute(
+            "select description, barcode_scanned from public.sale_lines "
+            "where sale_id = %s",
+            (sale_id,),
+        )
+        assert cur.fetchall() == [
+            ("Kissan Mixed Fruit Jam 500g", "8901999000014")
+        ]
+
+
+def test_the_placeholder_does_not_accumulate_stock(pg: Any) -> None:
+    """One row standing in for many unrelated products, so a stock level on it
+    would be the sum of things with nothing to do with each other."""
+    cur = pg.cursor()
+    cur.execute(
+        "select track_stock from public.products where id = %s",
+        (UNLISTED_PRODUCT_ID,),
+    )
+    assert cur.fetchone() == (False,)
+
+
+def test_a_cashier_may_file_a_code_that_matched_nothing(pg: Any) -> None:
+    """`sale.create`, not `product.edit`.
+
+    The cashier who met the unknown item is the only person who can record it,
+    and they are holding up a queue. Requiring a manager here means the item
+    gets rung up as something else at roughly the right price instead — wrong
+    stock, wrong tax, and no record that anything was ever missing.
+    """
+    scan_id = "019300aa-0000-7000-8000-00000000f001"
+    envelope = json.dumps(
+        [
+            {
+                "schema_version": 3,
+                "entity": "unknown_scan",
+                "op": "insert",
+                "id": scan_id,
+                "client_seq": 1,
+                "data": {
+                    "id": scan_id,
+                    "store_id": STORE_ID,
+                    "barcode": "8901999000014",
+                    "scanned_at": "2026-08-24T09:00:00+00:00",
+                    "terminal_id": TERMINAL_UUID,
+                    "resolved": False,
+                },
+            }
+        ]
+    )
+
+    with pg.transaction(force_rollback=True):
+        _push(pg, envelope)
+
+        cur = pg.cursor()
+        cur.execute(
+            "select barcode, resolved from public.unknown_scans where id = %s",
+            (scan_id,),
+        )
+        assert cur.fetchone() == ("8901999000014", False)
+
+
+def test_an_unknown_scan_stays_inside_its_store(pg: Any) -> None:
+    """A till cannot file a miss against a shop it does not work in. The same
+    fence every other entity sits behind, checked here because `sync_push` is
+    `security invoker` and would otherwise be the way around it."""
+    scan_id = "019300aa-0000-7000-8000-00000000f002"
+    envelope = json.dumps(
+        [
+            {
+                "schema_version": 3,
+                "entity": "unknown_scan",
+                "op": "insert",
+                "id": scan_id,
+                "client_seq": 1,
+                "data": {
+                    "id": scan_id,
+                    "store_id": "018f0000-0000-7000-8000-0000000009ff",
+                    "barcode": "8901999000014",
+                    "scanned_at": "2026-08-24T09:00:00+00:00",
+                    "terminal_id": TERMINAL_UUID,
+                    "resolved": False,
+                },
+            }
+        ]
+    )
+
+    with (
+        pytest.raises(psycopg.errors.Error),
+        pg.transaction(force_rollback=True),
+    ):
+        _push(pg, envelope)
 
 
 def test_repo_root_is_sane() -> None:
