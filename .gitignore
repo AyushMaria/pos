@@ -29,3 +29,8 @@ supabase/.temp/
 
 # Database dumps (never committed — real catalogue data)
 backup-*
+
+# Test and check output, from piping a run through Tee-Object. Never worth
+# committing, and PowerShell writes them as UTF-16 which reads as binary in a
+# diff.
+*.log

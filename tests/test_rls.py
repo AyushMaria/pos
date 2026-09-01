@@ -426,6 +426,19 @@ def test_a_review_cannot_be_rewritten(pg: Any) -> None:
 
 TERMINAL_UUID = "018f0000-0000-7000-8000-000000000200"
 PRODUCT_ID = "018f0000-0000-7000-8000-000000001002"
+UNCODED_PRODUCT_ID = "019400aa-0000-7000-8000-0000000000a1"
+
+
+def _as(pg: Any, role: str, sql: str, params: tuple = ()) -> list[tuple]:
+    """Run one statement as a role, carrying the claims that role would."""
+    cur = pg.cursor()
+    cur.execute("set local role authenticated")
+    cur.execute(
+        "select set_config('request.jwt.claims', %s, true)",
+        (claims(CASHIER_ID, role),),
+    )
+    cur.execute(sql, params)
+    return list(cur.fetchall())
 
 
 def _sale_envelope(sale_id: str, *, schema_version: int = 3) -> str:
@@ -555,6 +568,76 @@ def test_the_ledger_maintains_stock_levels(pg: Any) -> None:
             (STORE_ID, PRODUCT_ID),
         )
         assert cur.fetchone()[0] == before - 1000
+
+
+def test_an_internal_code_is_the_one_the_till_will_read(pg: Any) -> None:
+    """The 21 format is defined in `app/domain/barcode.py` and assigned in SQL.
+
+    Two implementations of one format, which is a place to drift. A code the
+    cloud hands out that the parser refuses is a product nobody can sell, and
+    nothing would notice until somebody scanned a shelf label at a counter.
+    """
+    from app.domain.barcode import internal_barcode, parse
+
+    with pg.transaction(force_rollback=True):
+        cur = pg.cursor()
+        cur.execute("select nextval('pos.internal_item_code_seq')")
+        (item_code,) = cur.fetchone()
+        cur.execute(
+            "select setval('pos.internal_item_code_seq', %s, false)", (item_code,)
+        )
+        cur.execute("select pos.next_internal_barcode()")
+        (generated,) = cur.fetchone()
+
+        assert generated == internal_barcode(item_code), (
+            "SQL and the domain disagree about the 21 format"
+        )
+
+        scan = parse(generated)
+        assert scan.symbology == "INTERNAL"
+        assert scan.lookup_key == generated
+        assert not scan.carries_quantity, "21 is identity; 22 is a weighing"
+
+
+def test_assigning_a_code_needs_a_catalogue_permission(pg: Any) -> None:
+    """`assign_internal_barcode` is `security invoker`, so its insert is
+    checked by `product_barcodes_write` exactly as a direct write would be.
+
+    Only the sequence is privileged, and a sequence can write nothing. A
+    cashier calling this burns one code out of ten billion and is refused.
+    """
+    with pg.transaction(force_rollback=True):
+        pg.cursor().execute(
+            "insert into public.products (id, sku, name, tax_code) "
+            "values (%s, 'SKU-UNCODED', 'Uncoded thing', 'GST18')",
+            (UNCODED_PRODUCT_ID,),
+        )
+
+        with pytest.raises(psycopg.errors.InsufficientPrivilege):
+            _as(
+                pg,
+                perms.CASHIER,
+                "select public.assign_internal_barcode(%s)",
+                (UNCODED_PRODUCT_ID,),
+            )
+
+
+def test_a_manager_can_assign_a_code(pg: Any) -> None:
+    with pg.transaction(force_rollback=True):
+        pg.cursor().execute(
+            "insert into public.products (id, sku, name, tax_code) "
+            "values (%s, 'SKU-UNCODED-2', 'Another uncoded', 'GST18')",
+            (UNCODED_PRODUCT_ID,),
+        )
+
+        rows = _as(
+            pg,
+            perms.MANAGER,
+            "select public.assign_internal_barcode(%s)",
+            (UNCODED_PRODUCT_ID,),
+        )
+
+        assert rows[0][0].startswith("21")
 
 
 def test_a_received_delivery_reconciles(pg: Any) -> None:

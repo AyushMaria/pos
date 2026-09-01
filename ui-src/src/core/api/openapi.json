@@ -1561,7 +1561,7 @@
     },
     "/inventory/counts": {
       "post": {
-        "description": "A stock count for a section.\n\nThe correction is written, not the count: `delta = counted \u2212 expected`,\nwith `expected` read in the same transaction so a sale landing mid-count\nis not silently reversed. A product that matches expected produces no row.",
+        "description": "A stock count for a section.\n\nThe correction is written, not the count: `delta = counted - expected`,\nwith `expected` read in the same transaction so a sale landing mid-count\nis not silently reversed. A product that matches expected produces no row.",
         "operationId": "count_inventory_counts_post",
         "requestBody": {
           "content": {
