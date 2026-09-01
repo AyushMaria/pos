@@ -123,7 +123,28 @@ class SalesRepository(Repository):
                     ),
                 )
 
-                # Stock is a ledger of deltas, never a counter (§1.5).
+                # Stock is a ledger of deltas, never a counter (§1.5) — but
+                # only for products that have stock to move.
+                #
+                # An unlisted line points at the one placeholder product
+                # (0014), which stands in for many unrelated real items. A
+                # delta against it would be the sum of things that have
+                # nothing to do with each other, and `stock_levels` would
+                # drift steadily negative on a row nobody can act on. The
+                # catalogue already says so with `track_stock false`; this is
+                # the write path honouring it.
+                #
+                # An unknown product means the placeholder has not been pulled
+                # to this terminal yet. Not tracking is the safe reading: the
+                # only lines that reach here with a product this till has
+                # never seen are unlisted ones.
+                tracked = conn.execute(
+                    "SELECT track_stock FROM products WHERE id = ?",
+                    (line.line.product_id,),
+                ).fetchone()
+                if tracked is None or not tracked[0]:
+                    continue
+
                 conn.execute(
                     """
                     INSERT INTO stock_ledger (

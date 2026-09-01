@@ -118,6 +118,30 @@ def test_the_line_carries_its_own_identity(till: TestClient, db: Database) -> No
     assert stored[0]["barcode_scanned"] == MISSING
 
 
+def test_an_unlisted_sale_moves_no_stock(till: TestClient, db: Database) -> None:
+    """The placeholder must not accumulate a stock level.
+
+    One row stands in for many unrelated real products, so a delta against it
+    is the sum of things that have nothing to do with each other, drifting
+    steadily negative on a row nobody can act on. `0014` says so with
+    `track_stock false`; the sale path has to honour it, and until this test
+    it did not — every sale line wrote a ledger row unconditionally.
+
+    A real line in the same sale still moves, which is what makes this a
+    filter rather than a switch.
+    """
+    cart_id = open_cart(till)
+    _sell(till, cart_id)
+    till.post(f"/register/carts/{cart_id}/lines", json={"barcode": "8901262010016"})
+    till.post(f"/register/carts/{cart_id}/payments", json={"method": "cash"})
+    assert till.post(f"/register/carts/{cart_id}/post").status_code == 200
+
+    moved = db.query("SELECT product_id, delta_milli FROM stock_ledger")
+    assert [row["product_id"] for row in moved] != []
+    assert UNLISTED_PRODUCT_ID not in [row["product_id"] for row in moved]
+    assert len(moved) == 1, "the real line should still move stock"
+
+
 def test_the_money_is_right_including_tax(till: TestClient) -> None:
     """An unlisted line is a real line. GST12 inclusive on ₹195.00 is ₹20.89,
     and the same arithmetic every other line goes through produces it."""

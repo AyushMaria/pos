@@ -256,12 +256,23 @@ product_id)` in the cloud and on `product_id` alone on the terminal. That
 asymmetry is already handled in the puller, and it will bite again anywhere
 this phase writes a level rather than a delta. Write deltas.
 
-**A provisional product is not a catalogue product.** Slice 5 creates rows the
-puller knows nothing about, in a table the puller overwrites with "server wins,
-always". Whatever marks a row provisional has to survive a pull, or the first
-catalogue refresh after a quick-create silently deletes the thing the cashier
-just sold. This is the sharp edge of decision 2 and the place to be most
-careful.
+**~~A provisional product is not a catalogue product.~~ — sidestepped.** This
+warned that a quick-created row lives in a table the puller overwrites with
+"server wins, always", so the first catalogue refresh would silently delete the
+thing the cashier just sold. Slice 5 avoids it by never creating the row: one
+placeholder product carries every unlisted line and the identity travels on the
+line. Nothing provisional has to survive a pull, because nothing provisional
+exists. `unknown_scans` is push-only and not in `ENTITIES`, so the puller never
+touches it either.
+
+**Not every sale line moves stock, as of slice 5.** `sales.py` wrote a
+`stock_ledger` row for every line unconditionally; against the placeholder that
+is the sum of unrelated products, drifting negative on a row nobody can act on.
+The write path now honours `track_stock`, which also covers any loose or
+weighed product the catalogue marks the same way. Slice 6's low-stock query
+filters on `reorder_point > 0` and would have hidden this rather than surfacing
+it — worth remembering that the reconciliation invariant stays *true* while the
+data underneath it turns meaningless.
 
 ---
 
