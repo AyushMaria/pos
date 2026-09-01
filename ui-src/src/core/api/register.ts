@@ -2,7 +2,9 @@ import { api, request } from "./client";
 import type {
   CartOut,
   LookupResponse,
+  MovementsResponse,
   PostSaleResponse,
+  ReceiptLineOut,
   SearchResponse,
   SyncFailuresResponse,
   SyncRetryResponse,
@@ -125,6 +127,47 @@ export const sync = {
     request<SyncRetryResponse>("/sync/failures/retry", {
       method: "POST",
       body: JSON.stringify({ failure_ids: failureIds ?? null }),
+    }),
+};
+
+/**
+ * Inventory - architecture 9.4.
+ *
+ * Receiving, counting and adjusting. Each is gated on its own permission at
+ * the API; the screens hide what a signed-in person may not do, which is UX
+ * rather than the control (11.1).
+ */
+export const inventory = {
+  /** What scanning this code that many times would receive. Writes nothing. */
+  previewLine: (barcode: string, packs: number) =>
+    request<ReceiptLineOut>("/inventory/receipts/preview", {
+      method: "POST",
+      body: JSON.stringify({ barcode, packs }),
+    }),
+
+  /** Commit a delivery. One transaction - all lines or none. */
+  receive: (lines: { barcode: string; packs: number }[]) =>
+    request<MovementsResponse>("/inventory/receipts", {
+      method: "POST",
+      body: JSON.stringify({ lines }),
+    }),
+
+  /** A count writes the difference, never the count. */
+  count: (lines: { product_id: string; counted_milli: number }[]) =>
+    request<MovementsResponse>("/inventory/counts", {
+      method: "POST",
+      body: JSON.stringify({ lines }),
+    }),
+
+  /** The only movement with no document behind it, so the note is required. */
+  adjust: (productId: string, deltaMilli: number, note: string) =>
+    request<MovementsResponse>("/inventory/adjustments", {
+      method: "POST",
+      body: JSON.stringify({
+        product_id: productId,
+        delta_milli: deltaMilli,
+        note,
+      }),
     }),
 };
 

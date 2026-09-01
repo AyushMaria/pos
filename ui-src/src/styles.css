@@ -482,3 +482,58 @@ body:has(.done) {
   letter-spacing: 0.1em;
   color: var(--bad);
 }
+
+/* ── Stockroom (architecture 9.4) ───────────────────────────────────────────
+   The back door, not the counter. Same shell as the register so nothing has
+   to be relearned, and a wider entry row because a delivery is scanned with
+   a quantity beside it rather than one item at a time. */
+
+.stockroom .tabs {
+  display: flex;
+  gap: 0.25rem;
+  flex: 1;
+  justify-content: center;
+}
+
+.stockroom .tabs button {
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  padding: 0.35rem 0.9rem;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+
+.stockroom .tabs button.on {
+  border-color: currentColor;
+  font-weight: 600;
+}
+
+/* Narrow, because it holds a count rather than a name. Wide enough for four
+   digits: nobody receives 10,000 cases in one go, and if they do it is worth
+   the second line. */
+.entry .qty,
+.lines .qty {
+  width: 6rem;
+  text-align: right;
+}
+
+.lines li {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.lines .what {
+  flex: 1;
+}
+
+.stockroom .card label {
+  display: block;
+  margin: 0.75rem 0 0.25rem;
+}
+
+.stockroom .card input {
+  width: 100%;
+}

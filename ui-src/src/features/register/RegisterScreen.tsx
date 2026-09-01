@@ -10,6 +10,7 @@ import type {
   TenderResponse,
 } from "../../core/api/contract";
 import { useBarcodeCapture } from "../../core/barcode-capture/useBarcodeCapture";
+import { PermissionGate } from "../../core/rbac/PermissionGate";
 import { SyncIndicator } from "../sync/SyncIndicator";
 
 /**
@@ -21,7 +22,13 @@ import { SyncIndicator } from "../sync/SyncIndicator";
  * somewhere else. Nothing here computes a total: every figure on screen came
  * from the recalculated basket the server returned.
  */
-export function RegisterScreen({ session }: { session: SessionResponse }) {
+export function RegisterScreen({
+  session,
+  onOpenStockroom,
+}: {
+  session: SessionResponse;
+  onOpenStockroom?: () => void;
+}) {
   const [cart, setCart] = useState<CartOut | null>(null);
   const [entry, setEntry] = useState("");
   const [message, setMessage] = useState<{ text: string; bad: boolean } | null>(null);
@@ -203,6 +210,15 @@ export function RegisterScreen({ session }: { session: SessionResponse }) {
       <header className="bar">
         <span className="who">{session.full_name}</span>
         <SyncIndicator session={session} />
+        {/* Only for someone who may move stock. A cashier is never offered a
+            door that would refuse them. */}
+        {onOpenStockroom && (
+          <PermissionGate session={session} permission="stock.receive">
+            <button type="button" className="link" onClick={onOpenStockroom}>
+              Stockroom
+            </button>
+          </PermissionGate>
+        )}
         <span className="till">{session.employee_code}</span>
       </header>
 

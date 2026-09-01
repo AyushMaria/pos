@@ -3,11 +3,15 @@ import { ApiError, api } from "./core/api/client";
 import type { HealthResponse, SessionResponse } from "./core/api/contract";
 import { LoginScreen } from "./features/auth/LoginScreen";
 import { RegisterScreen } from "./features/register/RegisterScreen";
+import { StockroomScreen } from "./features/stockroom/StockroomScreen";
 
 export function App() {
   const [health, setHealth] = useState<HealthResponse | null>(null);
   const [session, setSession] = useState<SessionResponse | null>(null);
   const [fatal, setFatal] = useState<string | null>(null);
+  // Two screens, no router. A till has one job and a back door; anything more
+  // is a dependency to carry for the sake of one boolean.
+  const [inStockroom, setInStockroom] = useState(false);
 
   useEffect(() => {
     api
@@ -39,9 +43,13 @@ export function App() {
     );
   }
 
-  return session ? (
-    <RegisterScreen session={session} />
+  if (!session) {
+    return <LoginScreen health={health} onSignedIn={setSession} />;
+  }
+
+  return inStockroom ? (
+    <StockroomScreen session={session} onClose={() => setInStockroom(false)} />
   ) : (
-    <LoginScreen health={health} onSignedIn={setSession} />
+    <RegisterScreen session={session} onOpenStockroom={() => setInStockroom(true)} />
   );
 }
