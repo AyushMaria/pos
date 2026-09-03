@@ -68,6 +68,167 @@
         "title": "AdjustmentRequest",
         "type": "object"
       },
+      "AdminBarcodeOut": {
+        "additionalProperties": false,
+        "properties": {
+          "barcode": {
+            "title": "Barcode",
+            "type": "string"
+          },
+          "barcode_id": {
+            "title": "Barcode Id",
+            "type": "string"
+          },
+          "is_primary": {
+            "title": "Is Primary",
+            "type": "boolean"
+          },
+          "pack_size": {
+            "title": "Pack Size",
+            "type": "integer"
+          },
+          "product_id": {
+            "title": "Product Id",
+            "type": "string"
+          },
+          "symbology": {
+            "title": "Symbology",
+            "type": "string"
+          }
+        },
+        "required": [
+          "barcode_id",
+          "product_id",
+          "barcode",
+          "symbology",
+          "pack_size",
+          "is_primary"
+        ],
+        "title": "AdminBarcodeOut",
+        "type": "object"
+      },
+      "AdminPriceOut": {
+        "additionalProperties": false,
+        "properties": {
+          "price": {
+            "title": "Price",
+            "type": "integer"
+          },
+          "price_id": {
+            "title": "Price Id",
+            "type": "string"
+          },
+          "product_id": {
+            "title": "Product Id",
+            "type": "string"
+          },
+          "store_id": {
+            "title": "Store Id",
+            "type": "string"
+          },
+          "valid_from": {
+            "title": "Valid From",
+            "type": "string"
+          },
+          "valid_to": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Valid To"
+          }
+        },
+        "required": [
+          "price_id",
+          "product_id",
+          "store_id",
+          "price",
+          "valid_from"
+        ],
+        "title": "AdminPriceOut",
+        "type": "object"
+      },
+      "AdminProductOut": {
+        "additionalProperties": false,
+        "properties": {
+          "is_active": {
+            "title": "Is Active",
+            "type": "boolean"
+          },
+          "is_weighed": {
+            "title": "Is Weighed",
+            "type": "boolean"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "product_id": {
+            "title": "Product Id",
+            "type": "string"
+          },
+          "short_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Short Name"
+          },
+          "sku": {
+            "title": "Sku",
+            "type": "string"
+          },
+          "tax_code": {
+            "title": "Tax Code",
+            "type": "string"
+          },
+          "track_stock": {
+            "title": "Track Stock",
+            "type": "boolean"
+          },
+          "uom": {
+            "title": "Uom",
+            "type": "string"
+          }
+        },
+        "required": [
+          "product_id",
+          "sku",
+          "name",
+          "uom",
+          "tax_code",
+          "is_weighed",
+          "track_stock",
+          "is_active"
+        ],
+        "title": "AdminProductOut",
+        "type": "object"
+      },
+      "AdminProductsResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "products": {
+            "items": {
+              "$ref": "#/components/schemas/AdminProductOut"
+            },
+            "title": "Products",
+            "type": "array"
+          }
+        },
+        "required": [
+          "products"
+        ],
+        "title": "AdminProductsResponse",
+        "type": "object"
+      },
       "AttemptOut": {
         "additionalProperties": false,
         "properties": {
@@ -153,6 +314,45 @@
           }
         },
         "title": "AttestRequest",
+        "type": "object"
+      },
+      "BarcodeAddRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "barcode": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Barcode",
+            "type": "string"
+          },
+          "pack_size": {
+            "default": 1,
+            "minimum": 1.0,
+            "title": "Pack Size",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "barcode"
+        ],
+        "title": "BarcodeAddRequest",
+        "type": "object"
+      },
+      "BarcodesResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "barcodes": {
+            "items": {
+              "$ref": "#/components/schemas/AdminBarcodeOut"
+            },
+            "title": "Barcodes",
+            "type": "array"
+          }
+        },
+        "required": [
+          "barcodes"
+        ],
+        "title": "BarcodesResponse",
         "type": "object"
       },
       "CartLineOut": {
@@ -446,6 +646,63 @@
         "title": "LookupResponse",
         "type": "object"
       },
+      "LowStockOut": {
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "on_hand": {
+            "title": "On Hand",
+            "type": "integer"
+          },
+          "product_id": {
+            "title": "Product Id",
+            "type": "string"
+          },
+          "reorder_point": {
+            "title": "Reorder Point",
+            "type": "integer"
+          },
+          "sku": {
+            "title": "Sku",
+            "type": "string"
+          },
+          "uom": {
+            "title": "Uom",
+            "type": "string"
+          }
+        },
+        "required": [
+          "product_id",
+          "sku",
+          "name",
+          "uom",
+          "on_hand",
+          "reorder_point"
+        ],
+        "title": "LowStockOut",
+        "type": "object"
+      },
+      "LowStockResponse": {
+        "additionalProperties": false,
+        "description": "At or under the reorder point. A query, not an alert.",
+        "properties": {
+          "rows": {
+            "items": {
+              "$ref": "#/components/schemas/LowStockOut"
+            },
+            "title": "Rows",
+            "type": "array"
+          }
+        },
+        "required": [
+          "rows"
+        ],
+        "title": "LowStockResponse",
+        "type": "object"
+      },
       "MoneyOut": {
         "additionalProperties": false,
         "description": "An amount, as both the canonical integer and something to display.\n\n`paise` is the truth; `text` is pre-formatted so the UI never reimplements\ncurrency formatting and cannot drift from what the receipt prints.\nFormatting is presentation, not math \u2014 React still does no arithmetic\n(architecture \u00a71.2).",
@@ -530,6 +787,97 @@
         "title": "PostSaleResponse",
         "type": "object"
       },
+      "PriceSetRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "price": {
+            "minimum": 0.0,
+            "title": "Price",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "price"
+        ],
+        "title": "PriceSetRequest",
+        "type": "object"
+      },
+      "PricesResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "prices": {
+            "items": {
+              "$ref": "#/components/schemas/AdminPriceOut"
+            },
+            "title": "Prices",
+            "type": "array"
+          }
+        },
+        "required": [
+          "prices"
+        ],
+        "title": "PricesResponse",
+        "type": "object"
+      },
+      "ProductCreateRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "is_weighed": {
+            "default": false,
+            "title": "Is Weighed",
+            "type": "boolean"
+          },
+          "name": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "short_name": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Short Name"
+          },
+          "sku": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Sku",
+            "type": "string"
+          },
+          "tax_code": {
+            "maxLength": 32,
+            "minLength": 1,
+            "title": "Tax Code",
+            "type": "string"
+          },
+          "track_stock": {
+            "default": true,
+            "title": "Track Stock",
+            "type": "boolean"
+          },
+          "uom": {
+            "default": "each",
+            "maxLength": 16,
+            "minLength": 1,
+            "title": "Uom",
+            "type": "string"
+          }
+        },
+        "required": [
+          "sku",
+          "name",
+          "tax_code"
+        ],
+        "title": "ProductCreateRequest",
+        "type": "object"
+      },
       "ProductOut": {
         "additionalProperties": false,
         "properties": {
@@ -597,6 +945,98 @@
           "unit_price"
         ],
         "title": "ProductOut",
+        "type": "object"
+      },
+      "ProductUpdateRequest": {
+        "additionalProperties": false,
+        "description": "Every field optional: a PATCH touches only what it names.",
+        "properties": {
+          "is_active": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Active"
+          },
+          "is_weighed": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Weighed"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "short_name": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Short Name"
+          },
+          "tax_code": {
+            "anyOf": [
+              {
+                "maxLength": 32,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tax Code"
+          },
+          "track_stock": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Track Stock"
+          },
+          "uom": {
+            "anyOf": [
+              {
+                "maxLength": 16,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Uom"
+          }
+        },
+        "title": "ProductUpdateRequest",
         "type": "object"
       },
       "ReceiptLineOut": {
@@ -1294,6 +1734,68 @@
         "title": "UnknownPaymentRequest",
         "type": "object"
       },
+      "UnknownScanOut": {
+        "additionalProperties": false,
+        "properties": {
+          "barcode": {
+            "title": "Barcode",
+            "type": "string"
+          },
+          "resolved": {
+            "title": "Resolved",
+            "type": "boolean"
+          },
+          "scan_id": {
+            "title": "Scan Id",
+            "type": "string"
+          },
+          "scanned_at": {
+            "title": "Scanned At",
+            "type": "string"
+          },
+          "store_id": {
+            "title": "Store Id",
+            "type": "string"
+          },
+          "terminal_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Terminal Id"
+          }
+        },
+        "required": [
+          "scan_id",
+          "store_id",
+          "barcode",
+          "scanned_at",
+          "resolved"
+        ],
+        "title": "UnknownScanOut",
+        "type": "object"
+      },
+      "UnknownScansResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "scans": {
+            "items": {
+              "$ref": "#/components/schemas/UnknownScanOut"
+            },
+            "title": "Scans",
+            "type": "array"
+          }
+        },
+        "required": [
+          "scans"
+        ],
+        "title": "UnknownScansResponse",
+        "type": "object"
+      },
       "UnlistedLineRequest": {
         "additionalProperties": false,
         "description": "Sell an item the catalogue does not have (architecture 9.2, phase 6).\n\nNo `product_id`: the line goes against the one placeholder product and\ncarries its real identity itself. `tax_code` is a key into `tax_codes`,\nnever a rate \u2014 a rate the client chose is a tax bill the client chose.",
@@ -1394,6 +1896,556 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/admin/barcodes/{barcode_id}": {
+      "delete": {
+        "description": "DELETE on the wire, a soft delete in the database.\n\nThe row survives so that a `sale_lines.barcode_scanned` from last month\nstill resolves to something; the partial unique index frees the code for\nanother product immediately.",
+        "operationId": "withdraw_barcode_admin_barcodes__barcode_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "barcode_id",
+            "required": true,
+            "schema": {
+              "title": "Barcode Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Withdraw Barcode",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/admin/low-stock": {
+      "get": {
+        "description": "`on_hand <= reorder_point` where the reorder point was set at all.\n\nA query behind a screen, with no alerting behind it until somebody asks.",
+        "operationId": "low_stock_admin_low_stock_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 500,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LowStockResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Low Stock",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/admin/products": {
+      "get": {
+        "operationId": "search_products_admin_products_get",
+        "parameters": [
+          {
+            "description": "Name or SKU fragment",
+            "in": "query",
+            "name": "q",
+            "required": true,
+            "schema": {
+              "description": "Name or SKU fragment",
+              "minLength": 1,
+              "title": "Q",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 25,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminProductsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Search Products",
+        "tags": [
+          "admin"
+        ]
+      },
+      "post": {
+        "operationId": "create_product_admin_products_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProductCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminProductOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Product",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/admin/products/{product_id}": {
+      "get": {
+        "operationId": "get_product_admin_products__product_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "product_id",
+            "required": true,
+            "schema": {
+              "title": "Product Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminProductOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Product",
+        "tags": [
+          "admin"
+        ]
+      },
+      "patch": {
+        "operationId": "update_product_admin_products__product_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "product_id",
+            "required": true,
+            "schema": {
+              "title": "Product Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProductUpdateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminProductOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Product",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/admin/products/{product_id}/barcodes": {
+      "get": {
+        "operationId": "list_barcodes_admin_products__product_id__barcodes_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "product_id",
+            "required": true,
+            "schema": {
+              "title": "Product Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BarcodesResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Barcodes",
+        "tags": [
+          "admin"
+        ]
+      },
+      "post": {
+        "description": "409 when the code is already on something else.\n\nThe message names the product holding it. `ux_product_barcodes_barcode`\nis the most useful constraint in the schema and the least useful error\nstring: nobody standing at a counter can act on \"duplicate key value\nviolates unique constraint\".",
+        "operationId": "add_barcode_admin_products__product_id__barcodes_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "product_id",
+            "required": true,
+            "schema": {
+              "title": "Product Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BarcodeAddRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminBarcodeOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Add Barcode",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/admin/products/{product_id}/price": {
+      "put": {
+        "description": "The price for *this* store. `store_id` comes from the session, never\nfrom the body \u2014 a manager edits the shop they are signed in to.",
+        "operationId": "set_price_admin_products__product_id__price_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "product_id",
+            "required": true,
+            "schema": {
+              "title": "Product Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PriceSetRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminPriceOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Set Price",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/admin/products/{product_id}/prices": {
+      "get": {
+        "operationId": "list_prices_admin_products__product_id__prices_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "product_id",
+            "required": true,
+            "schema": {
+              "title": "Product Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PricesResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Prices",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/admin/unknown-scans": {
+      "get": {
+        "description": "Gated on `product.edit`, not `product.read`.\n\nWorking this queue is catalogue editing \u2014 the plan moved it here from\nslice 5 for exactly that reason. A cashier files entries and does not\nread them back.",
+        "operationId": "unknown_scans_admin_unknown_scans_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "resolved",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Resolved",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 500,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnknownScansResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Unknown Scans",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/admin/unknown-scans/{scan_id}/resolve": {
+      "post": {
+        "description": "Close an entry, having catalogued the thing behind it.\n\nResolving changes nothing about the sales that were already rung against\nthe placeholder. A sold line records what was charged; the catalogue\ncatching up later does not rewrite it, and `sale_lines` has no update\npolicy for anyone to try.",
+        "operationId": "resolve_scan_admin_unknown_scans__scan_id__resolve_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "scan_id",
+            "required": true,
+            "schema": {
+              "title": "Scan Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Resolve Scan",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
     "/auth/login": {
       "post": {
         "operationId": "login_auth_login_post",

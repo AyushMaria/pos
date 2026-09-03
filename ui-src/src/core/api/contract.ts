@@ -15,6 +15,36 @@ export interface AdjustmentRequest {
   delta_milli: number;
   note: string;
 }
+export interface AdminBarcodeOut {
+  barcode_id: string;
+  product_id: string;
+  barcode: string;
+  symbology: string;
+  pack_size: number;
+  is_primary: boolean;
+}
+export interface AdminPriceOut {
+  price_id: string;
+  product_id: string;
+  store_id: string;
+  price: number;
+  valid_from: string;
+  valid_to?: string | null;
+}
+export interface AdminProductOut {
+  product_id: string;
+  sku: string;
+  name: string;
+  short_name?: string | null;
+  uom: string;
+  tax_code: string;
+  is_weighed: boolean;
+  track_stock: boolean;
+  is_active: boolean;
+}
+export interface AdminProductsResponse {
+  products: AdminProductOut[];
+}
 export interface AttemptOut {
   attempt_id: string;
   method: string;
@@ -30,6 +60,13 @@ export interface AttestRequest {
   amount_paise?: number | null;
   /** The UTR. With a static QR this is the only identifier the bank statement and this sale have in common — worth capturing. */
   reference?: string | null;
+}
+export interface BarcodeAddRequest {
+  barcode: string;
+  pack_size?: number;
+}
+export interface BarcodesResponse {
+  barcodes: AdminBarcodeOut[];
 }
 export interface CartLineOut {
   line_no: number;
@@ -91,6 +128,18 @@ export interface LookupResponse {
   is_case?: boolean;
   error?: string | null;
 }
+export interface LowStockOut {
+  product_id: string;
+  sku: string;
+  name: string;
+  uom: string;
+  on_hand: number;
+  reorder_point: number;
+}
+/** At or under the reorder point. A query, not an alert. */
+export interface LowStockResponse {
+  rows: LowStockOut[];
+}
 /** An amount, as both the canonical integer and something to display.
 
 `paise` is the truth; `text` is pre-formatted so the UI never reimplements
@@ -115,6 +164,21 @@ export interface PostSaleResponse {
   receipt_html: string;
   receipt_text: string;
 }
+export interface PriceSetRequest {
+  price: number;
+}
+export interface PricesResponse {
+  prices: AdminPriceOut[];
+}
+export interface ProductCreateRequest {
+  sku: string;
+  name: string;
+  short_name?: string | null;
+  uom?: string;
+  tax_code: string;
+  is_weighed?: boolean;
+  track_stock?: boolean;
+}
 export interface ProductOut {
   product_id: string;
   sku: string;
@@ -127,6 +191,16 @@ export interface ProductOut {
   unit_price: MoneyOut;
   pack_size?: number;
   barcode?: string | null;
+}
+/** Every field optional: a PATCH touches only what it names. */
+export interface ProductUpdateRequest {
+  name?: string | null;
+  short_name?: string | null;
+  uom?: string | null;
+  tax_code?: string | null;
+  is_weighed?: boolean | null;
+  track_stock?: boolean | null;
+  is_active?: boolean | null;
 }
 /** What that scan would receive, for the running list on the screen. */
 export interface ReceiptLineOut {
@@ -263,6 +337,17 @@ export interface TenderResponse {
 }
 export interface UnknownPaymentRequest {
   reason?: string | null;
+}
+export interface UnknownScanOut {
+  scan_id: string;
+  store_id: string;
+  barcode: string;
+  scanned_at: string;
+  terminal_id?: string | null;
+  resolved: boolean;
+}
+export interface UnknownScansResponse {
+  scans: UnknownScanOut[];
 }
 /** Sell an item the catalogue does not have (architecture 9.2, phase 6).
 

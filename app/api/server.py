@@ -18,6 +18,7 @@ from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
 from app import __version__
+from app.api import admin as admin_router
 from app.api import auth as auth_router
 from app.api import catalog as catalog_router
 from app.api import events as events_router
@@ -38,6 +39,7 @@ from app.data.repositories.terminal import TerminalRepository
 from app.data.repositories.unknown_scans import UnknownScanRepository
 from app.data.repositories.users import CachedUserRepository
 from app.security.local_auth import HostGuardMiddleware, SessionTokenMiddleware
+from app.services.admin_service import AdminService
 from app.services.auth_service import AuthService, SessionStore
 from app.services.cart_service import CartService
 from app.services.inventory_service import InventoryService
@@ -136,6 +138,13 @@ def build_app(
     app.state.inventory_service = InventoryService(
         catalog, inventory, terminal_code=settings.terminal_code
     )
+    # Catalogue admin reaches Supabase under the signed-in user's own
+    # token, so RLS decides. Built even when no project is configured:
+    # it refuses with "needs the internet", which is the true reason
+    # and a better screen than a missing route (phase 6 decision 2).
+    app.state.admin_service = AdminService(
+        settings.supabase_url, settings.supabase_anon_key, sessions
+    )
     app.state.auth_service = AuthService(
         users=users,
         sessions=sessions,
@@ -152,6 +161,7 @@ def build_app(
     # No CORS middleware, on purpose (architecture §5).
 
     app.include_router(health_router.router)
+    app.include_router(admin_router.router)
     app.include_router(auth_router.router)
     app.include_router(catalog_router.router)
     app.include_router(events_router.router)

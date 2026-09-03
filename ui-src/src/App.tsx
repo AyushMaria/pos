@@ -3,15 +3,20 @@ import { ApiError, api } from "./core/api/client";
 import type { HealthResponse, SessionResponse } from "./core/api/contract";
 import { LoginScreen } from "./features/auth/LoginScreen";
 import { RegisterScreen } from "./features/register/RegisterScreen";
+import { AdminScreen } from "./features/admin/AdminScreen";
 import { StockroomScreen } from "./features/stockroom/StockroomScreen";
 
 export function App() {
   const [health, setHealth] = useState<HealthResponse | null>(null);
   const [session, setSession] = useState<SessionResponse | null>(null);
   const [fatal, setFatal] = useState<string | null>(null);
-  // Two screens, no router. A till has one job and a back door; anything more
-  // is a dependency to carry for the sake of one boolean.
-  const [inStockroom, setInStockroom] = useState(false);
+  // Three screens, still no router. A till has one job and two back doors —
+  // a pallet arriving and a catalogue to fix — and a string is cheaper than a
+  // routing dependency for that. Admin is the only one of the three that
+  // needs the internet, and it says so itself rather than being hidden here.
+  const [screen, setScreen] = useState<"register" | "stockroom" | "admin">(
+    "register",
+  );
 
   useEffect(() => {
     api
@@ -47,9 +52,19 @@ export function App() {
     return <LoginScreen health={health} onSignedIn={setSession} />;
   }
 
-  return inStockroom ? (
-    <StockroomScreen session={session} onClose={() => setInStockroom(false)} />
-  ) : (
-    <RegisterScreen session={session} onOpenStockroom={() => setInStockroom(true)} />
+  if (screen === "stockroom") {
+    return (
+      <StockroomScreen session={session} onClose={() => setScreen("register")} />
+    );
+  }
+  if (screen === "admin") {
+    return <AdminScreen session={session} onClose={() => setScreen("register")} />;
+  }
+  return (
+    <RegisterScreen
+      session={session}
+      onOpenStockroom={() => setScreen("stockroom")}
+      onOpenAdmin={() => setScreen("admin")}
+    />
   );
 }

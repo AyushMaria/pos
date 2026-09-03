@@ -210,7 +210,7 @@ component tests. Live check still to run: offline, scan something unknown,
 sell it anyway, complete the sale, then sync and confirm both the sale and the
 queue entry land.
 
-### Slice 6 — Admin screens, low stock, and the unknown-scan queue
+### Slice 6 — Admin screens, low stock, and the unknown-scan queue — **done**
 
 The first real admin UI, and — by decision 2 — the simplest thing in the phase,
 because it is online-only. It talks to Supabase through the same RLS every
@@ -231,6 +231,39 @@ other client does, so `product.create` and `product.edit` are already enforced.
 
 **Prove it:** create a product, give it a barcode and a price, sell it. Then
 try to give a second product the same barcode and read what the screen says.
+
+**What "talks to Supabase directly" turned out to mean.** Decision 2 is about
+the *write path*: no local row, no outbox, no offline. It is not about the
+transport, and it could not be — architecture §5 forbids the page holding a
+token that outlives its launch, so putting `supabase-js` in the webview would
+have traded one architectural rule for another. The admin router forwards to
+PostgREST carrying **the signed-in user's own access token**, which is already
+in `SessionStore` from login. RLS therefore evaluates exactly as it would for
+any other client, and the three enforcement points (§11.1) stay intact.
+
+**Four policies were missing, and none of them would have failed loudly.**
+This is the whole story of the slice. With RLS on, a missing policy is not an
+error: the statement succeeds, matches nothing, and returns 200. Every screen
+built on one looks like it works until somebody refreshes.
+
+- `unknown_scans` had no UPDATE policy — so *every* resolve was a no-op (0016).
+- `product_barcodes` had no UPDATE policy — removing a code is a soft delete,
+  which is an update (0017).
+- `product_prices` had no INSERT or UPDATE policy, and no column grants for
+  either (0017).
+- Low stock compares two columns, which a PostgREST filter cannot express at
+  all; it needed a `security_invoker` view (0017).
+
+`sale_lines` was the exception that needed nothing: it has insert and select
+and has never had anything else, so requirement 3 — resolving a scan must not
+retroactively alter a sale — was already true by construction. It got a test
+rather than a policy. That test asserts the line is *unchanged* as well as
+that the update matched nothing, because a rowcount of zero also happens when
+the table is empty, which is how it read on the first attempt.
+
+**Proved by:** `tests/test_admin.py` (22), eleven RLS tests against a real
+Postgres, nine component tests. Live check still to run: the six-step pass
+below, on Windows, against the real project.
 
 ---
 

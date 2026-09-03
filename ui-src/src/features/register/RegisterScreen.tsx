@@ -26,9 +26,11 @@ import { SyncIndicator } from "../sync/SyncIndicator";
 export function RegisterScreen({
   session,
   onOpenStockroom,
+  onOpenAdmin,
 }: {
   session: SessionResponse;
   onOpenStockroom?: () => void;
+  onOpenAdmin?: () => void;
 }) {
   const [cart, setCart] = useState<CartOut | null>(null);
   const [entry, setEntry] = useState("");
@@ -263,6 +265,16 @@ export function RegisterScreen({
           <PermissionGate session={session} permission="stock.receive">
             <button type="button" className="link" onClick={onOpenStockroom}>
               Stockroom
+            </button>
+          </PermissionGate>
+        )}
+        {/* `product.read` rather than `product.edit`: low stock is worth
+            opening for someone who may not edit the catalogue, and the tabs
+            inside filter themselves. */}
+        {onOpenAdmin && (
+          <PermissionGate session={session} permission="product.read">
+            <button type="button" className="link" onClick={onOpenAdmin}>
+              Catalogue
             </button>
           </PermissionGate>
         )}

@@ -1058,3 +1058,274 @@ def test_an_unknown_scan_stays_inside_its_store(pg: Any) -> None:
 
 def test_repo_root_is_sane() -> None:
     assert (Path(REPO_ROOT) / "supabase").is_dir()
+
+
+# ── Slice 6: closing the queue, and editing the catalogue ──────────────────
+#
+# Everything below tests a policy that did not exist before 0016/0017. The
+# shape of the bug they prevent is always the same: with RLS on, a missing
+# policy is not an error. The statement succeeds, touches nothing, and the
+# screen above it looks like it worked. So these assert on rowcount, not on
+# an exception.
+
+SCAN_ID = "019400bb-0000-7000-8000-0000000000e1"
+
+
+def _an_unknown_scan(cur: Any, store_id: str = STORE_ID) -> None:
+    cur.execute(
+        """
+        insert into public.unknown_scans
+            (id, store_id, barcode, scanned_at, terminal_id, resolved)
+        values (%s, %s, '8906110944741', now(), %s, false)
+        """,
+        (SCAN_ID, store_id, TERMINAL_UUID),
+    )
+
+
+def test_a_manager_may_close_an_unknown_scan(pg: Any) -> None:
+    """The policy 0016 adds, and the reason it had to be added.
+
+    Before it, this update matched zero rows for everybody — including the
+    only person the queue screen is built for.
+    """
+    with pg.transaction(force_rollback=True):
+        cur = pg.cursor()
+        _an_unknown_scan(cur)
+        cur.execute("set local role authenticated")
+        cur.execute(
+            "select set_config('request.jwt.claims', %s, true)",
+            (claims(MANAGER_ID, perms.MANAGER),),
+        )
+        cur.execute(
+            "update public.unknown_scans set resolved = true where id = %s", (SCAN_ID,)
+        )
+        assert cur.rowcount == 1
+
+
+def test_a_cashier_cannot_close_an_unknown_scan(pg: Any) -> None:
+    """Files them, does not close them. Working the queue is catalogue work,
+    which is why the plan moved it out of slice 5."""
+    with pg.transaction(force_rollback=True):
+        cur = pg.cursor()
+        _an_unknown_scan(cur)
+        cur.execute("set local role authenticated")
+        cur.execute(
+            "select set_config('request.jwt.claims', %s, true)",
+            (claims(CASHIER_ID, perms.CASHIER),),
+        )
+        cur.execute(
+            "update public.unknown_scans set resolved = true where id = %s", (SCAN_ID,)
+        )
+        assert cur.rowcount == 0
+
+
+def test_an_unknown_scan_in_another_store_cannot_be_closed(pg: Any) -> None:
+    with pg.transaction(force_rollback=True):
+        cur = pg.cursor()
+        cur.execute(
+            "insert into public.stores (id, code, name) values (%s, 'OTHER', 'Other') "
+            "on conflict (id) do nothing",
+            (OTHER_STORE_ID,),
+        )
+        _an_unknown_scan(cur, store_id=OTHER_STORE_ID)
+        cur.execute("set local role authenticated")
+        cur.execute(
+            "select set_config('request.jwt.claims', %s, true)",
+            (claims(MANAGER_ID, perms.MANAGER),),
+        )
+        cur.execute(
+            "update public.unknown_scans set resolved = true where id = %s", (SCAN_ID,)
+        )
+        assert cur.rowcount == 0
+
+
+def test_a_scan_records_what_was_scanned(pg: Any) -> None:
+    """0016's trigger. An RLS policy cannot compare old to new, so `with
+    check` alone would have let a resolve quietly rewrite the barcode."""
+    with pg.transaction(force_rollback=True):
+        cur = pg.cursor()
+        _an_unknown_scan(cur)
+        cur.execute("set local role authenticated")
+        cur.execute(
+            "select set_config('request.jwt.claims', %s, true)",
+            (claims(MANAGER_ID, perms.MANAGER),),
+        )
+        with pytest.raises(psycopg.Error, match="only resolved may change"):
+            cur.execute(
+                "update public.unknown_scans set resolved = true, barcode = '1' "
+                "where id = %s",
+                (SCAN_ID,),
+            )
+
+
+def test_resolving_cannot_reach_back_into_a_sold_line(pg: Any) -> None:
+    """The plan's requirement 3, and it needs no code to hold.
+
+    A line sold against the unlisted placeholder records what was charged and
+    what the cashier typed. Cataloguing the item next week does not rewrite
+    that, because `sale_lines` has no update policy for anyone to use.
+    """
+    line_id = "019400bb-0000-7000-8000-0000000000f1"
+    with pg.transaction(force_rollback=True):
+        cur = pg.cursor()
+        _held_sale(cur)
+        cur.execute(
+            """
+            insert into public.sale_lines
+                (id, sale_id, line_no, product_id, barcode_scanned, description,
+                 qty_milli, unit_price, line_total)
+            values (%s, %s, 1, %s, '8906110944741', 'Loose supari packet',
+                    1000, 4500, 4500)
+            """,
+            (line_id, REVIEW_SALE_ID, UNLISTED_PRODUCT_ID),
+        )
+
+        cur.execute("set local role authenticated")
+        cur.execute(
+            "select set_config('request.jwt.claims', %s, true)",
+            (claims(MANAGER_ID, perms.MANAGER),),
+        )
+        cur.execute(
+            "update public.sale_lines set product_id = %s where id = %s",
+            (PRODUCT_ID, line_id),
+        )
+        assert cur.rowcount == 0
+
+        # And it is still pointed where it was. Asserting only on rowcount
+        # would pass just as well against an empty table, which is how this
+        # test read before the line above existed.
+        cur.execute("reset role")
+        cur.execute("select product_id, description from public.sale_lines where id = %s",
+                    (line_id,))
+        product_id, description = cur.fetchone()
+        assert str(product_id) == UNLISTED_PRODUCT_ID
+        assert description == "Loose supari packet"
+
+
+def test_a_manager_may_withdraw_a_barcode(pg: Any) -> None:
+    """0017. Removing a code is a soft delete, which is an UPDATE — and
+    `product_barcodes` had insert and select only."""
+    with pg.transaction(force_rollback=True):
+        cur = pg.cursor()
+        cur.execute("set local role authenticated")
+        cur.execute(
+            "select set_config('request.jwt.claims', %s, true)",
+            (claims(MANAGER_ID, perms.MANAGER),),
+        )
+        cur.execute(
+            "update public.product_barcodes set deleted_at = now() "
+            "where product_id = %s and deleted_at is null",
+            (PRODUCT_ID,),
+        )
+        assert cur.rowcount >= 1
+
+
+def test_a_manager_may_open_a_price(pg: Any) -> None:
+    with pg.transaction(force_rollback=True):
+        cur = pg.cursor()
+        cur.execute("set local role authenticated")
+        cur.execute(
+            "select set_config('request.jwt.claims', %s, true)",
+            (claims(MANAGER_ID, perms.MANAGER),),
+        )
+        cur.execute(
+            "insert into public.product_prices (product_id, store_id, price) "
+            "values (%s, %s, 4500)",
+            (PRODUCT_ID, STORE_ID),
+        )
+        assert cur.rowcount == 1
+
+
+def test_a_cashier_may_not_open_a_price(pg: Any) -> None:
+    with pg.transaction(force_rollback=True):
+        cur = pg.cursor()
+        cur.execute("set local role authenticated")
+        cur.execute(
+            "select set_config('request.jwt.claims', %s, true)",
+            (claims(CASHIER_ID, perms.CASHIER),),
+        )
+        with pytest.raises(psycopg.Error):
+            cur.execute(
+                "insert into public.product_prices (product_id, store_id, price) "
+                "values (%s, %s, 4500)",
+                (PRODUCT_ID, STORE_ID),
+            )
+
+
+def test_slice_6_did_not_widen_the_margin_grant(pg: Any) -> None:
+    """0017 grants insert and update on `product_prices` — but not on `cost`.
+
+    The column grant from 0003 is the only thing keeping margin away from a
+    till, and a slice that adds price editing is exactly where it would get
+    widened by accident.
+    """
+    with pg.transaction(force_rollback=True):
+        cur = pg.cursor()
+        cur.execute("set local role authenticated")
+        cur.execute(
+            "select set_config('request.jwt.claims', %s, true)",
+            (claims(MANAGER_ID, perms.MANAGER),),
+        )
+        # The type is the SQLSTATE: psycopg raises InsufficientPrivilege for
+        # 42501, and the message itself does not carry the code.
+        with pytest.raises(psycopg.errors.InsufficientPrivilege):
+            cur.execute(
+                "insert into public.product_prices (product_id, store_id, price, cost) "
+                "values (%s, %s, 4500, 3000)",
+                (PRODUCT_ID, STORE_ID),
+            )
+
+
+def _below_reorder(cur: Any, product_id: str, store_id: str = STORE_ID) -> None:
+    cur.execute(
+        """
+        insert into public.stock_levels (store_id, product_id, on_hand, reorder_point)
+        values (%s, %s, 1, 10)
+        on conflict (store_id, product_id)
+        do update set on_hand = 1, reorder_point = 10
+        """,
+        (store_id, product_id),
+    )
+
+
+def test_low_stock_stays_inside_your_own_store(pg: Any) -> None:
+    """The view is `security_invoker`. Without that it would run as its owner
+    and become a hole around `stock_levels_select`."""
+    with pg.transaction(force_rollback=True):
+        cur = pg.cursor()
+        cur.execute(
+            "insert into public.stores (id, code, name) values (%s, 'OTHER', 'Other') "
+            "on conflict (id) do nothing",
+            (OTHER_STORE_ID,),
+        )
+        _below_reorder(cur, PRODUCT_ID, store_id=OTHER_STORE_ID)
+        cur.execute("set local role authenticated")
+        cur.execute(
+            "select set_config('request.jwt.claims', %s, true)",
+            (claims(MANAGER_ID, perms.MANAGER),),
+        )
+        cur.execute("select count(*) from public.low_stock")
+        assert cur.fetchone()[0] == 0
+
+
+def test_the_unlisted_placeholder_never_reaches_the_reorder_list(pg: Any) -> None:
+    """Even if something puts a level row against it.
+
+    The placeholder stands in for many products, so its "stock" is the sum of
+    unrelated things. It is `track_stock false`, which the view filters on —
+    and rooting the view at `stock_levels` rather than at `products` means the
+    ordinary case never gets that far anyway.
+    """
+    with pg.transaction(force_rollback=True):
+        cur = pg.cursor()
+        _below_reorder(cur, UNLISTED_PRODUCT_ID)
+        cur.execute("set local role authenticated")
+        cur.execute(
+            "select set_config('request.jwt.claims', %s, true)",
+            (claims(MANAGER_ID, perms.MANAGER),),
+        )
+        cur.execute(
+            "select count(*) from public.low_stock where product_id = %s",
+            (UNLISTED_PRODUCT_ID,),
+        )
+        assert cur.fetchone()[0] == 0

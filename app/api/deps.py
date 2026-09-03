@@ -17,6 +17,7 @@ from app.config import Settings
 from app.data.db import Database
 from app.data.repositories.catalog import CatalogRepository
 from app.domain.identity import Session, utcnow
+from app.services.admin_service import AdminService
 from app.services.auth_service import AuthService, SessionStore
 from app.services.cart_service import CartService
 from app.services.inventory_service import InventoryService
@@ -55,6 +56,11 @@ def get_cart_service(request: Request) -> CartService:
 
 def get_sale_service(request: Request) -> SaleService:
     service: SaleService = request.app.state.sale_service
+    return service
+
+
+def get_admin_service(request: Request) -> AdminService:
+    service: AdminService = request.app.state.admin_service
     return service
 
 

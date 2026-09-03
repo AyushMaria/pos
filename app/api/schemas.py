@@ -417,3 +417,119 @@ class MovementsResponse(ApiModel):
     """The ledger rows written. Empty when a count matched everywhere."""
 
     movement_ids: list[str]
+
+
+# ── Admin: catalogue editing (phase 6 slice 6) ────────────────────────────
+#
+# These cross the local service to Supabase rather than to SQLite, so every
+# one of them can fail with "no internet" in a way nothing else in this file
+# can. The router turns that into 503, which the UI client already reads as
+# unavailable rather than refused.
+
+
+class AdminProductOut(ApiModel):
+    product_id: str
+    sku: str
+    name: str
+    short_name: str | None = None
+    uom: str
+    tax_code: str
+    is_weighed: bool
+    track_stock: bool
+    is_active: bool
+
+
+class AdminProductsResponse(ApiModel):
+    products: list[AdminProductOut]
+
+
+class ProductCreateRequest(ApiModel):
+    sku: str = Field(min_length=1, max_length=64)
+    name: str = Field(min_length=1, max_length=200)
+    short_name: str | None = Field(default=None, max_length=64)
+    uom: str = Field(default="each", min_length=1, max_length=16)
+    tax_code: str = Field(min_length=1, max_length=32)
+    is_weighed: bool = False
+    #: False for anything sold loose or by weight, and for the unlisted
+    #: placeholder. A product that does not track stock writes no ledger row.
+    track_stock: bool = True
+
+
+class ProductUpdateRequest(ApiModel):
+    """Every field optional: a PATCH touches only what it names."""
+
+    name: str | None = Field(default=None, min_length=1, max_length=200)
+    short_name: str | None = Field(default=None, max_length=64)
+    uom: str | None = Field(default=None, min_length=1, max_length=16)
+    tax_code: str | None = Field(default=None, min_length=1, max_length=32)
+    is_weighed: bool | None = None
+    track_stock: bool | None = None
+    is_active: bool | None = None
+
+
+class AdminBarcodeOut(ApiModel):
+    barcode_id: str
+    product_id: str
+    barcode: str
+    symbology: str
+    pack_size: int
+    is_primary: bool
+
+
+class BarcodesResponse(ApiModel):
+    barcodes: list[AdminBarcodeOut]
+
+
+class BarcodeAddRequest(ApiModel):
+    barcode: str = Field(min_length=1, max_length=64)
+    #: Units in the coded pack. A case code is the same product at a
+    #: different multiple, not a different product.
+    pack_size: int = Field(default=1, ge=1)
+
+
+class AdminPriceOut(ApiModel):
+    price_id: str
+    product_id: str
+    store_id: str
+    #: Paise. `cost` is deliberately absent — 0003 keeps the margin behind a
+    #: column grant and slice 6 has no reason to widen it.
+    price: int
+    valid_from: str
+    valid_to: str | None = None
+
+
+class PricesResponse(ApiModel):
+    prices: list[AdminPriceOut]
+
+
+class PriceSetRequest(ApiModel):
+    #: Paise, like every other money value that crosses this boundary.
+    price: int = Field(ge=0)
+
+
+class UnknownScanOut(ApiModel):
+    scan_id: str
+    store_id: str
+    barcode: str
+    scanned_at: str
+    terminal_id: str | None = None
+    resolved: bool
+
+
+class UnknownScansResponse(ApiModel):
+    scans: list[UnknownScanOut]
+
+
+class LowStockOut(ApiModel):
+    product_id: str
+    sku: str
+    name: str
+    uom: str
+    on_hand: int
+    reorder_point: int
+
+
+class LowStockResponse(ApiModel):
+    """At or under the reorder point. A query, not an alert."""
+
+    rows: list[LowStockOut]
