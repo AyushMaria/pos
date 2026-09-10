@@ -82,6 +82,23 @@ it properly does not.**
 Six slices, one per deliverable, each shippable and provable on its own. Do
 them in this order — each one's proof depends on the one before.
 
+**Two words, and they are not the same word.**
+
+- **code complete** — written, tested, green. Nothing more than that.
+- **done** — the slice's own *Prove it* line has been walked, by a person, on
+  Windows, against the real project.
+
+Slice 6 was marked **done** while the same paragraph said "live check still to
+run", and the thing the live check would have found was that the first step of
+its Prove it line — *create a product* — was impossible: `createProduct`
+existed in the service, the route, the request model and the TypeScript
+client, and nothing called it. 695 green tests, 22 of them about this screen,
+and none of them could see it, because they all tested the code that had been
+written rather than the job that had been asked for.
+
+A slice is not done because the tests are green. The tests measure what was
+built; the Prove it line is the only thing that measures what was wanted.
+
 ### Slice 1 — Push a ledger row that has no sale behind it — **done**
 
 Nothing else in this phase can reach the cloud until this works.
@@ -206,9 +223,9 @@ admin screens are. Working the queue is a catalogue edit and belongs with the
 other catalogue edits.
 
 **Proved by:** `tests/test_unlisted_items.py` (16), four RLS tests, five
-component tests. Live check still to run: offline, scan something unknown,
-sell it anyway, complete the sale, then sync and confirm both the sale and the
-queue entry land.
+component tests. **Live check passed:** offline, scanned something unknown,
+sold it anyway, completed the sale, synced, and both the sale and the queue
+entry landed.
 
 ### Slice 6 — Admin screens, low stock, and the unknown-scan queue — **done**
 
@@ -216,8 +233,10 @@ The first real admin UI, and — by decision 2 — the simplest thing in the pha
 because it is online-only. It talks to Supabase through the same RLS every
 other client does, so `product.create` and `product.edit` are already enforced.
 
-1. Product list, search, and an edit form: name, short name, category, UOM,
-   tax code, `is_weighed`, `track_stock`.
+1. Product list, search, a **create** form and an edit form: SKU, name, short
+   name, category, UOM, tax code, `is_weighed`, `track_stock`. *Create was not
+   in this list when the slice was built, and so it was not built. It is in
+   the Prove it line, which is the list that counts.*
 2. Barcodes and prices as sub-editors. `ux_product_barcodes_barcode` will
    refuse a duplicate code — surface that as a message about *which* product
    already holds it, not as a constraint name.
@@ -261,9 +280,34 @@ rather than a policy. That test asserts the line is *unchanged* as well as
 that the update matched nothing, because a rowcount of zero also happens when
 the table is empty, which is how it read on the first attempt.
 
-**Proved by:** `tests/test_admin.py` (22), eleven RLS tests against a real
-Postgres, nine component tests. Live check still to run: the six-step pass
-below, on Windows, against the real project.
+**Proved by:** `tests/test_admin.py` (28), eleven RLS tests against a real
+Postgres, fifteen component tests.
+
+**Live check passed** on Windows against the real project — search, add a
+barcode, set a price, sell it, offer the same code to a second product and
+read the sentence, withdraw the code and re-add it. Every step behaved.
+
+**What the live pass found, which nothing else could.** Step one of the Prove
+it line is *create a product*, and there was no way to do it. `createProduct`
+existed in `admin_service.py`, in the router, in `ProductCreateRequest` and in
+`core/api/admin.ts`; no component called it, and no test in the repository
+mentioned it. The same hole ran through requirement 3 — the queue could mark a
+scan resolved but could neither catalogue the item nor point the code at an
+existing product, so the one action that stops the next scan failing was the
+one action missing.
+
+Both are now built, and two mechanical guards came with them, because the
+interesting part is that the toolchain could not see any of it:
+
+- `scripts/check_dead_client.py` — every function in the TypeScript API client
+  must be called from a non-test file. `noUnusedLocals` cannot see a property
+  on an exported object, and `gen_ts_types.py --check` passed throughout: the
+  type was correct, it was simply never used.
+- `tests/test_route_coverage.py` — every route must have an HTTP-level test.
+  It counts method *and* path, because `GET /admin/products` was well tested
+  and any path-level count would have called `POST /admin/products` covered.
+  It ships with eleven routes listed as debt, seven of them this slice's own
+  router. That list may shrink and nothing else.
 
 ---
 

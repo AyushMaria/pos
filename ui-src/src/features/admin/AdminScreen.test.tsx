@@ -22,6 +22,7 @@ import { ApiError } from "../../core/api/client";
 const api = {
   searchProducts: vi.fn(),
   product: vi.fn(),
+  createProduct: vi.fn(),
   updateProduct: vi.fn(),
   barcodes: vi.fn(),
   addBarcode: vi.fn(),
@@ -38,6 +39,7 @@ vi.mock("../../core/api/admin", () => ({
   admin: {
     searchProducts: (...a: unknown[]) => api.searchProducts(...a),
     product: (...a: unknown[]) => api.product(...a),
+    createProduct: (...a: unknown[]) => api.createProduct(...a),
     updateProduct: (...a: unknown[]) => api.updateProduct(...a),
     barcodes: (...a: unknown[]) => api.barcodes(...a),
     addBarcode: (...a: unknown[]) => api.addBarcode(...a),
@@ -73,6 +75,14 @@ const PRODUCT = {
   is_weighed: true,
   track_stock: true,
   is_active: true,
+};
+
+const SCAN = {
+  scan_id: "s1",
+  store_id: "st1",
+  barcode: "8906110944741",
+  scanned_at: "2026-09-01T10:00:00Z",
+  resolved: false,
 };
 
 beforeEach(() => {
@@ -183,6 +193,148 @@ describe("who sees what", () => {
   it("tells someone with neither permission why the screen is empty", () => {
     render(<AdminScreen session={person([])} onClose={() => {}} />);
     expect(screen.getByText(/needs a permission this account does not have/)).toBeInTheDocument();
+  });
+});
+
+describe("creating a product", () => {
+  const GST5 = { code: "GST5", name: "5%", rate_bp: 500, is_inclusive: true };
+
+  async function openCreator(user: ReturnType<typeof userEvent.setup>) {
+    api.taxCodes.mockResolvedValue({ tax_codes: [GST5] });
+    render(
+      <AdminScreen
+        session={person(["product.read", "product.edit", "product.create"])}
+        onClose={() => {}}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "New product" }));
+  }
+
+  it("sends what the form was given, with a blank short name as null", async () => {
+    const user = userEvent.setup();
+    await openCreator(user);
+
+    api.createProduct.mockResolvedValue({ ...PRODUCT, product_id: "p9", sku: "SKU-9" });
+    await user.type(screen.getByLabelText("SKU"), "SKU-9");
+    await user.type(screen.getByLabelText("Product name"), "Parle-G 100g");
+    await user.click(screen.getByRole("button", { name: "Create" }));
+
+    await waitFor(() =>
+      expect(api.createProduct).toHaveBeenCalledWith({
+        sku: "SKU-9",
+        name: "Parle-G 100g",
+        short_name: null,
+        uom: "each",
+        tax_code: "GST5",
+        is_weighed: false,
+        track_stock: true,
+      }),
+    );
+  });
+
+  it("lands on the editor, because a new product cannot be sold yet", async () => {
+    const user = userEvent.setup();
+    await openCreator(user);
+
+    api.createProduct.mockResolvedValue({ ...PRODUCT, product_id: "p9", sku: "SKU-9" });
+    await user.type(screen.getByLabelText("SKU"), "SKU-9");
+    await user.type(screen.getByLabelText("Product name"), "Parle-G 100g");
+    await user.click(screen.getByRole("button", { name: "Create" }));
+
+    // The barcode and price sub-editors are the two things standing between
+    // this product and a sale, so the screen has to go there by itself.
+    expect(await screen.findByLabelText("Add a barcode")).toBeInTheDocument();
+    expect(screen.getByLabelText("New price in rupees")).toBeInTheDocument();
+  });
+
+  it("is not offered to someone who may edit but not create", () => {
+    render(
+      <AdminScreen session={person(["product.read", "product.edit"])} onClose={() => {}} />,
+    );
+    expect(screen.queryByRole("button", { name: "New product" })).toBeNull();
+    expect(screen.getByLabelText("Search the catalogue")).toBeInTheDocument();
+  });
+});
+
+describe("working the queue is what closes it", () => {
+  it("attaches the scanned code to a new product, then closes the entry", async () => {
+    const user = userEvent.setup();
+    api.taxCodes.mockResolvedValue({
+      tax_codes: [{ code: "GST5", name: "5%", rate_bp: 500, is_inclusive: true }],
+    });
+    api.unknownScans.mockResolvedValueOnce({ scans: [SCAN] });
+    api.createProduct.mockResolvedValue({ ...PRODUCT, product_id: "p9" });
+    api.addBarcode.mockResolvedValue({ barcode_id: "b1" });
+    api.resolveScan.mockResolvedValue(undefined);
+    api.unknownScans.mockResolvedValueOnce({ scans: [] });
+
+    render(
+      <AdminScreen
+        session={person(["product.read", "product.edit", "product.create"])}
+        onClose={() => {}}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "Unknown scans" }));
+    await user.click(await screen.findByRole("button", { name: "New product" }));
+
+    await user.type(screen.getByLabelText("SKU"), "SKU-9");
+    await user.type(screen.getByLabelText("Product name"), "Parle-G 100g");
+    await user.click(screen.getByRole("button", { name: "Create" }));
+
+    await waitFor(() =>
+      expect(api.addBarcode).toHaveBeenCalledWith("p9", { barcode: "8906110944741" }),
+    );
+    await waitFor(() => expect(api.resolveScan).toHaveBeenCalledWith("s1"));
+  });
+
+  it("points the code at a product that already exists", async () => {
+    const user = userEvent.setup();
+    api.unknownScans.mockResolvedValueOnce({ scans: [SCAN] });
+    api.searchProducts.mockResolvedValue({ products: [PRODUCT] });
+    api.addBarcode.mockResolvedValue({ barcode_id: "b1" });
+    api.resolveScan.mockResolvedValue(undefined);
+    api.unknownScans.mockResolvedValueOnce({ scans: [] });
+
+    render(<AdminScreen session={person(["product.read", "product.edit"])} onClose={() => {}} />);
+    await user.click(screen.getByRole("button", { name: "Unknown scans" }));
+    await user.click(await screen.findByRole("button", { name: "Existing product" }));
+
+    await user.type(
+      screen.getByLabelText("Search for the product this code belongs to"),
+      "tomato",
+    );
+    await user.click(screen.getByRole("button", { name: "Search" }));
+    await user.click(await screen.findByRole("button", { name: /SKU-1004/ }));
+
+    await waitFor(() =>
+      expect(api.addBarcode).toHaveBeenCalledWith("p1", { barcode: "8906110944741" }),
+    );
+    await waitFor(() => expect(api.resolveScan).toHaveBeenCalledWith("s1"));
+  });
+
+  it("leaves the entry open when the code turns out to be spoken for", async () => {
+    const user = userEvent.setup();
+    api.unknownScans.mockResolvedValue({ scans: [SCAN] });
+    api.searchProducts.mockResolvedValue({ products: [PRODUCT] });
+    api.addBarcode.mockRejectedValue(
+      new ApiError(409, "8906110944741 is already on SKU-7 — Marie Gold"),
+    );
+
+    render(<AdminScreen session={person(["product.read", "product.edit"])} onClose={() => {}} />);
+    await user.click(screen.getByRole("button", { name: "Unknown scans" }));
+    await user.click(await screen.findByRole("button", { name: "Existing product" }));
+
+    await user.type(
+      screen.getByLabelText("Search for the product this code belongs to"),
+      "tomato",
+    );
+    await user.click(screen.getByRole("button", { name: "Search" }));
+    await user.click(await screen.findByRole("button", { name: /SKU-1004/ }));
+
+    // The work is not done, so the queue must not say it is. Closing here
+    // would lose the only record that this code needs attention.
+    expect(await screen.findByText(/already on SKU-7/)).toBeInTheDocument();
+    expect(api.resolveScan).not.toHaveBeenCalled();
   });
 });
 

@@ -7,6 +7,7 @@ import type {
   AdminProductOut,
   LowStockOut,
   Permission,
+  ProductCreateRequest,
   SessionResponse,
   TaxCodeOut,
   UnknownScanOut,
@@ -126,7 +127,7 @@ export function AdminScreen({
       </header>
 
       {tab === "catalogue" && <CatalogueTab session={session} />}
-      {tab === "queue" && <QueueTab />}
+      {tab === "queue" && <QueueTab session={session} />}
       {tab === "low" && <LowStockTab />}
     </div>
   );
@@ -134,30 +135,41 @@ export function AdminScreen({
 
 // ── Catalogue ─────────────────────────────────────────────────────────────
 
-function CatalogueTab({ session }: { session: SessionResponse }) {
+/**
+ * Search and pick a product.
+ *
+ * Extracted because the unknown-scan queue needs exactly this to answer the
+ * other half of its question: a code the till did not recognise is either a
+ * product you have not catalogued yet, or one you have and forgot to give
+ * this code to. Requirement 3 of the slice says *either*, so both paths have
+ * to exist and the search is common to one of them.
+ */
+function ProductSearch({
+  onPick,
+  label = "Search the catalogue",
+}: {
+  onPick: (product: AdminProductOut) => void;
+  label?: string;
+}) {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<AdminProductOut[]>([]);
-  const [chosen, setChosen] = useState<AdminProductOut | null>(null);
   const { busy, error, offline, run } = useCloudCall();
 
   const search = async (event: React.FormEvent) => {
     event.preventDefault();
     if (!query.trim()) return;
     const found = await run(() => admin.searchProducts(query.trim()));
-    if (found) {
-      setResults(found.products);
-      setChosen(null);
-    }
+    if (found) setResults(found.products);
   };
 
   return (
-    <section className="pane">
+    <>
       <form onSubmit={search} className="row">
         <input
           value={query}
           onChange={(event) => setQuery(event.target.value)}
           placeholder="Name or SKU"
-          aria-label="Search the catalogue"
+          aria-label={label}
         />
         <button type="submit" disabled={busy || !query.trim()}>
           Search
@@ -166,40 +178,212 @@ function CatalogueTab({ session }: { session: SessionResponse }) {
 
       <CloudNotice offline={offline} error={error} />
 
-      {!chosen && (
-        <ul className="list">
-          {results.map((product) => (
-            <li key={product.product_id}>
-              <button type="button" className="link" onClick={() => setChosen(product)}>
-                <strong>{product.sku}</strong> {product.name}
-              </button>
-            </li>
-          ))}
-          {results.length === 0 && !busy && (
-            <li className="muted">
-              Nothing yet. Search by name or SKU — 38.6% of this catalogue has
-              no barcode, so the name is often the only way in.
-            </li>
-          )}
-        </ul>
-      )}
+      <ul className="list">
+        {results.map((product) => (
+          <li key={product.product_id}>
+            <button type="button" className="link" onClick={() => onPick(product)}>
+              <strong>{product.sku}</strong> {product.name}
+            </button>
+          </li>
+        ))}
+        {results.length === 0 && !busy && (
+          <li className="muted">
+            Nothing yet. Search by name or SKU — 38.6% of this catalogue has
+            no barcode, so the name is often the only way in.
+          </li>
+        )}
+      </ul>
+    </>
+  );
+}
 
-      {chosen && (
+function CatalogueTab({ session }: { session: SessionResponse }) {
+  const [chosen, setChosen] = useState<AdminProductOut | null>(null);
+  const [creating, setCreating] = useState(false);
+  const mayCreate = session.permissions.includes("product.create");
+
+  if (creating) {
+    return (
+      <section className="pane">
+        <ProductCreator
+          onCreated={(product) => {
+            setCreating(false);
+            // Straight into the editor rather than back to a list: a product
+            // with no barcode and no price cannot be sold, and those are the
+            // next two things this person has to do.
+            setChosen(product);
+          }}
+          onCancel={() => setCreating(false)}
+        />
+      </section>
+    );
+  }
+
+  if (chosen) {
+    return (
+      <section className="pane">
         <ProductEditor
           product={chosen}
           session={session}
-          onDone={(updated) => {
-            setChosen(updated);
-            setResults((rows) =>
-              rows.map((row) =>
-                row.product_id === updated.product_id ? updated : row,
-              ),
-            );
-          }}
+          onDone={setChosen}
           onBack={() => setChosen(null)}
         />
+      </section>
+    );
+  }
+
+  return (
+    <section className="pane">
+      {mayCreate && (
+        <p className="row">
+          <button type="button" onClick={() => setCreating(true)}>
+            New product
+          </button>
+        </p>
       )}
+      <ProductSearch onPick={setChosen} />
     </section>
+  );
+}
+
+/**
+ * Create a product.
+ *
+ * `product.create` is a separate permission from `product.edit`, and this is
+ * the only thing that needs it — so the button is gated on it rather than on
+ * the tab.
+ *
+ * SKU is the one field with no sensible default. Everything else has one, and
+ * the defaults are the common case for a kirana shop: sold each, tracked,
+ * not weighed.
+ */
+function ProductCreator({
+  seedName = "",
+  onCreated,
+  onCancel,
+}: {
+  seedName?: string;
+  onCreated: (product: AdminProductOut) => void;
+  onCancel: () => void;
+}) {
+  const [sku, setSku] = useState("");
+  const [name, setName] = useState(seedName);
+  const [shortName, setShortName] = useState("");
+  const [uom, setUom] = useState("each");
+  const [taxCode, setTaxCode] = useState("");
+  const [isWeighed, setIsWeighed] = useState(false);
+  const [tracksStock, setTracksStock] = useState(true);
+  const [rates, setRates] = useState<TaxCodeOut[]>([]);
+  const { busy, error, offline, run } = useCloudCall();
+
+  useEffect(() => {
+    catalog
+      .taxCodes()
+      .then((body) => {
+        setRates(body.tax_codes);
+        setTaxCode((current) => current || body.tax_codes[0]?.code || "");
+      })
+      .catch(() => undefined);
+  }, []);
+
+  const create = async (event: React.FormEvent) => {
+    event.preventDefault();
+    const body: ProductCreateRequest = {
+      sku: sku.trim(),
+      name: name.trim(),
+      short_name: shortName.trim() || null,
+      uom,
+      tax_code: taxCode,
+      is_weighed: isWeighed,
+      track_stock: tracksStock,
+    };
+    const created = await run(() => admin.createProduct(body));
+    if (created) onCreated(created);
+  };
+
+  const ready = sku.trim() !== "" && name.trim() !== "" && taxCode !== "";
+
+  return (
+    <div className="editor">
+      <button type="button" className="link" onClick={onCancel}>
+        ← Cancel
+      </button>
+      <h2>New product</h2>
+
+      <form onSubmit={create} className="form">
+        <label>
+          SKU
+          <input
+            value={sku}
+            onChange={(e) => setSku(e.target.value)}
+            aria-label="SKU"
+          />
+        </label>
+        <label>
+          Name
+          <input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            aria-label="Product name"
+          />
+        </label>
+        <label>
+          Short name <span className="muted">(what fits on a receipt)</span>
+          <input
+            value={shortName}
+            onChange={(e) => setShortName(e.target.value)}
+            aria-label="Short name"
+          />
+        </label>
+        <label>
+          Unit
+          <input value={uom} onChange={(e) => setUom(e.target.value)} aria-label="Unit" />
+        </label>
+        <label>
+          Tax code
+          <select
+            value={taxCode}
+            onChange={(e) => setTaxCode(e.target.value)}
+            aria-label="Tax code"
+          >
+            {rates.map((rate) => (
+              <option key={rate.code} value={rate.code}>
+                {rate.code} — {rate.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="check">
+          <input
+            type="checkbox"
+            checked={isWeighed}
+            onChange={(e) => setIsWeighed(e.target.checked)}
+          />
+          Sold by weight
+        </label>
+        <label className="check">
+          <input
+            type="checkbox"
+            checked={tracksStock}
+            onChange={(e) => setTracksStock(e.target.checked)}
+          />
+          Track stock
+          <span className="note muted">
+            Off means sales write no ledger row — correct for anything loose.
+          </span>
+        </label>
+        <button type="submit" disabled={busy || !ready}>
+          Create
+        </button>
+      </form>
+
+      <p className="note muted">
+        A new product has no barcode and no price yet, so it cannot be sold
+        until you give it both. That is the next screen.
+      </p>
+
+      <CloudNotice offline={offline} error={error} />
+    </div>
   );
 }
 
@@ -450,9 +634,24 @@ function PriceEditor({ productId, mayEdit }: { productId: string; mayEdit: boole
 
 // ── The unknown-scan queue ────────────────────────────────────────────────
 
-function QueueTab() {
+/**
+ * The unknown-scan queue.
+ *
+ * Requirement 3 of the slice: a manager takes an entry and *either* matches
+ * it to an existing product *or* creates a real one. Both attach the scanned
+ * code to a product and then close the entry, which is the only thing that
+ * makes the next scan of that packet find something.
+ *
+ * "Done" without either is kept deliberately, for the code that was a torn
+ * label or somebody's loyalty card. Closing an entry changes nothing about
+ * what was already sold — a sold line records what was charged.
+ */
+function QueueTab({ session }: { session: SessionResponse }) {
   const [scans, setScans] = useState<UnknownScanOut[]>([]);
+  const [working, setWorking] = useState<UnknownScanOut | null>(null);
+  const [mode, setMode] = useState<"create" | "match" | null>(null);
   const { busy, error, offline, run } = useCloudCall();
+  const mayCreate = session.permissions.includes("product.create");
 
   const load = useCallback(async () => {
     const body = await run(() => admin.unknownScans(false));
@@ -463,12 +662,74 @@ function QueueTab() {
     void load();
   }, [load]);
 
+  /**
+   * Attach the scanned code to a product, then close the entry.
+   *
+   * Order matters and is not reversible: the barcode needs a product to hang
+   * on, so a create has to land first. If the code turns out to already be on
+   * something else the entry stays open and the new product stays too —
+   * recoverable, and the honest signal that "match" was the right answer.
+   */
+  const attachAndClose = async (scan: UnknownScanOut, productId: string) => {
+    const added = await run(() =>
+      admin.addBarcode(productId, { barcode: scan.barcode }),
+    );
+    if (!added) return;
+    await run(() => admin.resolveScan(scan.scan_id));
+    setWorking(null);
+    setMode(null);
+    void load();
+  };
+
+  if (working && mode === "create") {
+    return (
+      <section className="pane">
+        <p className="note muted">
+          Cataloguing <code>{working.barcode}</code>. The code is attached to
+          the new product and the entry closed, both at the end.
+        </p>
+        <ProductCreator
+          onCreated={(product) => void attachAndClose(working, product.product_id)}
+          onCancel={() => {
+            setWorking(null);
+            setMode(null);
+          }}
+        />
+        <CloudNotice offline={offline} error={error} />
+      </section>
+    );
+  }
+
+  if (working && mode === "match") {
+    return (
+      <section className="pane">
+        <button
+          type="button"
+          className="link"
+          onClick={() => {
+            setWorking(null);
+            setMode(null);
+          }}
+        >
+          ← Back to the queue
+        </button>
+        <p className="note muted">
+          Which product does <code>{working.barcode}</code> belong to?
+        </p>
+        <ProductSearch
+          label="Search for the product this code belongs to"
+          onPick={(product) => void attachAndClose(working, product.product_id)}
+        />
+        <CloudNotice offline={offline} error={error} />
+      </section>
+    );
+  }
+
   return (
     <section className="pane">
       <p className="note muted">
-        Codes the till could not resolve. Catalogue the item, then close the
-        entry. Closing one changes nothing about what was already sold — a sold
-        line records what was charged.
+        Codes the till could not resolve. Catalogue the item or point the code
+        at a product you already have, and the entry closes itself.
       </p>
 
       <CloudNotice offline={offline} error={error} />
@@ -478,6 +739,30 @@ function QueueTab() {
           <li key={scan.scan_id}>
             <code>{scan.barcode}</code>{" "}
             <span className="muted">{new Date(scan.scanned_at).toLocaleString()}</span>
+            {mayCreate && (
+              <button
+                type="button"
+                className="link"
+                disabled={busy}
+                onClick={() => {
+                  setWorking(scan);
+                  setMode("create");
+                }}
+              >
+                New product
+              </button>
+            )}
+            <button
+              type="button"
+              className="link"
+              disabled={busy}
+              onClick={() => {
+                setWorking(scan);
+                setMode("match");
+              }}
+            >
+              Existing product
+            </button>
             <button
               type="button"
               className="link"

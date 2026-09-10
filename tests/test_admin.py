@@ -24,6 +24,7 @@ from app.services.admin_service import (
     AdminService,
     AdminUnavailable,
     DuplicateBarcode,
+    DuplicateSku,
 )
 from app.services.auth_service import SessionStore
 
@@ -174,6 +175,73 @@ async def test_a_patch_only_sends_what_it_was_given(rest: FakePostgrest) -> None
     rest.will_return([_product_row()])
     await service(rest).update_product(PRODUCT, name="Tomatoes (loose)")
     assert json.loads(rest.last().content) == {"name": "Tomatoes (loose)"}
+
+
+# ── Creating one ──────────────────────────────────────────────────────────
+#
+# These are here late because they were missing entirely. Slice 6 shipped
+# `create_product`, a route, a request model and a TypeScript client function
+# with no test and no caller anywhere — a whole feature that existed in four
+# places and could not be used from any of them. `tests/test_route_coverage.py`
+# is the mechanical guard; these are the tests it was pointing at.
+
+
+@pytest.mark.asyncio
+async def test_creating_a_product_sends_every_field_it_was_given(
+    rest: FakePostgrest,
+) -> None:
+    """Unlike a PATCH, a POST carries the whole row.
+
+    `update_product` deliberately sends only what it was handed; `_clean`
+    drops nothing here except a null short name, because a product with no
+    `track_stock` is not the same as one that defaulted to true.
+    """
+    rest.will_return([_product_row()])
+    await service(rest).create_product(
+        sku="SKU-9",
+        name="Parle-G 100g",
+        short_name=None,
+        uom="each",
+        tax_code="GST5",
+        is_weighed=False,
+        track_stock=True,
+    )
+    body = json.loads(rest.last().content)
+    assert body["sku"] == "SKU-9"
+    assert body["tax_code"] == "GST5"
+    assert body["track_stock"] is True
+    assert body["is_weighed"] is False
+
+
+@pytest.mark.asyncio
+async def test_a_taken_sku_is_a_sentence_not_a_constraint_name(
+    rest: FakePostgrest,
+) -> None:
+    """The predictable failure of the form: somebody reuses a code.
+
+    Same treatment as a duplicate barcode. "duplicate key value violates
+    unique constraint ux_products_sku" is not something a shopkeeper can act
+    on; "SKU-9 is already the code for another product" is.
+    """
+    rest.will_return({"code": "23505", "message": "duplicate key value"}, status=409)
+    with pytest.raises(DuplicateSku, match="SKU-9 is already the code"):
+        await service(rest).create_product(sku="SKU-9", name="Parle-G 100g")
+
+
+@pytest.mark.asyncio
+async def test_a_refusal_that_is_not_a_duplicate_stays_a_refusal(
+    rest: FakePostgrest,
+) -> None:
+    """RLS says no when the session lacks `product.create` at the database.
+
+    Worth pinning: the duplicate branch reads the error text, and text
+    matching that is too eager would swallow every other rejection into a
+    misleading message about SKUs.
+    """
+    rest.will_return({"code": "42501", "message": "row-level security"}, status=403)
+    with pytest.raises(AdminRejected) as caught:
+        await service(rest).create_product(sku="SKU-9", name="Parle-G 100g")
+    assert not isinstance(caught.value, DuplicateSku)
 
 
 # ── Barcodes ──────────────────────────────────────────────────────────────
@@ -361,6 +429,59 @@ def test_a_duplicate_barcode_reaches_the_screen_as_a_sentence(
     detail = response.json()["detail"]
     assert "SKU-1004" in detail
     assert "constraint" not in detail.lower()
+
+
+def test_creating_a_product_takes_more_than_being_allowed_to_edit(
+    client: TestClient, seeded_manager: dict[str, str], rest: FakePostgrest
+) -> None:
+    """`product.create` is its own permission and this is the only route
+    that spends it.
+
+    The first HTTP-level test this endpoint has ever had. It exists because
+    the route, the model and the client function all shipped without one, and
+    "the route is wired to the right dependency" is precisely the claim a
+    service-level test cannot make.
+    """
+    _sign_in(client, seeded_manager, token=TOKEN)
+    rest.will_return([_product_row()])
+    client.app.state.admin_service = service(rest)
+
+    response = client.post(
+        "/admin/products",
+        json={"sku": "SKU-9", "name": "Parle-G 100g", "tax_code": "GST5"},
+    )
+    assert response.status_code == 201
+    assert response.json()["sku"] == "SKU-1004"
+
+
+def test_a_cashier_cannot_create_a_product(
+    client: TestClient, seeded_cashier: dict[str, str]
+) -> None:
+    """403 before the cloud is touched, the same as every other admin route."""
+    _sign_in(client, seeded_cashier, token=TOKEN)
+    response = client.post(
+        "/admin/products",
+        json={"sku": "SKU-9", "name": "Parle-G 100g", "tax_code": "GST5"},
+    )
+    assert response.status_code == 403
+
+
+def test_a_taken_sku_reaches_the_screen_as_409(
+    client: TestClient, seeded_manager: dict[str, str], rest: FakePostgrest
+) -> None:
+    """409, not 422: the UI already treats a conflict as "that one is taken"
+    for barcodes, and a SKU is the same kind of no."""
+    _sign_in(client, seeded_manager, token=TOKEN)
+    rest.will_return({"code": "23505", "message": "duplicate key value"}, status=409)
+    client.app.state.admin_service = service(rest)
+
+    response = client.post(
+        "/admin/products",
+        json={"sku": "SKU-9", "name": "Parle-G 100g", "tax_code": "GST5"},
+    )
+    assert response.status_code == 409
+    assert "SKU-9" in response.json()["detail"]
+    assert "constraint" not in response.json()["detail"].lower()
 
 
 def test_the_store_comes_from_the_session_not_the_body(

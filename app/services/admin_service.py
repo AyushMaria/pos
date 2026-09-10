@@ -64,6 +64,19 @@ class DuplicateBarcode(AdminRejected):
             super().__init__(f"{barcode} is already on another product")
 
 
+class DuplicateSku(AdminRejected):
+    """This SKU is taken.
+
+    The predictable failure of the new-product form, and the one the raw
+    constraint text serves worst: somebody typing a code they believe is free
+    needs to be told it is not, rather than shown the name of an index.
+    """
+
+    def __init__(self, sku: str) -> None:
+        self.sku = sku
+        super().__init__(f"{sku} is already the code for another product")
+
+
 @dataclass(frozen=True)
 class AdminProduct:
     product_id: str
@@ -286,9 +299,21 @@ class AdminService:
         return _product(rows[0]) if rows else None
 
     async def create_product(self, **fields: Any) -> AdminProduct:
-        rows = await self._send(
-            "POST", "products", json=_clean(fields), prefer="return=representation"
-        )
+        """A new product, which cannot be sold until it has a code and a price.
+
+        Deliberately does not create either. A product is one row; making it
+        sellable is two more, each with its own way of going wrong, and doing
+        all three here would mean deciding what to leave behind when the
+        second one fails.
+        """
+        try:
+            rows = await self._send(
+                "POST", "products", json=_clean(fields), prefer="return=representation"
+            )
+        except AdminRejected as exc:
+            if "23505" in str(exc) or "duplicate key" in str(exc):
+                raise DuplicateSku(str(fields.get("sku", ""))) from exc
+            raise
         return _product(rows[0])
 
     async def update_product(self, product_id: str, **fields: Any) -> AdminProduct:

@@ -49,6 +49,7 @@ from app.services.admin_service import (
     AdminService,
     AdminUnavailable,
     DuplicateBarcode,
+    DuplicateSku,
     LowStockRow,
     UnknownScan,
 )
@@ -182,6 +183,11 @@ async def create_product(
         product = await admin.create_product(**body.model_dump())
     except AdminUnavailable as exc:
         raise _offline(exc) from exc
+    except DuplicateSku as exc:
+        # 409 for the same reason a duplicate barcode is: the request was
+        # well formed and the answer is "that one is taken", which is a
+        # conflict rather than a mistake in what was sent.
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
     except AdminRejected as exc:
         raise _refused(exc) from exc
     return _product_out(product)

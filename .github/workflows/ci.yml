@@ -48,6 +48,12 @@ jobs:
       - name: TypeScript contract matches the Pydantic models
         run: python scripts/gen_ts_types.py --check
 
+      # The contract check above proves the *types* match, which is exactly
+      # what made slice 6's dead `createProduct` look finished. This asks the
+      # different question: does anything call it?
+      - name: every API client function has a caller
+        run: python scripts/check_dead_client.py
+
   # ── The Python suite, on both target and CI platforms ─────────────────────
   test:
     name: pytest (${{ matrix.os }}, py${{ matrix.python }})
