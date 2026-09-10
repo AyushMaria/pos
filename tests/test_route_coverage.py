@@ -31,10 +31,12 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 
 TESTS = Path(__file__).resolve().parent
+
+#: The methods an endpoint can be reached by. OpenAPI keys these lowercase.
+_METHODS = frozenset({"GET", "POST", "PUT", "PATCH", "DELETE"})
 
 #: Endpoints that had no HTTP-level test when this check was written.
 #:
@@ -67,17 +69,26 @@ UNTESTED: frozenset[tuple[str, str]] = frozenset(
 
 
 def _operations(client: TestClient) -> set[tuple[str, str]]:
-    """Every (method, path) the application actually serves."""
+    """Every (method, path) the application actually serves.
+
+    Read from the OpenAPI surface, not `app.routes`. This FastAPI version does
+    not put an included router's `APIRoute` objects on the application —
+    `include_router` leaves a wrapper whose `path` is None — so walking
+    `app.routes` sees only what was declared on the app itself and reports
+    every router endpoint as not existing. That is all nine routers,
+    including the admin one this check was written for: it checked 1 of 46
+    operations and called the other 45 gone.
+
+    Using the schema also settles `GET /` without an exemption. The dev login
+    fallback is `include_in_schema=False`, and exists at all only when there
+    is no UI build to mount over it — so it is absent here by construction
+    rather than by a rule that would have to explain itself.
+    """
     found: set[tuple[str, str]] = set()
-    for route in client.app.routes:
-        if not isinstance(route, APIRoute):
-            continue
-        if route.path.startswith(("/docs", "/openapi", "/redoc")):
-            continue
-        for method in route.methods:
-            if method in ("HEAD", "OPTIONS"):
-                continue
-            found.add((method, route.path))
+    for path, item in client.app.openapi()["paths"].items():  # type: ignore[attr-defined]
+        for method in item:
+            if method.upper() in _METHODS:
+                found.add((method.upper(), path))
     return found
 
 
