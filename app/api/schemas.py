@@ -520,6 +520,27 @@ class UnknownScansResponse(ApiModel):
     scans: list[UnknownScanOut]
 
 
+class ReorderPointSetRequest(ApiModel):
+    """Thousandths, like every other quantity below the screen.
+
+    It is compared directly against `stock_levels.on_hand`, which is a sum of
+    `delta_milli`, so the two must be the same unit or the comparison is
+    nonsense in a way nothing would report. One packet is 1000. The screen
+    converts, exactly as the stockroom does.
+    """
+
+    reorder_point: int = Field(ge=0, le=1_000_000_000)
+
+
+class StockLevelOut(ApiModel):
+    """A product's level after a write. Both quantities are thousandths."""
+
+    product_id: str
+    store_id: str
+    on_hand: int
+    reorder_point: int
+
+
 class LowStockOut(ApiModel):
     product_id: str
     sku: str

@@ -1329,3 +1329,189 @@ def test_the_unlisted_placeholder_never_reaches_the_reorder_list(pg: Any) -> Non
             (UNLISTED_PRODUCT_ID,),
         )
         assert cur.fetchone()[0] == 0
+
+# ── 0018: reorder points ──────────────────────────────────────────────────
+
+
+def _a_level(cur: object, store_id: str = STORE_ID, on_hand: int = 24_000) -> None:
+    cur.execute(  # type: ignore[attr-defined]
+        """
+        insert into public.stock_levels (store_id, product_id, on_hand, reorder_point)
+        values (%s, %s, %s, 0)
+        on conflict (store_id, product_id)
+        do update set on_hand = excluded.on_hand, reorder_point = 0
+        """,
+        (store_id, PRODUCT_ID, on_hand),
+    )
+
+
+def test_a_manager_may_set_a_reorder_point(pg: Any) -> None:
+    with pg.transaction(force_rollback=True):
+        cur = pg.cursor()
+        _a_level(cur)
+        cur.execute("set local role authenticated")
+        cur.execute(
+            "select set_config('request.jwt.claims', %s, true)",
+            (claims(MANAGER_ID, perms.MANAGER),),
+        )
+        cur.execute(
+            "update public.stock_levels set reorder_point = 5000 "
+            "where product_id = %s and store_id = %s",
+            (PRODUCT_ID, STORE_ID),
+        )
+        assert cur.rowcount == 1
+
+
+def test_a_cashier_may_not_set_a_reorder_point(pg: Any) -> None:
+    """`product.edit`, not `product.read`. Deciding when to reorder is
+    catalogue work, and a till has no business doing it."""
+    with pg.transaction(force_rollback=True):
+        cur = pg.cursor()
+        _a_level(cur)
+        cur.execute("set local role authenticated")
+        cur.execute(
+            "select set_config('request.jwt.claims', %s, true)",
+            (claims(CASHIER_ID, perms.CASHIER),),
+        )
+        cur.execute(
+            "update public.stock_levels set reorder_point = 5000 "
+            "where product_id = %s and store_id = %s",
+            (PRODUCT_ID, STORE_ID),
+        )
+        assert cur.rowcount == 0
+
+
+def test_a_reorder_point_stops_at_the_store_boundary(pg: Any) -> None:
+    with pg.transaction(force_rollback=True):
+        cur = pg.cursor()
+        cur.execute(
+            "insert into public.stores (id, code, name) values (%s, 'OTHER', 'Other') "
+            "on conflict (id) do nothing",
+            (OTHER_STORE_ID,),
+        )
+        _a_level(cur, store_id=OTHER_STORE_ID)
+        cur.execute("set local role authenticated")
+        cur.execute(
+            "select set_config('request.jwt.claims', %s, true)",
+            (claims(MANAGER_ID, perms.MANAGER),),
+        )
+        cur.execute(
+            "update public.stock_levels set reorder_point = 5000 "
+            "where product_id = %s and store_id = %s",
+            (PRODUCT_ID, OTHER_STORE_ID),
+        )
+        assert cur.rowcount == 0
+
+
+def test_on_hand_is_still_unwritable_by_anyone(pg: Any) -> None:
+    """The whole reason 0018 revokes before it grants.
+
+    Supabase had already granted `authenticated` table-wide privileges here,
+    so adding an UPDATE policy alone would have handed every manager the power
+    to write a level the ledger never agreed to — and
+    `scripts/reconcile_stock.sql`, phase 6's exit criterion, would start
+    returning rows with nothing to explain them.
+
+    A column-level privilege is checked before RLS, so this fails at the grant
+    layer whatever the policy says. psycopg carries SQLSTATE as the exception
+    type; 42501 is not in the message.
+    """
+    with pg.transaction(force_rollback=True):
+        cur = pg.cursor()
+        _a_level(cur)
+        cur.execute("set local role authenticated")
+        cur.execute(
+            "select set_config('request.jwt.claims', %s, true)",
+            (claims(MANAGER_ID, perms.MANAGER),),
+        )
+        with pytest.raises(psycopg.errors.InsufficientPrivilege):
+            cur.execute(
+                "update public.stock_levels set on_hand = 999999 "
+                "where product_id = %s and store_id = %s",
+                (PRODUCT_ID, STORE_ID),
+            )
+
+
+def test_a_level_cannot_be_conjured_from_nothing(pg: Any) -> None:
+    """No INSERT, deliberately. A row that arrives without a ledger entry
+    behind it is an `on_hand` nobody can account for."""
+    with pg.transaction(force_rollback=True):
+        cur = pg.cursor()
+        cur.execute("set local role authenticated")
+        cur.execute(
+            "select set_config('request.jwt.claims', %s, true)",
+            (claims(MANAGER_ID, perms.MANAGER),),
+        )
+        with pytest.raises(psycopg.errors.InsufficientPrivilege):
+            cur.execute(
+                "insert into public.stock_levels "
+                "(store_id, product_id, on_hand, reorder_point) "
+                "values (%s, %s, 5000, 10)",
+                (STORE_ID, UNCODED_PRODUCT_ID),
+            )
+
+
+def test_setting_a_reorder_point_moves_the_pull_cursor(pg: Any) -> None:
+    """The puller pages `stock_levels` by `updated_at`.
+
+    Only `apply_stock_delta` ever advanced it, so without the trigger in 0018
+    a reorder point would change the cloud and never reach a till: the row's
+    cursor would not move and the pull would step over it.
+
+    The row is seeded with a literal old timestamp rather than a backdated
+    UPDATE, because a BEFORE UPDATE trigger fires on that too and would stamp
+    the very value the test was trying to set. And `now()` is the transaction
+    timestamp, constant for the whole transaction, so the comparison has to be
+    against something that is not `now()` at all.
+    """
+    stale = "2020-01-01T00:00:00+00:00"
+    with pg.transaction(force_rollback=True):
+        cur = pg.cursor()
+        cur.execute(
+            "delete from public.stock_levels where product_id = %s and store_id = %s",
+            (PRODUCT_ID, STORE_ID),
+        )
+        cur.execute(
+            "insert into public.stock_levels "
+            "(store_id, product_id, on_hand, reorder_point, updated_at) "
+            "values (%s, %s, 24000, 0, %s)",
+            (STORE_ID, PRODUCT_ID, stale),
+        )
+
+        cur.execute("set local role authenticated")
+        cur.execute(
+            "select set_config('request.jwt.claims', %s, true)",
+            (claims(MANAGER_ID, perms.MANAGER),),
+        )
+        # Deliberately does not name updated_at: the client cannot write it,
+        # and the point is that it moves anyway.
+        cur.execute(
+            "update public.stock_levels set reorder_point = 5000 "
+            "where product_id = %s and store_id = %s",
+            (PRODUCT_ID, STORE_ID),
+        )
+        cur.execute("reset role")
+        cur.execute(
+            "select updated_at = now() from public.stock_levels "
+            "where product_id = %s and store_id = %s",
+            (PRODUCT_ID, STORE_ID),
+        )
+        assert cur.fetchone()[0] is True
+
+
+def test_a_negative_reorder_point_is_refused(pg: Any) -> None:
+    with pg.transaction(force_rollback=True):
+        cur = pg.cursor()
+        _a_level(cur)
+        cur.execute("set local role authenticated")
+        cur.execute(
+            "select set_config('request.jwt.claims', %s, true)",
+            (claims(MANAGER_ID, perms.MANAGER),),
+        )
+        with pytest.raises(psycopg.errors.CheckViolation):
+            cur.execute(
+                "update public.stock_levels set reorder_point = -1 "
+                "where product_id = %s and store_id = %s",
+                (PRODUCT_ID, STORE_ID),
+            )
+

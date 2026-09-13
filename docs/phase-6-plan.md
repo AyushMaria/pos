@@ -246,7 +246,11 @@ other client does, so `product.create` and `product.edit` are already enforced.
    charged, whatever the catalogue later says the item is called.
 4. Low stock is a query, not a feature: `on_hand <= reorder_point` where
    `reorder_point > 0`. Put it on the manager's screen and leave alerting alone
-   until somebody asks for it.
+   until somebody asks for it. *Shipped without any way to set
+   `reorder_point`, so the list was correct and structurally incapable of
+   returning a row — and the column it displayed was thousandths rendered as
+   units, which nobody saw because the table was always empty. 0018 adds the
+   write path and the screen converts. Alerting is still nobody's job yet.*
 
 **Prove it:** create a product, give it a barcode and a price, sell it. Then
 try to give a second product the same barcode and read what the screen says.

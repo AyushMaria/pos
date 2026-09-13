@@ -1148,6 +1148,23 @@
         "title": "ReceiptRequest",
         "type": "object"
       },
+      "ReorderPointSetRequest": {
+        "additionalProperties": false,
+        "description": "Thousandths, like every other quantity below the screen.\n\nIt is compared directly against `stock_levels.on_hand`, which is a sum of\n`delta_milli`, so the two must be the same unit or the comparison is\nnonsense in a way nothing would report. One packet is 1000. The screen\nconverts, exactly as the stockroom does.",
+        "properties": {
+          "reorder_point": {
+            "maximum": 1000000000.0,
+            "minimum": 0.0,
+            "title": "Reorder Point",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "reorder_point"
+        ],
+        "title": "ReorderPointSetRequest",
+        "type": "object"
+      },
       "ResolveReviewRequest": {
         "additionalProperties": false,
         "properties": {
@@ -1364,6 +1381,36 @@
           "lines"
         ],
         "title": "StockCountRequest",
+        "type": "object"
+      },
+      "StockLevelOut": {
+        "additionalProperties": false,
+        "description": "A product's level after a write. Both quantities are thousandths.",
+        "properties": {
+          "on_hand": {
+            "title": "On Hand",
+            "type": "integer"
+          },
+          "product_id": {
+            "title": "Product Id",
+            "type": "string"
+          },
+          "reorder_point": {
+            "title": "Reorder Point",
+            "type": "integer"
+          },
+          "store_id": {
+            "title": "Store Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "product_id",
+          "store_id",
+          "on_hand",
+          "reorder_point"
+        ],
+        "title": "StockLevelOut",
         "type": "object"
       },
       "SyncFailureOut": {
@@ -2349,6 +2396,102 @@
           }
         },
         "summary": "List Prices",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/admin/products/{product_id}/reorder-point": {
+      "put": {
+        "description": "The level at which this product wants reordering.\n\nThe store comes from the session, never the body \u2014 the same rule as\n`set_price`. A manager signed in to one shop cannot set another shop's\nminimum by naming it.",
+        "operationId": "set_reorder_point_admin_products__product_id__reorder_point_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "product_id",
+            "required": true,
+            "schema": {
+              "title": "Product Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReorderPointSetRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StockLevelOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Set Reorder Point",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/admin/products/{product_id}/stock-level": {
+      "get": {
+        "description": "This product's level and reorder point in the signed-in store.",
+        "operationId": "stock_level_admin_products__product_id__stock_level_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "product_id",
+            "required": true,
+            "schema": {
+              "title": "Product Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StockLevelOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Stock Level",
         "tags": [
           "admin"
         ]

@@ -36,6 +36,8 @@ from app.api.schemas import (
     PricesResponse,
     ProductCreateRequest,
     ProductUpdateRequest,
+    ReorderPointSetRequest,
+    StockLevelOut,
     UnknownScanOut,
     UnknownScansResponse,
 )
@@ -51,6 +53,7 @@ from app.services.admin_service import (
     DuplicateBarcode,
     DuplicateSku,
     LowStockRow,
+    StockLevel,
     UnknownScan,
 )
 
@@ -129,6 +132,15 @@ def _scan_out(scan: UnknownScan) -> UnknownScanOut:
         scanned_at=scan.scanned_at,
         terminal_id=scan.terminal_id,
         resolved=scan.resolved,
+    )
+
+
+def _stock_level_out(level: StockLevel) -> StockLevelOut:
+    return StockLevelOut(
+        product_id=level.product_id,
+        store_id=level.store_id,
+        on_hand=level.on_hand,
+        reorder_point=level.reorder_point,
     )
 
 
@@ -340,6 +352,60 @@ async def resolve_scan(scan_id: str, admin: Admin, session: CanEdit) -> None:
 
 
 # ── Low stock ─────────────────────────────────────────────────────────────
+
+
+@router.get("/products/{product_id}/stock-level", response_model=StockLevelOut)
+async def stock_level(
+    product_id: str, admin: Admin, session: CanRead
+) -> StockLevelOut:
+    """This product's level and reorder point in the signed-in store."""
+    try:
+        level = await admin.stock_level(product_id, session.store_id)
+    except AdminUnavailable as exc:
+        raise _offline(exc) from exc
+    except AdminRejected as exc:
+        raise _refused(exc) from exc
+
+    if level is None:
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND,
+            "this product has no stock record yet",
+        )
+    return _stock_level_out(level)
+
+
+@router.put(
+    "/products/{product_id}/reorder-point", response_model=StockLevelOut
+)
+async def set_reorder_point(
+    product_id: str, body: ReorderPointSetRequest, admin: Admin, session: CanEdit
+) -> StockLevelOut:
+    """The level at which this product wants reordering.
+
+    The store comes from the session, never the body — the same rule as
+    `set_price`. A manager signed in to one shop cannot set another shop's
+    minimum by naming it.
+    """
+    try:
+        level = await admin.set_reorder_point(
+            product_id, session.store_id, body.reorder_point
+        )
+    except AdminUnavailable as exc:
+        raise _offline(exc) from exc
+    except AdminRejected as exc:
+        raise _refused(exc) from exc
+
+    if level is None:
+        # 0018 grants update and no insert, so there is nothing to write until
+        # the product has a level. 409 rather than 404: the product exists, the
+        # request was well formed, and the answer is "not yet" — which is a
+        # state the person can change, and the sentence says how.
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "this product has no stock yet — count it in or receive it first, "
+            "then set the reorder point",
+        )
+    return _stock_level_out(level)
 
 
 @router.get("/low-stock", response_model=LowStockResponse)

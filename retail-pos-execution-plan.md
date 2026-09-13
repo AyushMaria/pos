@@ -157,7 +157,10 @@ Three things surfaced during the build:
 ### Phase 6 — Inventory and catalog (weeks 14–15)
 
 - Product/barcode/price admin screens (the first real admin UI)
-- Goods receipt against POs, pack-size multipliers on ITF-14 codes
+- Goods receipt against a supplier document reference, pack-size multipliers on ITF-14 codes
+  — *not against a purchase order. No PO entity exists; `stock_ledger` keys a receipt by
+  document, which is the number written on the delivery note in the shop's hand. Receiving
+  against a PO, with matching and partial deliveries, is deferred to phase 8.*
 - Stock counts and adjustments
 - Internal `21…` prefix code assignment for products with no manufacturer barcode
 - Unknown-barcode quick-create and the `unknown_scans` queue
@@ -180,6 +183,9 @@ Three things surfaced during the build:
 - Shift close: counted vs. expected, variance, UPI attested totals listed separately, accumulated rounding shown as its own figure
 - X/Z reports, day close Edge Function
 - Sales, margin and stock reports with permission-scoped columns
+- Purchase orders, deferred from phase 6: the entity, receiving against it, and what a
+  partial delivery means. Sequenced here because a PO is only worth raising once there
+  is a reorder report to raise it from
 
 **Exit criteria:** a full trading day opens and closes with a variance figure the owner can actually explain — which means rounding gain/loss is reported separately and not mistaken for cashier error. Z-report totals tie to the sum of `payments` by method. Reports export to a file the owner can open without the app.
 

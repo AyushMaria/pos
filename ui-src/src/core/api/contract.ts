@@ -225,6 +225,15 @@ export interface ReceiptPreviewRequest {
 export interface ReceiptRequest {
   lines: ReceiptPreviewRequest[];
 }
+/** Thousandths, like every other quantity below the screen.
+
+It is compared directly against `stock_levels.on_hand`, which is a sum of
+`delta_milli`, so the two must be the same unit or the comparison is
+nonsense in a way nothing would report. One packet is 1000. The screen
+converts, exactly as the stockroom does. */
+export interface ReorderPointSetRequest {
+  reorder_point: number;
+}
 export interface ResolveReviewRequest {
   /** 'paid' if the money was there after all, 'not_paid' if it never arrived. Never a bare 'resolved': a variance nobody can name is one nobody can act on at shift close. */
   outcome: string;
@@ -268,6 +277,13 @@ export interface StockCountLine {
 }
 export interface StockCountRequest {
   lines: StockCountLine[];
+}
+/** A product's level after a write. Both quantities are thousandths. */
+export interface StockLevelOut {
+  product_id: string;
+  store_id: string;
+  on_hand: number;
+  reorder_point: number;
 }
 export interface SyncFailureOut {
   id: number;

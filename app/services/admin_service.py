@@ -121,6 +121,16 @@ class UnknownScan:
 
 
 @dataclass(frozen=True)
+class StockLevel:
+    """What a product's level is now. Quantities are thousandths."""
+
+    product_id: str
+    store_id: str
+    on_hand: int
+    reorder_point: int
+
+
+@dataclass(frozen=True)
 class LowStockRow:
     product_id: str
     sku: str
@@ -174,6 +184,15 @@ def _scan(row: dict[str, Any]) -> UnknownScan:
         scanned_at=row["scanned_at"],
         terminal_id=row.get("terminal_id"),
         resolved=bool(row["resolved"]),
+    )
+
+
+def _stock_level(row: dict[str, Any]) -> StockLevel:
+    return StockLevel(
+        product_id=str(row["product_id"]),
+        store_id=str(row["store_id"]),
+        on_hand=int(row["on_hand"]),
+        reorder_point=int(row["reorder_point"]),
     )
 
 
@@ -461,6 +480,58 @@ class AdminService:
                 product_id,
             )
         return new
+
+    async def stock_level(self, product_id: str, store_id: str) -> StockLevel | None:
+        """What this product's level and minimum are now, or None if untracked.
+
+        None is the ordinary answer for a product that has never been counted
+        or received: `stock_levels` gets its rows from `apply_stock_delta`, so
+        one exists only once the ledger has said something about the product.
+        """
+        rows = await self._send(
+            "GET",
+            "stock_levels",
+            params={
+                "product_id": f"eq.{product_id}",
+                "store_id": f"eq.{store_id}",
+                "limit": "1",
+            },
+        )
+        return _stock_level(rows[0]) if rows else None
+
+    async def set_reorder_point(
+        self, product_id: str, store_id: str, reorder_point: int
+    ) -> StockLevel | None:
+        """The minimum below which this product needs reordering.
+
+        A PATCH and never an upsert. 0018 grants `update (reorder_point)` and
+        no insert at all, so there is no row to write for a product that has
+        never been counted or received — and inventing one would mean writing
+        an `on_hand` the ledger never agreed to.
+
+        Returns the level as it now stands, taken from the write's own
+        representation rather than read back. Reading it back through
+        `low_stock` would have been wrong in the ordinary case: that view
+        selects `reorder_point > 0 and on_hand <= reorder_point`, so a product
+        that is *not* low — which is most of them, and the point of setting a
+        minimum early — would come back empty and look like a failure.
+
+        `None` means nothing was written, which has two readings this layer
+        cannot separate: no stock row yet, or RLS filtered it away. The router
+        turns that into a sentence about counting the product in, because that
+        is the true answer in almost every case and the actionable one in both.
+        """
+        rows = await self._send(
+            "PATCH",
+            "stock_levels",
+            params={
+                "product_id": f"eq.{product_id}",
+                "store_id": f"eq.{store_id}",
+            },
+            json={"reorder_point": reorder_point},
+            prefer="return=representation",
+        )
+        return _stock_level(rows[0]) if rows else None
 
     # ── The unknown-scan queue ────────────────────────────────────────────
 

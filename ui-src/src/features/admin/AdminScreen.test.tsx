@@ -32,6 +32,8 @@ const api = {
   unknownScans: vi.fn(),
   resolveScan: vi.fn(),
   lowStock: vi.fn(),
+  stockLevel: vi.fn(),
+  setReorderPoint: vi.fn(),
   taxCodes: vi.fn(),
 };
 
@@ -49,6 +51,8 @@ vi.mock("../../core/api/admin", () => ({
     unknownScans: (...a: unknown[]) => api.unknownScans(...a),
     resolveScan: (...a: unknown[]) => api.resolveScan(...a),
     lowStock: (...a: unknown[]) => api.lowStock(...a),
+    stockLevel: (...a: unknown[]) => api.stockLevel(...a),
+    setReorderPoint: (...a: unknown[]) => api.setReorderPoint(...a),
   },
 }));
 
@@ -92,6 +96,9 @@ beforeEach(() => {
   api.prices.mockResolvedValue({ prices: [] });
   api.unknownScans.mockResolvedValue({ scans: [] });
   api.lowStock.mockResolvedValue({ rows: [] });
+  api.stockLevel.mockResolvedValue({
+    product_id: "p1", store_id: "st1", on_hand: 24_000, reorder_point: 0,
+  });
 });
 
 async function openProduct(user: ReturnType<typeof userEvent.setup>) {
@@ -253,6 +260,49 @@ describe("creating a product", () => {
     );
     expect(screen.queryByRole("button", { name: "New product" })).toBeNull();
     expect(screen.getByLabelText("Search the catalogue")).toBeInTheDocument();
+  });
+});
+
+describe("a reorder point is thousandths below the screen", () => {
+  it("sends 5000 when a person types 5", async () => {
+    const user = userEvent.setup();
+    render(<AdminScreen session={person(["product.read", "product.edit"])} onClose={() => {}} />);
+    await openProduct(user);
+
+    api.setReorderPoint.mockResolvedValue({
+      product_id: "p1", store_id: "st1", on_hand: 24_000, reorder_point: 5_000,
+    });
+    await user.type(await screen.findByLabelText("Reorder point"), "5");
+    await user.click(screen.getByRole("button", { name: "Set reorder point" }));
+
+    // It is compared against on_hand, which is a sum of delta_milli. Sending
+    // 5 would mean "reorder below one two-hundredth of a packet", silently.
+    await waitFor(() =>
+      expect(api.setReorderPoint).toHaveBeenCalledWith("p1", { reorder_point: 5_000 }),
+    );
+  });
+
+  it("shows the level back in things a person counts", async () => {
+    const user = userEvent.setup();
+    api.stockLevel.mockResolvedValue({
+      product_id: "p1", store_id: "st1", on_hand: 24_000, reorder_point: 5_000,
+    });
+    render(<AdminScreen session={person(["product.read", "product.edit"])} onClose={() => {}} />);
+    await openProduct(user);
+
+    expect(await screen.findByText("5 kg")).toBeInTheDocument();
+    expect(await screen.findByText(/24 kg on hand/)).toBeInTheDocument();
+  });
+
+  it("says to count the product in when it has no stock row", async () => {
+    const user = userEvent.setup();
+    api.stockLevel.mockRejectedValue(new ApiError(404, "no stock record"));
+    render(<AdminScreen session={person(["product.read", "product.edit"])} onClose={() => {}} />);
+    await openProduct(user);
+
+    // The ordinary state of a product nobody has counted yet, not an error.
+    expect(await screen.findByText(/Count this product in/)).toBeInTheDocument();
+    expect(screen.queryByLabelText("Reorder point")).not.toBeInTheDocument();
   });
 });
 

@@ -9,6 +9,8 @@ import type {
   LowStockResponse,
   PriceSetRequest,
   PricesResponse,
+  ReorderPointSetRequest,
+  StockLevelOut,
   ProductCreateRequest,
   ProductUpdateRequest,
   UnknownScansResponse,
@@ -66,6 +68,16 @@ export const admin = {
   /** Paise. The store is taken from the session, never sent from here. */
   setPrice: (productId: string, body: PriceSetRequest) =>
     request<AdminPriceOut>(`/admin/products/${productId}/price`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
+
+  stockLevel: (productId: string) =>
+    request<StockLevelOut>(`/admin/products/${productId}/stock-level`),
+
+  /** Thousandths. The screen converts; nothing below it does. */
+  setReorderPoint: (productId: string, body: ReorderPointSetRequest) =>
+    request<StockLevelOut>(`/admin/products/${productId}/reorder-point`, {
       method: "PUT",
       body: JSON.stringify(body),
     }),

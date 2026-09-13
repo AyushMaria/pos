@@ -9,6 +9,7 @@ import type {
   Permission,
   ProductCreateRequest,
   SessionResponse,
+  StockLevelOut,
   TaxCodeOut,
   UnknownScanOut,
 } from "../../core/api/contract";
@@ -37,6 +38,15 @@ type Tab = "catalogue" | "queue" | "low";
 
 const rupees = (paise: number) => (paise / 100).toFixed(2);
 const paise = (typed: string) => Math.round(Number(typed) * 100);
+
+/**
+ * Quantities are thousandths below this screen and things you can count on
+ * it — the same boundary the stockroom owns, for the same reason: nobody
+ * counts in millipackets.
+ */
+const UNIT = 1000;
+const units = (milli: number) => String(milli / UNIT);
+const milli = (typed: string) => Math.round(Number(typed) * UNIT);
 
 /** Offline is a different sentence from refused, and a different next step. */
 function useCloudCall() {
@@ -491,6 +501,12 @@ function ProductEditor({
 
       <BarcodeEditor productId={product.product_id} mayEdit={mayEdit} />
       <PriceEditor productId={product.product_id} mayEdit={mayEdit} />
+      <ReorderPointEditor
+        productId={product.product_id}
+        uom={product.uom}
+        tracksStock={tracksStock}
+        mayEdit={mayEdit}
+      />
     </div>
   );
 }
@@ -566,6 +582,113 @@ function BarcodeEditor({ productId, mayEdit }: { productId: string; mayEdit: boo
           product that holds the code — the router does that, because
           "duplicate key value violates unique constraint" is not something
           anyone can act on. */}
+      <CloudNotice offline={offline} error={error} />
+    </section>
+  );
+}
+
+function ReorderPointEditor({
+  productId,
+  uom,
+  tracksStock,
+  mayEdit,
+}: {
+  productId: string;
+  uom: string;
+  tracksStock: boolean;
+  mayEdit: boolean;
+}) {
+  const [level, setLevel] = useState<StockLevelOut | null>(null);
+  const [untracked, setUntracked] = useState(false);
+  const [typed, setTyped] = useState("");
+  const { busy, error, offline, run } = useCloudCall();
+
+  const load = useCallback(async () => {
+    setUntracked(false);
+    try {
+      setLevel(await admin.stockLevel(productId));
+    } catch (cause) {
+      // 404 here is the ordinary state of a product nobody has counted yet,
+      // not a failure worth a red message. Anything else is.
+      if (cause instanceof ApiError && cause.status === 404) {
+        setLevel(null);
+        setUntracked(true);
+        return;
+      }
+      await run(() => Promise.reject(cause));
+    }
+  }, [productId, run]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const save = async (event: React.FormEvent) => {
+    event.preventDefault();
+    const saved = await run(() =>
+      admin.setReorderPoint(productId, { reorder_point: milli(typed) }),
+    );
+    if (saved) {
+      setTyped("");
+      setLevel(saved);
+    }
+  };
+
+  if (!tracksStock) {
+    return (
+      <section className="sub">
+        <h3>Reorder point</h3>
+        <p className="muted">
+          This product does not track stock, so there is no level to fall
+          below. Loose and weighed items are counted on the shelf, not here.
+        </p>
+      </section>
+    );
+  }
+
+  return (
+    <section className="sub">
+      <h3>Reorder point</h3>
+      <p>
+        {untracked ? (
+          <span className="muted">
+            No stock record yet. Count this product in or receive a delivery,
+            then set the point it should be reordered at.
+          </span>
+        ) : level === null ? (
+          <span className="muted">Loading…</span>
+        ) : level.reorder_point === 0 ? (
+          <span className="muted">
+            Not set — {units(level.on_hand)} {uom} on hand. Without a point,
+            this product never reaches the reorder list.
+          </span>
+        ) : (
+          <>
+            <strong>
+              {units(level.reorder_point)} {uom}
+            </strong>{" "}
+            <span className="muted">
+              · {units(level.on_hand)} {uom} on hand
+            </span>
+          </>
+        )}
+      </p>
+
+      {mayEdit && !untracked && (
+        <form onSubmit={save} className="row">
+          <input
+            value={typed}
+            onChange={(event) => setTyped(event.target.value)}
+            inputMode="decimal"
+            placeholder={`Reorder at, in ${uom}`}
+            aria-label="Reorder point"
+          />
+          <button type="submit" disabled={busy || typed.trim() === ""}>
+            Set reorder point
+          </button>
+        </form>
+      )}
+
       <CloudNotice offline={offline} error={error} />
     </section>
   );
@@ -815,9 +938,11 @@ function LowStockTab() {
               <td>{row.sku}</td>
               <td>{row.name}</td>
               <td className="num">
-                {row.on_hand} {row.uom}
+                {units(row.on_hand)} {row.uom}
               </td>
-              <td className="num">{row.reorder_point}</td>
+              <td className="num">
+                {units(row.reorder_point)} {row.uom}
+              </td>
             </tr>
           ))}
         </tbody>

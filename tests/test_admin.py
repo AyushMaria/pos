@@ -327,6 +327,179 @@ async def test_a_price_is_paise_all_the_way_down(rest: FakePostgrest) -> None:
     assert isinstance(price.price, int)
 
 
+# ── Reorder points ────────────────────────────────────────────────────────
+
+
+def _level_row(reorder_point: int = 0) -> dict[str, object]:
+    return {
+        "product_id": PRODUCT,
+        "store_id": STORE,
+        "on_hand": 24_000,
+        "reorder_point": reorder_point,
+    }
+
+
+@pytest.mark.asyncio
+async def test_setting_a_reorder_point_patches_and_never_inserts(
+    rest: FakePostgrest,
+) -> None:
+    """0018 grants update and no insert, so an upsert would be refused anyway.
+
+    Sending a PATCH is the first line of that: a client that tries to create
+    the row is a client trying to write an `on_hand` the ledger never agreed
+    to, which is the invariant `reconcile_stock.sql` exists to protect.
+    """
+    rest.will_return([_level_row(5_000)])
+    await service(rest).set_reorder_point(PRODUCT, STORE, 5_000)
+
+    sent = rest.last()
+    assert sent.method == "PATCH"
+    assert json.loads(sent.content) == {"reorder_point": 5_000}
+
+
+@pytest.mark.asyncio
+async def test_a_reorder_point_is_scoped_to_one_product_in_one_store(
+    rest: FakePostgrest,
+) -> None:
+    rest.will_return([_level_row(5_000)])
+    await service(rest).set_reorder_point(PRODUCT, STORE, 5_000)
+
+    url = unquote(str(rest.last().url))
+    assert f"product_id=eq.{PRODUCT}" in url
+    assert f"store_id=eq.{STORE}" in url
+
+
+@pytest.mark.asyncio
+async def test_no_stock_row_is_none_rather_than_an_error(
+    rest: FakePostgrest,
+) -> None:
+    """The ordinary state of a product nobody has counted in yet.
+
+    PostgREST answers an empty set, exactly as it does when RLS filtered the
+    row away. This layer cannot tell those apart and does not pretend to — it
+    reports that nothing was written and lets the router say the useful thing.
+    """
+    rest.will_return([])
+    assert await service(rest).set_reorder_point(PRODUCT, STORE, 5_000) is None
+
+
+@pytest.mark.asyncio
+async def test_a_reorder_point_is_thousandths_all_the_way_down(
+    rest: FakePostgrest,
+) -> None:
+    """It is compared against `on_hand`, which is a sum of `delta_milli`.
+
+    Five packets is 5000. Sending 5 would mean "reorder when the shelf drops
+    below one two-hundredth of a packet", and nothing anywhere would complain.
+    """
+    rest.will_return([_level_row(5_000)])
+    level = await service(rest).set_reorder_point(PRODUCT, STORE, 5_000)
+    assert level is not None
+    assert level.reorder_point == 5_000
+    assert isinstance(level.reorder_point, int)
+
+
+def test_setting_a_reorder_point_needs_more_than_being_able_to_read(
+    client: TestClient, seeded_cashier: dict[str, str], rest: FakePostgrest
+) -> None:
+    _sign_in(client, seeded_cashier, token=TOKEN)
+    client.app.state.admin_service = service(rest)
+
+    response = client.put(
+        "/admin/products/p1/reorder-point",
+        json={"reorder_point": 5000},
+        headers={"X-Session-Token": TOKEN},
+    )
+    assert response.status_code == 403
+    assert rest.seen == []
+
+
+def test_a_product_with_no_stock_row_says_to_count_it_in(
+    client: TestClient, seeded_manager: dict[str, str], rest: FakePostgrest
+) -> None:
+    """409, and a sentence with the next action in it.
+
+    Not 404: the product exists. Not 422: the request was well formed. The
+    answer is "not yet", and the person can change that.
+    """
+    _sign_in(client, seeded_manager, token=TOKEN)
+    rest.will_return([])
+    client.app.state.admin_service = service(rest)
+
+    response = client.put(
+        "/admin/products/p1/reorder-point",
+        json={"reorder_point": 5000},
+        headers={"X-Session-Token": TOKEN},
+    )
+    assert response.status_code == 409
+    assert "count it in" in response.json()["detail"]
+
+
+def test_the_reorder_store_comes_from_the_session_not_the_body(
+    client: TestClient, seeded_manager: dict[str, str], rest: FakePostgrest
+) -> None:
+    """A manager edits the shop they are signed in to.
+
+    Two halves, and the second is the stronger one. The store that reaches
+    PostgREST is the session's; and naming a different one is not quietly
+    ignored but refused, because `ApiModel` forbids extra fields. There is no
+    field on the form for which store and no way to invent one.
+    """
+    _sign_in(client, seeded_manager, token=TOKEN)
+    rest.will_return([_level_row(5_000)])
+    client.app.state.admin_service = service(rest)
+
+    client.put(
+        "/admin/products/p1/reorder-point",
+        json={"reorder_point": 5000},
+        headers={"X-Session-Token": TOKEN},
+    )
+    url = unquote(str(rest.last().url))
+    assert f"store_id=eq.{client.app.state.sessions.current.store_id}" in url
+
+
+def test_naming_another_store_is_refused_rather_than_ignored(
+    client: TestClient, seeded_manager: dict[str, str], rest: FakePostgrest
+) -> None:
+    _sign_in(client, seeded_manager, token=TOKEN)
+    client.app.state.admin_service = service(rest)
+
+    response = client.put(
+        "/admin/products/p1/reorder-point",
+        json={"reorder_point": 5000, "store_id": "some-other-shop"},
+        headers={"X-Session-Token": TOKEN},
+    )
+    assert response.status_code == 422
+    assert rest.seen == []
+
+
+def test_a_level_can_be_read_back(
+    client: TestClient, seeded_manager: dict[str, str], rest: FakePostgrest
+) -> None:
+    _sign_in(client, seeded_manager, token=TOKEN)
+    rest.will_return([_level_row(5_000)])
+    client.app.state.admin_service = service(rest)
+
+    response = client.get(
+        "/admin/products/p1/stock-level", headers={"X-Session-Token": TOKEN}
+    )
+    assert response.status_code == 200
+    assert response.json()["reorder_point"] == 5_000
+
+
+def test_reading_a_level_that_does_not_exist_is_a_404(
+    client: TestClient, seeded_manager: dict[str, str], rest: FakePostgrest
+) -> None:
+    _sign_in(client, seeded_manager, token=TOKEN)
+    rest.will_return([])
+    client.app.state.admin_service = service(rest)
+
+    response = client.get(
+        "/admin/products/p1/stock-level", headers={"X-Session-Token": TOKEN}
+    )
+    assert response.status_code == 404
+
+
 # ── The unknown-scan queue ────────────────────────────────────────────────
 
 
