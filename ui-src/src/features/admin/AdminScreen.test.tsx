@@ -263,6 +263,64 @@ describe("creating a product", () => {
   });
 });
 
+describe("edits that were never saved", () => {
+  // The first person to use this screen ticked "sold by weight", left, and
+  // lost it: the product form saves on a button while every panel below it
+  // saves on its own. The audit log showed no write had ever happened.
+  it("will not offer to save a form nobody has touched", async () => {
+    const user = userEvent.setup();
+    render(<AdminScreen session={person(["product.read", "product.edit"])} onClose={() => {}} />);
+    await openProduct(user);
+
+    expect(screen.getByRole("button", { name: "Save changes" })).toBeDisabled();
+  });
+
+  it("offers to save once something differs", async () => {
+    const user = userEvent.setup();
+    render(<AdminScreen session={person(["product.read", "product.edit"])} onClose={() => {}} />);
+    await openProduct(user);
+
+    await user.click(screen.getByLabelText(/Sold by weight/));
+    expect(screen.getByRole("button", { name: "Save changes" })).toBeEnabled();
+  });
+
+  it("asks before the back link throws the edits away", async () => {
+    const user = userEvent.setup();
+    render(<AdminScreen session={person(["product.read", "product.edit"])} onClose={() => {}} />);
+    await openProduct(user);
+
+    await user.click(screen.getByLabelText(/Sold by weight/));
+    await user.click(screen.getByRole("button", { name: "← All results" }));
+
+    expect(screen.getByRole("alert")).toHaveTextContent("unsaved changes");
+    // Still on the product: the click did not navigate.
+    expect(screen.getByRole("button", { name: "Save changes" })).toBeInTheDocument();
+  });
+
+  it("asks before a tab throws them away too", async () => {
+    const user = userEvent.setup();
+    render(<AdminScreen session={person(["product.read", "product.edit"])} onClose={() => {}} />);
+    await openProduct(user);
+
+    await user.click(screen.getByLabelText(/Sold by weight/));
+    await user.click(screen.getByRole("button", { name: "Low stock" }));
+
+    expect(screen.getByRole("alert")).toHaveTextContent("unsaved changes");
+  });
+
+  it("leaves when the discard is explicit", async () => {
+    const user = userEvent.setup();
+    render(<AdminScreen session={person(["product.read", "product.edit"])} onClose={() => {}} />);
+    await openProduct(user);
+
+    await user.click(screen.getByLabelText(/Sold by weight/));
+    await user.click(screen.getByRole("button", { name: "← All results" }));
+    await user.click(screen.getByRole("button", { name: "Discard them" }));
+
+    expect(await screen.findByLabelText("Search the catalogue")).toBeInTheDocument();
+  });
+});
+
 describe("a reorder point is thousandths below the screen", () => {
   it("sends 5000 when a person types 5", async () => {
     const user = userEvent.setup();

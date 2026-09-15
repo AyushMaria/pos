@@ -118,6 +118,18 @@ button.secondary {
   border: 1px solid #c0392b55;
 }
 
+/* Unsaved work is not an error — nothing has gone wrong yet, and colouring it
+   like a failure teaches people to dismiss the colour. */
+.msg.warn {
+  background: #d087001a;
+  color: #8a5a00;
+  border: 1px solid #d0870055;
+}
+
+.msg.warn .link {
+  font-weight: 600;
+}
+
 .note {
   font-size: 14px;
   margin: 12px 0;

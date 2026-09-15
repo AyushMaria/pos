@@ -75,6 +75,33 @@ function useCloudCall() {
   return { busy, error, offline, run, clearError: () => setError(null) };
 }
 
+/**
+ * The product form saves on a button; the barcode, price and reorder panels
+ * below it save on theirs. That difference is invisible, and the first person
+ * to use this screen ticked "sold by weight", walked away, and lost it — the
+ * edit had never left the browser. Leaving is now a question rather than a
+ * silent discard.
+ */
+function UnsavedChanges({
+  onDiscard,
+  onStay,
+}: {
+  onDiscard: () => void;
+  onStay: () => void;
+}) {
+  return (
+    <p className="msg warn" role="alert">
+      You have unsaved changes to this product.{" "}
+      <button type="button" className="link" onClick={onStay}>
+        Keep editing
+      </button>{" "}
+      <button type="button" className="link danger" onClick={onDiscard}>
+        Discard them
+      </button>
+    </p>
+  );
+}
+
 function CloudNotice({ offline, error }: { offline: boolean; error: string | null }) {
   if (offline) {
     return (
@@ -98,6 +125,15 @@ export function AdminScreen({
     session.permissions.includes(entry.permission),
   );
   const [tab, setTab] = useState<Tab>(allowed[0]?.id ?? "catalogue");
+  // Raised by the product editor. A tab is a navigation like any other, and
+  // it discarded edits as quietly as the back link did.
+  const [unsaved, setUnsaved] = useState(false);
+  const [pending, setPending] = useState<Tab | null>(null);
+
+  const goTo = (next: Tab) => {
+    if (unsaved && next !== tab) setPending(next);
+    else setTab(next);
+  };
 
   if (allowed.length === 0) {
     return (
@@ -127,7 +163,7 @@ export function AdminScreen({
               key={entry.id}
               type="button"
               className={entry.id === tab ? "tab on" : "tab"}
-              onClick={() => setTab(entry.id)}
+              onClick={() => goTo(entry.id)}
             >
               {entry.label}
             </button>
@@ -136,7 +172,20 @@ export function AdminScreen({
         <span className="till">{session.employee_code}</span>
       </header>
 
-      {tab === "catalogue" && <CatalogueTab session={session} />}
+      {pending && (
+        <UnsavedChanges
+          onDiscard={() => {
+            setUnsaved(false);
+            setTab(pending);
+            setPending(null);
+          }}
+          onStay={() => setPending(null)}
+        />
+      )}
+
+      {tab === "catalogue" && (
+        <CatalogueTab session={session} onDirtyChange={setUnsaved} />
+      )}
       {tab === "queue" && <QueueTab session={session} />}
       {tab === "low" && <LowStockTab />}
     </div>
@@ -207,7 +256,13 @@ function ProductSearch({
   );
 }
 
-function CatalogueTab({ session }: { session: SessionResponse }) {
+function CatalogueTab({
+  session,
+  onDirtyChange,
+}: {
+  session: SessionResponse;
+  onDirtyChange: (dirty: boolean) => void;
+}) {
   const [chosen, setChosen] = useState<AdminProductOut | null>(null);
   const [creating, setCreating] = useState(false);
   const mayCreate = session.permissions.includes("product.create");
@@ -235,6 +290,7 @@ function CatalogueTab({ session }: { session: SessionResponse }) {
         <ProductEditor
           product={chosen}
           session={session}
+          onDirtyChange={onDirtyChange}
           onDone={setChosen}
           onBack={() => setChosen(null)}
         />
@@ -402,11 +458,13 @@ function ProductEditor({
   session,
   onDone,
   onBack,
+  onDirtyChange,
 }: {
   product: AdminProductOut;
   session: SessionResponse;
   onDone: (product: AdminProductOut) => void;
   onBack: () => void;
+  onDirtyChange: (dirty: boolean) => void;
 }) {
   const [name, setName] = useState(product.name);
   const [shortName, setShortName] = useState(product.short_name ?? "");
@@ -414,8 +472,23 @@ function ProductEditor({
   const [isWeighed, setIsWeighed] = useState(product.is_weighed);
   const [tracksStock, setTracksStock] = useState(product.track_stock);
   const [rates, setRates] = useState<TaxCodeOut[]>([]);
+  const [leaving, setLeaving] = useState(false);
   const { busy, error, offline, run } = useCloudCall();
   const mayEdit = session.permissions.includes("product.edit");
+
+  // Compared against the product as the server last returned it, so saving
+  // clears this without a second round trip: `onDone` replaces the prop.
+  const dirty =
+    name !== product.name ||
+    shortName !== (product.short_name ?? "") ||
+    taxCode !== product.tax_code ||
+    isWeighed !== product.is_weighed ||
+    tracksStock !== product.track_stock;
+
+  useEffect(() => {
+    onDirtyChange(dirty);
+    return () => onDirtyChange(false);
+  }, [dirty, onDirtyChange]);
 
   useEffect(() => {
     catalog.taxCodes().then((body) => setRates(body.tax_codes)).catch(() => undefined);
@@ -435,11 +508,20 @@ function ProductEditor({
     if (saved) onDone(saved);
   };
 
+  const back = () => {
+    if (dirty) setLeaving(true);
+    else onBack();
+  };
+
   return (
     <div className="editor">
-      <button type="button" className="link" onClick={onBack}>
+      <button type="button" className="link" onClick={back}>
         ← All results
       </button>
+
+      {leaving && (
+        <UnsavedChanges onDiscard={onBack} onStay={() => setLeaving(false)} />
+      )}
       <h2>
         {product.sku} <span className="muted">{product.uom}</span>
       </h2>
@@ -492,8 +574,10 @@ function ProductEditor({
             Off means sales write no ledger row — correct for anything loose.
           </span>
         </label>
-        <button type="submit" disabled={busy || !mayEdit}>
-          Save
+        {/* Disabled until something differs. The button is the only thing on
+            this form that says whether the edits are real yet. */}
+        <button type="submit" disabled={busy || !mayEdit || !dirty}>
+          Save changes
         </button>
       </form>
 
