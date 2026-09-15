@@ -315,6 +315,33 @@ interesting part is that the toolchain could not see any of it:
 
 ---
 
+## What the admin path did not record
+
+The five catalogue mutations wrote no `audit_log` row. Every sync path writes
+them, so the admin screen was the only way to change this shop's data
+invisibly — and the definition of done says "audit rows exist for anything a
+manager would need to investigate later", which is a line about price changes
+whether or not it names them.
+
+0019 puts it in a trigger rather than in `admin_service.py`, because the
+screen reaches PostgREST under the user's own token: a Python-side audit is
+exactly as honest as the client holding that token. Two things fell out of
+writing it. `audit_log_select` required `pos.in_store(store_id)` while
+`audit_log_insert` allowed a null store, so a catalogue edit — `products` has
+no store column — would have been recorded and then invisible to everyone.
+And `to_jsonb(NEW)` on `product_prices` would have carried `cost`, which 0003
+revoked and 0005 built a guarded view to reach, straight into a table a
+manager can read.
+
+0020 came out of checking the grants behind it. Supabase grants `anon` and
+`authenticated` every privilege on everything in `public`; only three tables
+had ever been narrowed, each in response to a specific hole. Nothing there is
+reachable with an anon key — PostgREST issues only the four verbs RLS gates —
+but TRUNCATE is not one RLS can gate, and the local test shim granted
+everything *except* TRUNCATE, so the suite had been starting from a safer
+position than production. A shim kinder than the real thing hides the class
+of finding it exists to catch.
+
 ## What to watch
 
 **Reconciliation is the exit criterion, so write that query first.** Sum the

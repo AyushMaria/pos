@@ -65,6 +65,18 @@ grant execute on function auth.uid() to anon, authenticated, service_role;
 -- Supabase grants the API roles table access by default and relies on RLS to
 -- restrict it; the same must be true here or every policy would look like it
 -- works simply because nothing was granted.
+--
+-- TRUNCATE is in this list deliberately, and was missing until 0020. Supabase
+-- grants it, RLS cannot gate it, and its absence here meant the suite started
+-- from a safer position than production — so a migration revoking it would
+-- have looked like it changed nothing, and the grant itself was invisible.
+-- A shim that is kinder than the real thing hides exactly the class of
+-- finding it exists to catch.
 alter default privileges in schema public
-    grant select, insert, update, delete on tables to authenticated;
+    grant select, insert, update, delete, truncate on tables to authenticated;
 alter default privileges in schema public grant select on tables to anon;
+
+-- Known remaining gap: the real project grants `anon` every table privilege,
+-- not just select. Nothing in this system acts as `anon` and every policy is
+-- `to authenticated`, so the difference does not change a policy outcome —
+-- but it is a difference, and it belongs written down rather than discovered.

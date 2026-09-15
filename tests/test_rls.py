@@ -1515,3 +1515,223 @@ def test_a_negative_reorder_point_is_refused(pg: Any) -> None:
                 (PRODUCT_ID, STORE_ID),
             )
 
+
+
+# ── 0019: the catalogue leaves a trail ────────────────────────────────────
+
+
+def _as_manager(cur: Any) -> None:
+    cur.execute("set local role authenticated")
+    cur.execute(
+        "select set_config('request.jwt.claims', %s, true)",
+        (claims(MANAGER_ID, perms.MANAGER),),
+    )
+
+
+def _audit(cur: Any, action: str) -> list[Any]:
+    """Audit rows for one action, read back as owner rather than as the caller."""
+    cur.execute("reset role")
+    cur.execute(
+        "select actor_id, entity, entity_id, before_json, after_json, store_id "
+        "from public.audit_log where action = %s order by occurred_at",
+        (action,),
+    )
+    return cur.fetchall()
+
+
+def test_creating_a_product_leaves_a_trail(pg: Any) -> None:
+    with pg.transaction(force_rollback=True):
+        cur = pg.cursor()
+        _as_manager(cur)
+        cur.execute(
+            "insert into public.products (sku, name, tax_code) "
+            "values ('SKU-AUDIT-1', 'Audited thing', 'GST0')"
+        )
+        rows = _audit(cur, "product.created")
+        assert len(rows) == 1
+        actor, entity, _entity_id, before, after, store = rows[0]
+        assert str(actor) == MANAGER_ID
+        assert entity == "products"
+        assert before is None
+        assert after["sku"] == "SKU-AUDIT-1"
+        # `products` has no store column; the trail records where the editor was.
+        assert str(store) == STORE_ID
+
+
+def test_withdrawing_a_barcode_is_named_as_a_withdrawal(pg: Any) -> None:
+    """A soft delete and an edit are the same UPDATE to Postgres.
+
+    `tg_argv[1]` exists so the log says which one a person did.
+    """
+    with pg.transaction(force_rollback=True):
+        cur = pg.cursor()
+        _as_manager(cur)
+        cur.execute(
+            "update public.product_barcodes set deleted_at = now() "
+            "where product_id = %s and deleted_at is null",
+            (PRODUCT_ID,),
+        )
+        assert cur.rowcount > 0
+        assert len(_audit(cur, "barcode.withdrawn")) == cur.rowcount
+        assert _audit(cur, "barcode.updated") == []
+
+
+def test_cost_never_reaches_the_audit_trail(pg: Any) -> None:
+    """0003 revoked `product_prices.cost` and 0005 made one guarded route to
+    it. An audit row carrying the whole `NEW` record would have been a second,
+    unguarded one — readable by anyone who may read the log at all."""
+    with pg.transaction(force_rollback=True):
+        cur = pg.cursor()
+        cur.execute(
+            "insert into public.product_prices (product_id, store_id, price, cost) "
+            "values (%s, %s, 4500, 3000)",
+            (PRODUCT_ID, STORE_ID),
+        )
+        rows = _audit(cur, "price.opened")
+        assert len(rows) == 1
+        after = rows[0][4]
+        assert after["price"] == 4500
+        assert "cost" not in after
+
+
+def test_a_cashier_cannot_read_the_trail(pg: Any) -> None:
+    with pg.transaction(force_rollback=True):
+        cur = pg.cursor()
+        cur.execute(
+            "insert into public.products (sku, name, tax_code) "
+            "values ('SKU-AUDIT-2', 'Another', 'GST0')"
+        )
+        cur.execute("set local role authenticated")
+        cur.execute(
+            "select set_config('request.jwt.claims', %s, true)",
+            (claims(CASHIER_ID, perms.CASHIER),),
+        )
+        cur.execute("select count(*) from public.audit_log")
+        assert cur.fetchone()[0] == 0
+
+
+def test_a_store_less_row_is_readable_by_someone_who_may_read_the_log(pg: Any) -> None:
+    """`audit_log_insert` always allowed a null store; `audit_log_select` did
+    not, and `pos.in_store(null)` is false — so a catalogue edit would have
+    been written and then invisible to everybody. 0019 mirrors the two."""
+    with pg.transaction(force_rollback=True):
+        cur = pg.cursor()
+        cur.execute(
+            "insert into public.audit_log (id, store_id, action, entity, occurred_at) "
+            "values (gen_random_uuid(), null, 'product.updated', 'products', now())"
+        )
+        cur.execute("set local role authenticated")
+        cur.execute(
+            "select set_config('request.jwt.claims', %s, true)",
+            (claims(MANAGER_ID, perms.MANAGER),),
+        )
+        cur.execute("select count(*) from public.audit_log where store_id is null")
+        assert cur.fetchone()[0] == 1
+
+
+def test_a_sale_does_not_write_a_reorder_point_audit_row(pg: Any) -> None:
+    """The `when` clause is the whole safety of the `stock_levels` trigger.
+
+    `apply_stock_delta` upserts `on_hand` and `updated_at` on every ledger
+    row, so without it every sale in the shop would land in the audit log and
+    bury the thing the log is for.
+    """
+    with pg.transaction(force_rollback=True):
+        cur = pg.cursor()
+        cur.execute(
+            "insert into public.stock_ledger "
+            "(id, store_id, product_id, delta_milli, reason, occurred_at) "
+            "values (gen_random_uuid(), %s, %s, -1000, 'sale', now())",
+            (STORE_ID, PRODUCT_ID),
+        )
+        assert _audit(cur, "stock.reorder_point_set") == []
+
+        _as_manager(cur)
+        cur.execute(
+            "update public.stock_levels set reorder_point = 5000 "
+            "where product_id = %s and store_id = %s",
+            (PRODUCT_ID, STORE_ID),
+        )
+        assert len(_audit(cur, "stock.reorder_point_set")) == 1
+
+
+# ── 0020: privileges nothing uses ─────────────────────────────────────────
+
+
+def test_the_audit_log_cannot_be_emptied(pg: Any) -> None:
+    """TRUNCATE is the one privilege RLS cannot gate — no policy is consulted.
+
+    The test shim granted everything *except* truncate until 0020, so this
+    started from a kinder position than production and the real grant stayed
+    invisible. The shim now mirrors it, which is what gives this test meaning.
+    """
+    with pg.transaction(force_rollback=True):
+        cur = pg.cursor()
+        _as_manager(cur)
+        with pytest.raises(psycopg.errors.InsufficientPrivilege):
+            cur.execute("truncate public.audit_log")
+
+
+def test_the_ledger_cannot_be_emptied_either(pg: Any) -> None:
+    with pg.transaction(force_rollback=True):
+        cur = pg.cursor()
+        _as_manager(cur)
+        with pytest.raises(psycopg.errors.InsufficientPrivilege):
+            cur.execute("truncate public.stock_ledger")
+
+
+def test_an_audit_row_cannot_be_rewritten(pg: Any) -> None:
+    """Append-only at the privilege layer, not only by the absence of a policy.
+
+    A log the grant system says may be rewritten is a log with a caveat.
+    """
+    with pg.transaction(force_rollback=True):
+        cur = pg.cursor()
+        _as_manager(cur)
+        with pytest.raises(psycopg.errors.InsufficientPrivilege):
+            cur.execute("update public.audit_log set action = 'nothing.happened'")
+
+
+def test_a_trigger_function_is_not_on_the_public_api(pg: Any) -> None:
+    """`apply_stock_delta` is SECURITY DEFINER and lives in `public`, so
+    PostgREST published it at /rest/v1/rpc/. A trigger needs no EXECUTE grant
+    to fire, so taking it away costs nothing."""
+    with pg.transaction(force_rollback=True):
+        cur = pg.cursor()
+        cur.execute(
+            "select has_function_privilege('authenticated', "
+            "'public.apply_stock_delta()', 'EXECUTE')"
+        )
+        assert cur.fetchone()[0] is False
+
+
+def test_the_ledger_still_applies_after_the_revoke(pg: Any) -> None:
+    """The point of the test above: the trigger fires regardless."""
+    with pg.transaction(force_rollback=True):
+        cur = pg.cursor()
+        cur.execute(
+            "select coalesce(on_hand, 0) from public.stock_levels "
+            "where product_id = %s and store_id = %s",
+            (PRODUCT_ID, STORE_ID),
+        )
+        row = cur.fetchone()
+        before = row[0] if row else 0
+
+        cur.execute("set local role authenticated")
+        cur.execute(
+            "select set_config('request.jwt.claims', %s, true)",
+            (claims(CASHIER_ID, perms.CASHIER),),
+        )
+        cur.execute("reset role")
+        cur.execute(
+            "insert into public.stock_ledger "
+            "(id, store_id, product_id, delta_milli, reason, occurred_at) "
+            "values (gen_random_uuid(), %s, %s, 7000, 'receipt', now())",
+            (STORE_ID, PRODUCT_ID),
+        )
+        cur.execute(
+            "select on_hand from public.stock_levels "
+            "where product_id = %s and store_id = %s",
+            (PRODUCT_ID, STORE_ID),
+        )
+        assert cur.fetchone()[0] == before + 7000
