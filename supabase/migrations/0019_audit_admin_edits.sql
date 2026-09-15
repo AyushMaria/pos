@@ -121,6 +121,23 @@ begin
 end;
 $$;
 
+-- ## What this means for bulk writes
+--
+-- The triggers do not know who is calling, which is the point — but it means
+-- anything that writes these tables in bulk now writes a matching pile of
+-- audit rows. Two cases worth expecting rather than discovering:
+--
+--   * **Seeding.** `seed.sql` creates products, barcodes and prices, so a
+--     freshly pushed project starts with an audit log that is already
+--     populated, with a null `actor_id` because nobody was signed in. That is
+--     accurate — the rows really were created — and the RLS suite scopes its
+--     assertions to the row each test makes rather than assuming an empty
+--     table.
+--   * **`scripts/assign_internal_codes.sql`.** It mints a barcode for every
+--     product that has none. Re-running it against the pilot catalogue would
+--     write roughly 12,431 `barcode.added` rows in one statement. Correct,
+--     and worth knowing before it surprises somebody reading the log.
+
 -- ── Where it fires ────────────────────────────────────────────────────────
 
 drop trigger if exists products_audit_insert on public.products;

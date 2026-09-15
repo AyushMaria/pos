@@ -1528,13 +1528,21 @@ def _as_manager(cur: Any) -> None:
     )
 
 
-def _audit(cur: Any, action: str) -> list[Any]:
-    """Audit rows for one action, read back as owner rather than as the caller."""
+def _audit(cur: Any, action: str, entity_id: Any = None) -> list[Any]:
+    """Audit rows for one action, read back as owner rather than as the caller.
+
+    `entity_id` is not optional in spirit. Seeding the database creates
+    products, barcodes and prices, and those inserts fire these triggers like
+    any other — so the log is never empty and counting every row for an action
+    answers a different question than the one a test is asking.
+    """
     cur.execute("reset role")
     cur.execute(
         "select actor_id, entity, entity_id, before_json, after_json, store_id "
-        "from public.audit_log where action = %s order by occurred_at",
-        (action,),
+        "from public.audit_log "
+        " where action = %s and (%s::uuid is null or entity_id = %s::uuid) "
+        " order by occurred_at",
+        (action, entity_id, entity_id),
     )
     return cur.fetchall()
 
@@ -1545,9 +1553,10 @@ def test_creating_a_product_leaves_a_trail(pg: Any) -> None:
         _as_manager(cur)
         cur.execute(
             "insert into public.products (sku, name, tax_code) "
-            "values ('SKU-AUDIT-1', 'Audited thing', 'GST0')"
+            "values ('SKU-AUDIT-1', 'Audited thing', 'GST0') returning id"
         )
-        rows = _audit(cur, "product.created")
+        made = cur.fetchone()[0]
+        rows = _audit(cur, "product.created", made)
         assert len(rows) == 1
         actor, entity, _entity_id, before, after, store = rows[0]
         assert str(actor) == MANAGER_ID
@@ -1584,10 +1593,11 @@ def test_cost_never_reaches_the_audit_trail(pg: Any) -> None:
         cur = pg.cursor()
         cur.execute(
             "insert into public.product_prices (product_id, store_id, price, cost) "
-            "values (%s, %s, 4500, 3000)",
+            "values (%s, %s, 4500, 3000) returning id",
             (PRODUCT_ID, STORE_ID),
         )
-        rows = _audit(cur, "price.opened")
+        made = cur.fetchone()[0]
+        rows = _audit(cur, "price.opened", made)
         assert len(rows) == 1
         after = rows[0][4]
         assert after["price"] == 4500
@@ -1616,16 +1626,23 @@ def test_a_store_less_row_is_readable_by_someone_who_may_read_the_log(pg: Any) -
     been written and then invisible to everybody. 0019 mirrors the two."""
     with pg.transaction(force_rollback=True):
         cur = pg.cursor()
+        marker = "018f0000-0000-7000-8000-0000000000aa"
         cur.execute(
-            "insert into public.audit_log (id, store_id, action, entity, occurred_at) "
-            "values (gen_random_uuid(), null, 'product.updated', 'products', now())"
+            "insert into public.audit_log "
+            "(id, store_id, action, entity, entity_id, occurred_at) "
+            "values (gen_random_uuid(), null, 'product.updated', 'products', %s, now())",
+            (marker,),
         )
         cur.execute("set local role authenticated")
         cur.execute(
             "select set_config('request.jwt.claims', %s, true)",
             (claims(MANAGER_ID, perms.MANAGER),),
         )
-        cur.execute("select count(*) from public.audit_log where store_id is null")
+        cur.execute(
+            "select count(*) from public.audit_log "
+            " where store_id is null and entity_id = %s::uuid",
+            (marker,),
+        )
         assert cur.fetchone()[0] == 1
 
 
