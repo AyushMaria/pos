@@ -85,8 +85,19 @@ export const admin = {
   unknownScans: (resolved = false) =>
     request<UnknownScansResponse>(`/admin/unknown-scans?resolved=${resolved}`),
 
+  /**
+   * Close an entry because the code is now on a product.
+   *
+   * Only correct *after* `addBarcode` has landed: 0021 refuses this if the
+   * barcode is still on nothing, which is the whole point of it. A 422 here
+   * means the attach never happened and the entry is rightly still open.
+   */
   resolveScan: (scanId: string) =>
     request<void>(`/admin/unknown-scans/${scanId}/resolve`, { method: "POST" }),
+
+  /** Close an entry that is never going to be a product. Audited apart. */
+  dismissScan: (scanId: string) =>
+    request<void>(`/admin/unknown-scans/${scanId}/dismiss`, { method: "POST" }),
 
   lowStock: () => request<LowStockResponse>("/admin/low-stock"),
 };

@@ -84,3 +84,21 @@ def test_no_role_string_checks_in_the_codebase() -> None:
         if pattern.search(path.read_text(encoding="utf-8"))
     ]
     assert not offenders, f"role-string comparison found in: {offenders}"
+
+
+def test_editing_the_catalogue_implies_being_allowed_to_read_it() -> None:
+    """A dependency 0021 takes on, written down where it can break.
+
+    `pos.unknown_scan_outcome_is_honest` refuses to close an entry as
+    catalogued unless the barcode is on a product, and it looks for that
+    barcode as the caller — under `product_barcodes_select`, which asks for
+    `product.read`. Every role that can work the queue holds `product.edit`,
+    and every one of those holds `product.read` as well, so the check can
+    never come back empty for the wrong reason.
+
+    If a future role ever holds edit without read, the trigger starts
+    refusing honest work and blaming the catalogue. This fails first.
+    """
+    for role, granted in perms.ROLE_PERMISSIONS.items():
+        if perms.PRODUCT_EDIT in granted:
+            assert perms.PRODUCT_READ in granted, role

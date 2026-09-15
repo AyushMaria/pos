@@ -342,6 +342,55 @@ everything *except* TRUNCATE, so the suite had been starting from a safer
 position than production. A shim kinder than the real thing hides the class
 of finding it exists to catch.
 
+## What the queue counted as finished
+
+Three days after the live pass, a question from the shop: *an unknown barcode
+lets me make a quick sale, but I cannot find that product in the catalogue
+afterwards.* Half of that is the design working — an unlisted sale creates no
+product on purpose (slice 5) — and the other half was a real defect sitting in
+plain sight in the screen built to fix exactly this.
+
+Each queue row had three buttons: **New product**, **Existing product**, and
+**Done**. The first two attach the barcode and then close the entry. The third
+only closed the entry. It was styled the same as the other two, it asked
+nothing, it needed no work to press, and it was the one that got pressed.
+`8901999000014` had five closed scans and was still not in the catalogue.
+`product.created` had never fired once in the life of the database. With the
+queue empty the screen then said, in so many words, *"Nothing waiting. Every
+scan found a product."*
+
+Nothing failed. There was no error to find, no policy missing, no 200 hiding a
+no-op — every layer did exactly what it was asked. The gap was that closing an
+entry had one meaning where the work needed two, so "catalogued" and "gave up"
+were the same row in the same table and the same line in the audit log, and
+the flattering reading was the one the screen chose.
+
+What went in (0021):
+
+- **The claim is checked.** Closing an entry now carries an outcome, and
+  `catalogued` is refused unless the barcode is on a product at that moment.
+  The silent no-op is impossible rather than discouraged, which is the only
+  part of this that is a boundary.
+- **`dismissed` is a first-class answer**, because a torn label or a loyalty
+  card is real and the queue always needed somewhere to put it. It just has to
+  be said rather than implied, and it writes `scan.dismissed` — so the log can
+  finally tell how much of the queue was worked and how much was closed.
+- **The button asks first**, is styled as the lesser option, and is called
+  Dismiss. That changes no guarantee; it changes what gets pressed by
+  accident, which is what actually happened here.
+- **The empty state stopped claiming something it cannot know.**
+
+Two smaller things came out of it. `POST /admin/unknown-scans/{scan_id}/resolve`
+left the route-coverage debt list — it had been thoroughly tested one layer
+down, where the service and its test agreed with each other about a request
+whose meaning was the problem. And the audit trail added the day before is what
+made the diagnosis take minutes: five `scan.resolved` rows, no `product.created`
+row, one query.
+
+**The general shape, worth keeping:** a destructive-by-omission action that
+costs nothing to take, sits beside the actions that cost effort, and reports
+the same success as them. Look for the others.
+
 ## What to watch
 
 **Reconciliation is the exit criterion, so write that query first.** Sum the

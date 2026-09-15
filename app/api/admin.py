@@ -132,6 +132,7 @@ def _scan_out(scan: UnknownScan) -> UnknownScanOut:
         scanned_at=scan.scanned_at,
         terminal_id=scan.terminal_id,
         resolved=scan.resolved,
+        resolution=scan.resolution,
     )
 
 
@@ -338,6 +339,12 @@ async def unknown_scans(
 async def resolve_scan(scan_id: str, admin: Admin, session: CanEdit) -> None:
     """Close an entry, having catalogued the thing behind it.
 
+    Two endpoints rather than one with a flag, because they are two different
+    claims about the world and only one of them can be checked. This one says
+    the code is now on a product; 0021 refuses it if that is not true, so a
+    422 here means the barcode never got attached and the entry is still
+    waiting — which is the honest outcome.
+
     Resolving changes nothing about the sales that were already rung against
     the placeholder. A sold line records what was charged; the catalogue
     catching up later does not rewrite it, and `sale_lines` has no update
@@ -345,6 +352,27 @@ async def resolve_scan(scan_id: str, admin: Admin, session: CanEdit) -> None:
     """
     try:
         await admin.resolve_scan(scan_id)
+    except AdminUnavailable as exc:
+        raise _offline(exc) from exc
+    except AdminRejected as exc:
+        raise _refused(exc) from exc
+
+
+@router.post("/unknown-scans/{scan_id}/dismiss", status_code=204)
+async def dismiss_scan(scan_id: str, admin: Admin, session: CanEdit) -> None:
+    """Close an entry that is never going to be a product.
+
+    The other half of the queue, and the half the screen used to call "Done".
+    A torn label or a customer's loyalty card is a real answer; recording it
+    as the same event as cataloguing an item is what let five scans of one
+    biscuit packet close without anything being catalogued at all.
+
+    No body and no reason field. Who and when is enough to go back and ask,
+    and a required reason on a button people press twenty times a morning
+    gets typed as "x".
+    """
+    try:
+        await admin.dismiss_scan(scan_id)
     except AdminUnavailable as exc:
         raise _offline(exc) from exc
     except AdminRejected as exc:

@@ -1788,6 +1788,17 @@
             "title": "Barcode",
             "type": "string"
           },
+          "resolution": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolution"
+          },
           "resolved": {
             "title": "Resolved",
             "type": "boolean"
@@ -2553,9 +2564,45 @@
         ]
       }
     },
+    "/admin/unknown-scans/{scan_id}/dismiss": {
+      "post": {
+        "description": "Close an entry that is never going to be a product.\n\nThe other half of the queue, and the half the screen used to call \"Done\".\nA torn label or a customer's loyalty card is a real answer; recording it\nas the same event as cataloguing an item is what let five scans of one\nbiscuit packet close without anything being catalogued at all.\n\nNo body and no reason field. Who and when is enough to go back and ask,\nand a required reason on a button people press twenty times a morning\ngets typed as \"x\".",
+        "operationId": "dismiss_scan_admin_unknown_scans__scan_id__dismiss_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "scan_id",
+            "required": true,
+            "schema": {
+              "title": "Scan Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Dismiss Scan",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
     "/admin/unknown-scans/{scan_id}/resolve": {
       "post": {
-        "description": "Close an entry, having catalogued the thing behind it.\n\nResolving changes nothing about the sales that were already rung against\nthe placeholder. A sold line records what was charged; the catalogue\ncatching up later does not rewrite it, and `sale_lines` has no update\npolicy for anyone to try.",
+        "description": "Close an entry, having catalogued the thing behind it.\n\nTwo endpoints rather than one with a flag, because they are two different\nclaims about the world and only one of them can be checked. This one says\nthe code is now on a product; 0021 refuses it if that is not true, so a\n422 here means the barcode never got attached and the entry is still\nwaiting \u2014 which is the honest outcome.\n\nResolving changes nothing about the sales that were already rung against\nthe placeholder. A sold line records what was charged; the catalogue\ncatching up later does not rewrite it, and `sale_lines` has no update\npolicy for anyone to try.",
         "operationId": "resolve_scan_admin_unknown_scans__scan_id__resolve_post",
         "parameters": [
           {

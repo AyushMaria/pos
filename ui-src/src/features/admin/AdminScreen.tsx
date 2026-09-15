@@ -849,14 +849,29 @@ function PriceEditor({ productId, mayEdit }: { productId: string; mayEdit: boole
  * code to a product and then close the entry, which is the only thing that
  * makes the next scan of that packet find something.
  *
- * "Done" without either is kept deliberately, for the code that was a torn
- * label or somebody's loyalty card. Closing an entry changes nothing about
- * what was already sold — a sold line records what was charged.
+ * The third way out is kept deliberately, for the code that was a torn label
+ * or somebody's loyalty card — but it used to be a button called "Done",
+ * sitting third in a row of three, that closed the entry and catalogued
+ * nothing. It was the one people pressed. One code went through it five
+ * times and is still not in the catalogue.
+ *
+ * So it is called Dismiss, it is styled as the lesser option, it asks before
+ * it acts, and it reaches a different endpoint that writes a different audit
+ * row (0021). None of that is what makes it safe — the database refusing a
+ * resolve when the barcode is on nothing is what makes it safe. This is what
+ * stops it being pressed by accident in the first place.
+ *
+ * Closing an entry either way changes nothing about what was already sold —
+ * a sold line records what was charged.
  */
 function QueueTab({ session }: { session: SessionResponse }) {
   const [scans, setScans] = useState<UnknownScanOut[]>([]);
   const [working, setWorking] = useState<UnknownScanOut | null>(null);
   const [mode, setMode] = useState<"create" | "match" | null>(null);
+  // The one entry whose Dismiss has been pressed but not yet confirmed. A
+  // scan id rather than a boolean, so the question is asked in the row it is
+  // about and a second row cannot inherit the answer.
+  const [dismissing, setDismissing] = useState<string | null>(null);
   const { busy, error, offline, run } = useCloudCall();
   const mayCreate = session.permissions.includes("product.create");
 
@@ -936,7 +951,8 @@ function QueueTab({ session }: { session: SessionResponse }) {
     <section className="pane">
       <p className="note muted">
         Codes the till could not resolve. Catalogue the item or point the code
-        at a product you already have, and the entry closes itself.
+        at a product you already have, and the entry closes itself. Dismiss is
+        for a code that is never going to be a product.
       </p>
 
       <CloudNotice offline={offline} error={error} />
@@ -970,21 +986,56 @@ function QueueTab({ session }: { session: SessionResponse }) {
             >
               Existing product
             </button>
-            <button
-              type="button"
-              className="link"
-              disabled={busy}
-              onClick={async () => {
-                await run(() => admin.resolveScan(scan.scan_id));
-                void load();
-              }}
-            >
-              Done
-            </button>
+            {dismissing === scan.scan_id ? (
+              <>
+                <span className="muted">
+                  Not a product? The code stays on record and what was sold
+                  against it does not change — but nothing gets catalogued.
+                </span>
+                <button
+                  type="button"
+                  className="link secondary"
+                  disabled={busy}
+                  onClick={async () => {
+                    // Reloaded either way, like the resolve path above it: a
+                    // dismissal that was refused left the row open, and the
+                    // list should show that rather than the optimistic view.
+                    await run(() => admin.dismissScan(scan.scan_id));
+                    setDismissing(null);
+                    void load();
+                  }}
+                >
+                  Yes, dismiss it
+                </button>
+                <button
+                  type="button"
+                  className="link"
+                  disabled={busy}
+                  onClick={() => setDismissing(null)}
+                >
+                  Keep it open
+                </button>
+              </>
+            ) : (
+              <button
+                type="button"
+                className="link secondary"
+                disabled={busy}
+                onClick={() => setDismissing(scan.scan_id)}
+              >
+                Dismiss
+              </button>
+            )}
           </li>
         ))}
         {scans.length === 0 && !busy && !offline && (
-          <li className="muted">Nothing waiting. Every scan found a product.</li>
+          // It used to say "Every scan found a product", which the screen had
+          // no way of knowing and which was false for every entry closed with
+          // the old Done button. An empty queue means nobody is waiting on
+          // you; it does not mean the catalogue is complete.
+          <li className="muted">
+            Nothing waiting. New codes appear here as they are scanned.
+          </li>
         )}
       </ul>
     </section>

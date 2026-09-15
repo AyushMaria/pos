@@ -25,6 +25,7 @@ from app.services.admin_service import (
     AdminUnavailable,
     DuplicateBarcode,
     DuplicateSku,
+    ScanNotCatalogued,
 )
 from app.services.auth_service import SessionStore
 
@@ -504,15 +505,55 @@ def test_reading_a_level_that_does_not_exist_is_a_404(
 
 
 @pytest.mark.asyncio
-async def test_resolving_sets_only_resolved(rest: FakePostgrest) -> None:
+async def test_closing_a_scan_sends_the_outcome_and_nothing_else(
+    rest: FakePostgrest,
+) -> None:
     """The scan is evidence about a moment, not a view of the catalogue.
 
     0016 enforces this with a trigger as well; sending anything else would be
-    refused there. Not sending it is the first line of that defence.
+    refused there. Not sending it is the first line of that defence. 0021
+    adds the outcome to the small list of things that may legitimately move.
     """
     rest.will_return([_scan_row()])
     await service(rest).resolve_scan("s1")
-    assert json.loads(rest.last().content) == {"resolved": True}
+    assert json.loads(rest.last().content) == {
+        "resolved": True,
+        "resolution": "catalogued",
+    }
+
+
+@pytest.mark.asyncio
+async def test_a_dismissal_says_so_rather_than_looking_like_the_work(
+    rest: FakePostgrest,
+) -> None:
+    """The whole point of 0021. Both close the entry; they must not arrive
+    at the database as the same statement, or the audit log cannot tell a
+    catalogued packet from an abandoned one — which is how one code closed
+    five times with nothing to show for it."""
+    rest.will_return([_scan_row()])
+    await service(rest).dismiss_scan("s1")
+    assert json.loads(rest.last().content) == {
+        "resolved": True,
+        "resolution": "dismissed",
+    }
+
+
+@pytest.mark.asyncio
+async def test_claiming_a_scan_was_catalogued_when_it_was_not_is_a_sentence(
+    rest: FakePostgrest,
+) -> None:
+    """0021's refusal, on its way to the screen.
+
+    The raw reply is a SQLSTATE and a trigger's message. What the person
+    working the queue needs is the next action, which is either to attach the
+    code or to admit it is never going to be a product.
+    """
+    rest.will_return(
+        {"code": "23514", "message": "8906110944741 is not on any product yet"},
+        status=400,
+    )
+    with pytest.raises(ScanNotCatalogued, match="dismiss the scan"):
+        await service(rest).resolve_scan("s1")
 
 
 @pytest.mark.asyncio
@@ -637,6 +678,61 @@ def test_a_cashier_cannot_create_a_product(
         json={"sku": "SKU-9", "name": "Parle-G 100g", "tax_code": "GST5"},
     )
     assert response.status_code == 403
+
+
+def test_closing_an_entry_and_giving_up_on_it_are_different_endpoints(
+    client: TestClient, seeded_manager: dict[str, str], rest: FakePostgrest
+) -> None:
+    """Both close the entry. Only one of them claims work was done.
+
+    The claim is what 0021 checks, so it has to travel as a claim and not as
+    a flag somebody could forget to set — which is why these are two routes
+    rather than one with a body.
+    """
+    _sign_in(client, seeded_manager, token=TOKEN)
+    rest.will_return([_scan_row()])
+    rest.will_return([_scan_row()])
+    client.app.state.admin_service = service(rest)
+
+    assert client.post("/admin/unknown-scans/s1/resolve").status_code == 204
+    assert json.loads(rest.seen[-1].content)["resolution"] == "catalogued"
+
+    assert client.post("/admin/unknown-scans/s1/dismiss").status_code == 204
+    assert json.loads(rest.seen[-1].content)["resolution"] == "dismissed"
+
+
+def test_a_resolve_the_database_refuses_arrives_as_an_instruction(
+    client: TestClient, seeded_manager: dict[str, str], rest: FakePostgrest
+) -> None:
+    """422 and a sentence, for the case the old screen could not produce at
+    all: the entry closed, nothing was catalogued, and nobody found out until
+    the same packet came past the till again."""
+    _sign_in(client, seeded_manager, token=TOKEN)
+    rest.will_return(
+        {"code": "23514", "message": "8906110944741 is not on any product yet"},
+        status=400,
+    )
+    client.app.state.admin_service = service(rest)
+
+    response = client.post("/admin/unknown-scans/s1/resolve")
+    assert response.status_code == 422
+    detail = response.json()["detail"]
+    assert "not on any product" in detail
+    assert "23514" not in detail
+
+
+def test_a_cashier_cannot_dismiss_an_entry(
+    client: TestClient, seeded_cashier: dict[str, str], rest: FakePostgrest
+) -> None:
+    """Working the queue is catalogue work either way. Giving up on an entry
+    is a decision about the catalogue as much as cataloguing it is."""
+    _sign_in(client, seeded_cashier, token=TOKEN)
+    client.app.state.admin_service = service(rest)
+
+    assert client.post("/admin/unknown-scans/s1/dismiss").status_code == 403
+    # Wired to a live fake, and it was never called: the refusal happened in
+    # the router, before anything was sent anywhere.
+    assert rest.seen == []
 
 
 def test_a_taken_sku_reaches_the_screen_as_409(

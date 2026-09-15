@@ -64,6 +64,22 @@ class DuplicateBarcode(AdminRejected):
             super().__init__(f"{barcode} is already on another product")
 
 
+class ScanNotCatalogued(AdminRejected):
+    """Closed as catalogued, but the code is still on nothing (0021).
+
+    The backstop for the queue's oldest bug: a close that changed the row and
+    catalogued nothing, and looked from the screen exactly like a close that
+    worked. The database refuses it now, and this is that refusal in words a
+    shopkeeper can act on.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(
+            "that code is still not on any product — attach it to one, "
+            "or dismiss the scan if it is never going to be a product"
+        )
+
+
 class DuplicateSku(AdminRejected):
     """This SKU is taken.
 
@@ -118,6 +134,8 @@ class UnknownScan:
     scanned_at: str
     terminal_id: str | None
     resolved: bool
+    #: 'catalogued', 'dismissed', or None — open, or closed before 0021.
+    resolution: str | None = None
 
 
 @dataclass(frozen=True)
@@ -184,6 +202,7 @@ def _scan(row: dict[str, Any]) -> UnknownScan:
         scanned_at=row["scanned_at"],
         terminal_id=row.get("terminal_id"),
         resolved=bool(row["resolved"]),
+        resolution=row.get("resolution"),
     )
 
 
@@ -548,28 +567,60 @@ class AdminService:
                     "resolved": f"is.{str(resolved).lower()}",
                     "order": "scanned_at.desc",
                     "limit": str(limit),
-                    "select": "id,store_id,barcode,scanned_at,terminal_id,resolved",
+                    "select": (
+                        "id,store_id,barcode,scanned_at,terminal_id,"
+                        "resolved,resolution"
+                    ),
                 },
             )
         ]
 
     async def resolve_scan(self, scan_id: str) -> None:
-        """Close a queue entry.
+        """Close a queue entry, the code now being on a product.
 
-        Note what this does *not* do. It does not go back and repoint the
+        0021 checks that claim rather than taking it: if the barcode is on
+        nothing when this lands, the update is refused. So this method is
+        only ever correct *after* the barcode has been attached, which is the
+        order `attachAndClose` already uses on the screen.
+
+        Note what it does *not* do. It does not go back and repoint the
         `sale_lines` rows that were rung against the placeholder: a sold line
         records what was charged and what the cashier typed, whatever the
         catalogue later decides the item is called. `sale_lines` has no update
         policy at all (0003), so that guarantee is enforced by Postgres rather
         than by this comment.
         """
-        rows = await self._send(
-            "PATCH",
-            "unknown_scans",
-            params={"id": f"eq.{scan_id}"},
-            json={"resolved": True},
-            prefer="return=representation",
-        )
+        await self._close_scan(scan_id, "catalogued")
+
+    async def dismiss_scan(self, scan_id: str) -> None:
+        """Close a queue entry that is never going to be a product.
+
+        A torn label, a loyalty card, a code off a delivery note. This is a
+        real answer and the queue has always needed it — what it did not need
+        was for the answer to be indistinguishable from having done the work,
+        which is what "Done" meant before 0021.
+        """
+        await self._close_scan(scan_id, "dismissed")
+
+    async def _close_scan(self, scan_id: str, resolution: str) -> None:
+        """One PATCH, two outcomes, and neither of them silent.
+
+        `resolved` and `resolution` are sent together because 0021 refuses
+        them apart: closing an entry says how it was closed, or it does not
+        close.
+        """
+        try:
+            rows = await self._send(
+                "PATCH",
+                "unknown_scans",
+                params={"id": f"eq.{scan_id}"},
+                json={"resolved": True, "resolution": resolution},
+                prefer="return=representation",
+            )
+        except AdminRejected as exc:
+            if "not on any product yet" in str(exc):
+                raise ScanNotCatalogued() from exc
+            raise
         if not rows:
             raise AdminRejected("no scan was resolved — check your permissions")
 

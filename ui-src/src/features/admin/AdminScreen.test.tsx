@@ -31,6 +31,7 @@ const api = {
   setPrice: vi.fn(),
   unknownScans: vi.fn(),
   resolveScan: vi.fn(),
+  dismissScan: vi.fn(),
   lowStock: vi.fn(),
   stockLevel: vi.fn(),
   setReorderPoint: vi.fn(),
@@ -50,6 +51,7 @@ vi.mock("../../core/api/admin", () => ({
     setPrice: (...a: unknown[]) => api.setPrice(...a),
     unknownScans: (...a: unknown[]) => api.unknownScans(...a),
     resolveScan: (...a: unknown[]) => api.resolveScan(...a),
+    dismissScan: (...a: unknown[]) => api.dismissScan(...a),
     lowStock: (...a: unknown[]) => api.lowStock(...a),
     stockLevel: (...a: unknown[]) => api.stockLevel(...a),
     setReorderPoint: (...a: unknown[]) => api.setReorderPoint(...a),
@@ -446,28 +448,64 @@ describe("working the queue is what closes it", () => {
   });
 });
 
-describe("the unknown-scan queue", () => {
-  it("closes an entry and reloads what is left", async () => {
+describe("giving up on an entry is a different act from finishing it", () => {
+  const ONE_SCAN = {
+    scans: [
+      {
+        scan_id: "s1",
+        store_id: "st1",
+        barcode: "8906110944741",
+        scanned_at: "2026-09-01T10:00:00Z",
+        resolved: false,
+      },
+    ],
+  };
+
+  it("asks before it dismisses, and does nothing until the answer is yes", async () => {
     const user = userEvent.setup();
-    api.unknownScans.mockResolvedValueOnce({
-      scans: [
-        {
-          scan_id: "s1",
-          store_id: "st1",
-          barcode: "8906110944741",
-          scanned_at: "2026-09-01T10:00:00Z",
-          resolved: false,
-        },
-      ],
-    });
-    api.resolveScan.mockResolvedValue(undefined);
+    api.unknownScans.mockResolvedValue(ONE_SCAN);
+
+    render(<AdminScreen session={person(["product.read", "product.edit"])} onClose={() => {}} />);
+    await user.click(screen.getByRole("button", { name: "Unknown scans" }));
+    await user.click(await screen.findByRole("button", { name: "Dismiss" }));
+
+    // The press opened a question, not a request.
+    expect(await screen.findByText(/nothing gets catalogued/)).toBeInTheDocument();
+    expect(api.dismissScan).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole("button", { name: "Keep it open" }));
+    expect(api.dismissScan).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Dismiss" })).toBeInTheDocument();
+  });
+
+  it("dismisses through the endpoint that records it as a dismissal", async () => {
+    const user = userEvent.setup();
+    api.unknownScans.mockResolvedValueOnce(ONE_SCAN);
+    api.dismissScan.mockResolvedValue(undefined);
     api.unknownScans.mockResolvedValueOnce({ scans: [] });
 
     render(<AdminScreen session={person(["product.read", "product.edit"])} onClose={() => {}} />);
     await user.click(screen.getByRole("button", { name: "Unknown scans" }));
-    await user.click(await screen.findByRole("button", { name: "Done" }));
+    await user.click(await screen.findByRole("button", { name: "Dismiss" }));
+    await user.click(await screen.findByRole("button", { name: "Yes, dismiss it" }));
 
-    await waitFor(() => expect(api.resolveScan).toHaveBeenCalledWith("s1"));
+    await waitFor(() => expect(api.dismissScan).toHaveBeenCalledWith("s1"));
+    // Not the resolve endpoint. Both close the entry; only one of them is a
+    // claim that the code is now on a product, and 0021 checks that claim.
+    expect(api.resolveScan).not.toHaveBeenCalled();
     expect(await screen.findByText(/Nothing waiting/)).toBeInTheDocument();
+  });
+
+  it("does not tell the manager that every scan found a product", async () => {
+    const user = userEvent.setup();
+    api.unknownScans.mockResolvedValue({ scans: [] });
+
+    render(<AdminScreen session={person(["product.read", "product.edit"])} onClose={() => {}} />);
+    await user.click(screen.getByRole("button", { name: "Unknown scans" }));
+
+    // The old copy asserted something the screen cannot know and that was
+    // false for every entry closed with the button this one replaced.
+    expect(await screen.findByText(/Nothing waiting/)).toBeInTheDocument();
+    expect(screen.queryByText(/found a product/)).not.toBeInTheDocument();
   });
 });

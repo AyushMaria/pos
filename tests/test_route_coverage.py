@@ -48,9 +48,11 @@ _METHODS = frozenset({"GET", "POST", "PUT", "PATCH", "DELETE"})
 #: `POST /admin/products` is deliberately absent — it is the reason this file
 #: exists, and it got its test in the same commit.
 #:
-#: Seven of the eleven are the slice 6 admin router, which is the honest shape
-#: of that slice: thoroughly tested one layer below the thing the screen talks
-#: to.
+#: Six of the ten are the slice 6 admin router, which is the honest shape of
+#: that slice: thoroughly tested one layer below the thing the screen talks
+#: to. `POST /admin/unknown-scans/{scan_id}/resolve` left the list when the
+#: queue's Done button turned out to be closing entries without cataloguing
+#: anything — the layer below had always agreed with itself.
 UNTESTED: frozenset[tuple[str, str]] = frozenset(
     {
         ("GET", "/admin/products"),
@@ -59,7 +61,6 @@ UNTESTED: frozenset[tuple[str, str]] = frozenset(
         ("GET", "/admin/products/{product_id}/barcodes"),
         ("DELETE", "/admin/barcodes/{barcode_id}"),
         ("GET", "/admin/products/{product_id}/prices"),
-        ("POST", "/admin/unknown-scans/{scan_id}/resolve"),
         ("GET", "/catalog/lookup"),
         ("GET", "/catalog/size"),
         ("DELETE", "/register/carts/{cart_id}"),

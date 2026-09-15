@@ -514,6 +514,12 @@ class UnknownScanOut(ApiModel):
     scanned_at: str
     terminal_id: str | None = None
     resolved: bool
+    #: How it was closed (0021): "catalogued", "dismissed", or null — still
+    #: open, or closed before there was a difference. Carried here rather
+    #: than left to `audit_log`, because reading the log needs `user.manage`
+    #: and working the queue needs `product.edit`: the person who dismissed
+    #: an entry is often not allowed to read the record of having done it.
+    resolution: str | None = None
 
 
 class UnknownScansResponse(ApiModel):

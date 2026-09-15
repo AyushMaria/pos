@@ -361,6 +361,7 @@ export interface UnknownScanOut {
   scanned_at: string;
   terminal_id?: string | null;
   resolved: boolean;
+  resolution?: string | null;
 }
 export interface UnknownScansResponse {
   scans: UnknownScanOut[];

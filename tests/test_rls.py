@@ -1097,7 +1097,9 @@ def test_a_manager_may_close_an_unknown_scan(pg: Any) -> None:
             (claims(MANAGER_ID, perms.MANAGER),),
         )
         cur.execute(
-            "update public.unknown_scans set resolved = true where id = %s", (SCAN_ID,)
+            "update public.unknown_scans "
+            "   set resolved = true, resolution = 'dismissed' where id = %s",
+            (SCAN_ID,),
         )
         assert cur.rowcount == 1
 
@@ -1114,8 +1116,12 @@ def test_a_cashier_cannot_close_an_unknown_scan(pg: Any) -> None:
             (claims(CASHIER_ID, perms.CASHIER),),
         )
         cur.execute(
-            "update public.unknown_scans set resolved = true where id = %s", (SCAN_ID,)
+            "update public.unknown_scans "
+            "   set resolved = true, resolution = 'dismissed' where id = %s",
+            (SCAN_ID,),
         )
+        # Zero, and no exception: RLS filters the row out before 0021's
+        # trigger ever sees it, so the refusal that lands is the policy's.
         assert cur.rowcount == 0
 
 
@@ -1134,8 +1140,12 @@ def test_an_unknown_scan_in_another_store_cannot_be_closed(pg: Any) -> None:
             (claims(MANAGER_ID, perms.MANAGER),),
         )
         cur.execute(
-            "update public.unknown_scans set resolved = true where id = %s", (SCAN_ID,)
+            "update public.unknown_scans "
+            "   set resolved = true, resolution = 'dismissed' where id = %s",
+            (SCAN_ID,),
         )
+        # Zero, and no exception: RLS filters the row out before 0021's
+        # trigger ever sees it, so the refusal that lands is the policy's.
         assert cur.rowcount == 0
 
 
@@ -1150,10 +1160,123 @@ def test_a_scan_records_what_was_scanned(pg: Any) -> None:
             "select set_config('request.jwt.claims', %s, true)",
             (claims(MANAGER_ID, perms.MANAGER),),
         )
-        with pytest.raises(psycopg.Error, match="only resolved may change"):
+        with pytest.raises(psycopg.Error, match="only how it was closed"):
             cur.execute(
                 "update public.unknown_scans set resolved = true, barcode = '1' "
                 "where id = %s",
+                (SCAN_ID,),
+            )
+
+
+# ── 0021: a close that says what it was ───────────────────────────────────
+#
+# The bug these exist for did not raise, did not 403 and did not return an
+# empty result. The queue's third button set `resolved` and nothing else, so
+# the entry closed, the catalogue stayed as it was, and the screen said
+# "Nothing waiting. Every scan found a product." One code went round that
+# loop five times.
+#
+# The screen has been changed too, but a screen is not a boundary. These
+# assert the part that cannot be clicked past.
+
+
+def test_closing_a_scan_has_to_say_how(pg: Any) -> None:
+    """The old statement, exactly as the old button sent it."""
+    with pg.transaction(force_rollback=True):
+        cur = pg.cursor()
+        _an_unknown_scan(cur)
+        _as_manager(cur)
+        with pytest.raises(psycopg.Error, match="closing a scan has to say how"):
+            cur.execute(
+                "update public.unknown_scans set resolved = true where id = %s",
+                (SCAN_ID,),
+            )
+
+
+def test_a_scan_cannot_be_called_catalogued_while_the_code_is_on_nothing(
+    pg: Any,
+) -> None:
+    """The claim is checked rather than believed.
+
+    This is the one refusal in the whole feature that had to live in the
+    database. A client that skips the barcode and posts the resolve is not a
+    hypothetical: it is what the product itself did for a fortnight.
+    """
+    with pg.transaction(force_rollback=True):
+        cur = pg.cursor()
+        _an_unknown_scan(cur)
+        _as_manager(cur)
+        with pytest.raises(psycopg.Error, match="is not on any product yet"):
+            cur.execute(
+                "update public.unknown_scans "
+                "   set resolved = true, resolution = 'catalogued' where id = %s",
+                (SCAN_ID,),
+            )
+
+
+def test_cataloguing_is_allowed_the_moment_the_code_is_attached(pg: Any) -> None:
+    """And in that order, which is the order the screen uses: the barcode
+    lands first, then the entry closes. A resolve is a statement about the
+    catalogue, so it can only be true after the catalogue has changed."""
+    with pg.transaction(force_rollback=True):
+        cur = pg.cursor()
+        _an_unknown_scan(cur)
+        _as_manager(cur)
+        cur.execute(
+            "insert into public.product_barcodes "
+            "(product_id, barcode, symbology, pack_size, is_primary) "
+            "values (%s, '8906110944741', 'EAN13', 1, false)",
+            (PRODUCT_ID,),
+        )
+        cur.execute(
+            "update public.unknown_scans "
+            "   set resolved = true, resolution = 'catalogued' where id = %s",
+            (SCAN_ID,),
+        )
+        assert cur.rowcount == 1
+
+        # The action name 0019 already used, kept so the rows written before
+        # today stay comparable with the ones written after it.
+        assert len(_audit(cur, "scan.resolved", SCAN_ID)) == 1
+
+
+def test_giving_up_on_a_scan_is_recorded_as_giving_up(pg: Any) -> None:
+    """The distinction 0021 exists to make.
+
+    Before it, this row and the one above were the same row, and no report
+    could count how much of the queue had actually been catalogued. A torn
+    label is a fine reason to dismiss an entry; five of them against the same
+    biscuit packet is a shop with a hole in its catalogue.
+    """
+    with pg.transaction(force_rollback=True):
+        cur = pg.cursor()
+        _an_unknown_scan(cur)
+        _as_manager(cur)
+        cur.execute(
+            "update public.unknown_scans "
+            "   set resolved = true, resolution = 'dismissed' where id = %s",
+            (SCAN_ID,),
+        )
+        assert cur.rowcount == 1
+
+        rows = _audit(cur, "scan.dismissed", SCAN_ID)
+        assert len(rows) == 1
+        assert str(rows[0][0]) == MANAGER_ID
+        assert not _audit(cur, "scan.resolved", SCAN_ID)
+
+
+def test_an_outcome_cannot_be_hung_on_an_open_scan(pg: Any) -> None:
+    """An entry that is waiting has not been catalogued or dismissed,
+    whatever a column says. Refused rather than quietly ignored: a write that
+    disappears is the failure this whole migration is about."""
+    with pg.transaction(force_rollback=True):
+        cur = pg.cursor()
+        _an_unknown_scan(cur)
+        _as_manager(cur)
+        with pytest.raises(psycopg.Error, match="still open has no outcome"):
+            cur.execute(
+                "update public.unknown_scans set resolution = 'catalogued' "
+                " where id = %s",
                 (SCAN_ID,),
             )
 
