@@ -26,6 +26,7 @@ from app.api import catalog as catalog_router
 from app.api import events as events_router
 from app.api import health as health_router
 from app.api import inventory as inventory_router
+from app.api import overrides as overrides_router
 from app.api import register as register_router
 from app.api import reports as reports_router
 from app.api import sync as sync_router
@@ -215,6 +216,7 @@ def build_app(
     app.include_router(catalog_router.router)
     app.include_router(events_router.router)
     app.include_router(inventory_router.router)
+    app.include_router(overrides_router.router)
     app.include_router(register_router.router)
     app.include_router(reports_router.router)
     app.include_router(sync_router.router)

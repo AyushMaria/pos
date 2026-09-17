@@ -60,8 +60,24 @@ async function mintPinHash(pin: string): Promise<string> {
 }
 
 // A till types a PIN wrong occasionally; a script types thousands. Ten
-// attempts per code per five minutes leaves the cashier alone and stops
-// enumeration cold.
+// attempts per code per five minutes leaves the cashier alone and makes
+// casual enumeration expensive.
+//
+// Per instance, and only per instance. `attempts` lives in the memory of one
+// Deno isolate: the platform cold-starts, recycles and scales these
+// horizontally, so somebody who spreads requests across instances — or who
+// simply arrives after a recycle — meets a fresh counter. Ten per five
+// minutes is a nominal figure, not a property of the system.
+//
+// That has never mattered much on this path, which also needs a reachable
+// network and leaves server-side traces either way. It matters for what gets
+// written beside it. `app/domain/lockout.py` throttles the terminal with a
+// persisted, escalating counter that survives restarts, and the tests assert
+// the terminal is never looser than this number — a real bound compared
+// against a hopeful one, and in the direction that protects the shop. The
+// usual assumption is that the cloud is the strict half; here it is the
+// weaker one. A second copy of this Map in another function would look like
+// protection without being any.
 const MAX_ATTEMPTS = 10;
 const WINDOW_MS = 5 * 60 * 1000;
 const attempts = new Map<string, { count: number; resetAt: number }>();

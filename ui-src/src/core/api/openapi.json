@@ -741,6 +741,81 @@
         "title": "MovementsResponse",
         "type": "object"
       },
+      "OverrideRequest": {
+        "additionalProperties": false,
+        "description": "Who is authorising, with what, and for which permission.\n\nNo `actor` field: the cashier being lent the permission is whoever is\nsigned in at this terminal, read from the session rather than the body.\nA request that could name its own beneficiary would let a caller mint a\ngrant for somebody who is not standing there.",
+        "properties": {
+          "approver_code": {
+            "maxLength": 32,
+            "minLength": 1,
+            "title": "Approver Code",
+            "type": "string"
+          },
+          "permission": {
+            "description": "One of app.domain.permissions.OVERRIDABLE",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Permission",
+            "type": "string"
+          },
+          "pin": {
+            "maxLength": 12,
+            "minLength": 4,
+            "title": "Pin",
+            "type": "string"
+          }
+        },
+        "required": [
+          "approver_code",
+          "pin",
+          "permission"
+        ],
+        "title": "OverrideRequest",
+        "type": "object"
+      },
+      "OverrideResponse": {
+        "additionalProperties": false,
+        "description": "The grant, as the modal needs to see it.\n\n`expires_in_seconds` is redundant with `expires_at` and is here anyway:\nthe UI counts down, and a countdown computed from two clocks is a\ncountdown that can start at a negative number. The service owns the\nwindow, so the service says how much of it is left.",
+        "properties": {
+          "actor_code": {
+            "description": "The cashier the permission was lent to",
+            "title": "Actor Code",
+            "type": "string"
+          },
+          "approver_code": {
+            "title": "Approver Code",
+            "type": "string"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "title": "Expires At",
+            "type": "string"
+          },
+          "expires_in_seconds": {
+            "title": "Expires In Seconds",
+            "type": "integer"
+          },
+          "granted_at": {
+            "format": "date-time",
+            "title": "Granted At",
+            "type": "string"
+          },
+          "permission": {
+            "title": "Permission",
+            "type": "string"
+          }
+        },
+        "required": [
+          "permission",
+          "granted_at",
+          "expires_at",
+          "expires_in_seconds",
+          "approver_code",
+          "actor_code"
+        ],
+        "title": "OverrideResponse",
+        "type": "object"
+      },
       "PostSaleResponse": {
         "additionalProperties": false,
         "properties": {
@@ -3046,6 +3121,48 @@
         "summary": "Preview Line",
         "tags": [
           "inventory"
+        ]
+      }
+    },
+    "/overrides/authorize": {
+      "post": {
+        "description": "Verify a second person and lend the signed-in cashier a permission.\n\n`session` is taken as a dependency and then not used, deliberately. The\nservice reads the current session for itself \u2014 it has to, because the\ngrant is written into the store rather than returned to be applied \u2014 and\nnaming it here is what makes \"no session\" a 401 like every other route\ninstead of a 400 that only this endpoint knows how to produce.",
+        "operationId": "authorize_overrides_authorize_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OverrideRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OverrideResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Authorize",
+        "tags": [
+          "overrides"
         ]
       }
     },

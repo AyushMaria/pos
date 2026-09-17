@@ -67,6 +67,44 @@ class ErrorResponse(ApiModel):
     code: str | None = None
 
 
+# ── /overrides — the supervisor override (architecture §11.3) ───────────────
+
+
+class OverrideRequest(ApiModel):
+    """Who is authorising, with what, and for which permission.
+
+    No `actor` field: the cashier being lent the permission is whoever is
+    signed in at this terminal, read from the session rather than the body.
+    A request that could name its own beneficiary would let a caller mint a
+    grant for somebody who is not standing there.
+    """
+
+    approver_code: str = Field(min_length=1, max_length=32)
+    pin: str = Field(min_length=4, max_length=12)
+    permission: str = Field(
+        min_length=1,
+        max_length=64,
+        description="One of app.domain.permissions.OVERRIDABLE",
+    )
+
+
+class OverrideResponse(ApiModel):
+    """The grant, as the modal needs to see it.
+
+    `expires_in_seconds` is redundant with `expires_at` and is here anyway:
+    the UI counts down, and a countdown computed from two clocks is a
+    countdown that can start at a negative number. The service owns the
+    window, so the service says how much of it is left.
+    """
+
+    permission: str
+    granted_at: datetime
+    expires_at: datetime
+    expires_in_seconds: int
+    approver_code: str
+    actor_code: str = Field(description="The cashier the permission was lent to")
+
+
 # ── Money on the wire ───────────────────────────────────────────────────────
 
 

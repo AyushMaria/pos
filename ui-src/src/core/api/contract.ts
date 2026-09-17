@@ -154,6 +154,33 @@ export interface MoneyOut {
 export interface MovementsResponse {
   movement_ids: string[];
 }
+/** Who is authorising, with what, and for which permission.
+
+No `actor` field: the cashier being lent the permission is whoever is
+signed in at this terminal, read from the session rather than the body.
+A request that could name its own beneficiary would let a caller mint a
+grant for somebody who is not standing there. */
+export interface OverrideRequest {
+  approver_code: string;
+  pin: string;
+  /** One of app.domain.permissions.OVERRIDABLE */
+  permission: string;
+}
+/** The grant, as the modal needs to see it.
+
+`expires_in_seconds` is redundant with `expires_at` and is here anyway:
+the UI counts down, and a countdown computed from two clocks is a
+countdown that can start at a negative number. The service owns the
+window, so the service says how much of it is left. */
+export interface OverrideResponse {
+  permission: string;
+  granted_at: string;
+  expires_at: string;
+  expires_in_seconds: number;
+  approver_code: string;
+  /** The cashier the permission was lent to */
+  actor_code: string;
+}
 export interface PostSaleResponse {
   sale_id: string;
   receipt_no: string;

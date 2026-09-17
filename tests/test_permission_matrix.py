@@ -196,6 +196,13 @@ NO_API_SURFACE: frozenset[str] = frozenset(
 #: slice 2 settled and `test_sync_push_is_deliberately_ungated` records. It
 #: drains the outbox early; every row in it was written under a permission
 #: checked at the time, and RLS still refuses each one on its own merits.
+#:
+#: `POST /overrides/authorize` is the other decision. A gate on it would be
+#: circular: the cashier who needs an override is the one who does not hold
+#: the key, so any permission strict enough to matter would refuse exactly the
+#: people it exists for. It is not unauthenticated — it requires a session,
+#: because a grant is lent to somebody — and the credential it checks is a
+#: second person's PIN rather than the caller's rights.
 UNGATED: frozenset[Operation] = frozenset(
     {
         Operation("GET", "/health"),
@@ -204,6 +211,7 @@ UNGATED: frozenset[Operation] = frozenset(
         Operation("GET", "/auth/session"),
         Operation("GET", "/catalog/size"),
         Operation("GET", "/catalog/tax-codes"),
+        Operation("POST", "/overrides/authorize"),
         Operation("GET", "/register/carts/{cart_id}"),
         Operation("GET", "/register/carts/{cart_id}/tender-quote"),
         Operation("GET", "/register/payments/{attempt_id}"),

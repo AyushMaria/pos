@@ -169,6 +169,16 @@ def test_the_local_throttle_is_at_least_as_strict_as_the_cloud() -> None:
     The cloud allows MAX_ATTEMPTS per WINDOW_MS, sustained, for ever. The
     terminal must never be looser than that, or the offline path becomes the
     cheaper way in — which is exactly the state this slice found.
+
+    One caveat, and it runs the opposite way to the usual assumption. The
+    cloud's figure is **per isolate**: `attempts` is a Map in one instance's
+    memory, and the platform cold-starts, recycles and scales these
+    horizontally, so the real cloud rate is some multiple of this number that
+    nobody measures. The terminal's is persisted and escalating, so it is the
+    one that actually binds. This assertion therefore compares a real counter
+    against a hopeful one — which is still worth asserting, because it holds
+    in the direction that protects the shop, but it is a floor on the cloud's
+    behaviour rather than a description of it.
     """
     source = edge_sources()["authenticate-pin"]
     attempts = int(re.search(r"const\s+MAX_ATTEMPTS\s*=\s*(\d+)", source).group(1))
@@ -185,3 +195,34 @@ def test_the_local_throttle_is_at_least_as_strict_as_the_cloud() -> None:
         f"allows {cloud_per_hour:.0f}. Offline is now the cheaper way to guess "
         "a supervisor's PIN, which is the asymmetry this lockout exists to end."
     )
+
+
+def test_an_in_memory_throttle_says_that_it_is_per_instance() -> None:
+    """A Map of attempts is a nominal limit, and has to admit it.
+
+    The pattern is cheap to copy and reads like protection: ten attempts,
+    a window, a 429. What it does not survive is a cold start, a recycle or a
+    second isolate, none of which are visible from the source. The comment is
+    the only thing standing between the next function and a limit somebody
+    trusts.
+
+    Its own positive control: `authenticate-pin` declares one, so the loop
+    cannot pass by matching nothing.
+    """
+    throttles = {
+        name: source
+        for name, source in edge_sources().items()
+        if re.search(r"new Map<[^>]*count[^>]*>", source)
+    }
+    assert "authenticate-pin" in throttles, (
+        "authenticate-pin no longer keeps an in-memory attempt counter — "
+        "either the throttle moved somewhere durable, which is good news and "
+        "makes this check stale, or the check has stopped matching it"
+    )
+
+    for name, source in throttles.items():
+        assert re.search(r"per instance", source, re.IGNORECASE), (
+            f"{name}/index.ts rate-limits in a Map without saying that the "
+            "limit is per isolate. It resets on every cold start and does not "
+            "exist across instances; the terminal's lockout is the binding one."
+        )
