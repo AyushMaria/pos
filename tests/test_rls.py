@@ -2403,3 +2403,35 @@ def test_a_manager_can_read_a_grant_and_a_cashier_cannot(pg: Any) -> None:
                 "select count(*) from public.audit_log where id = %s", (audit_id,)
             )
             assert cur.fetchone()[0] == expected, role
+
+
+def test_a_lockout_pushes_as_an_audit_row(pg: Any) -> None:
+    """`0023` widened the override branch rather than adding a second one.
+
+    A lockout and a grant are both audit rows with no parent, so they share a
+    branch; the entity names stay apart on the wire because `override` was
+    already in terminals' outboxes when lockouts were added.
+    """
+    audit_id = "019600aa-0000-7000-8000-00000000a010"
+    envelope = json.dumps([{
+        "schema_version": 3, "entity": "audit", "op": "insert",
+        "id": audit_id, "client_seq": 1,
+        "data": {
+            "id": audit_id, "store_id": STORE_ID,
+            "actor_id": SUPERVISOR_ID, "approver_id": None,
+            "action": "pin.locked", "entity": "permission", "entity_id": None,
+            "after_json": json.dumps({"employee_code": "S001"}),
+            "occurred_at": "2026-09-17T23:00:00+00:00",
+        },
+    }])
+
+    with pg.transaction(force_rollback=True):
+        _push(pg, envelope)
+        row = _read_back_as_manager(
+            pg.cursor(), audit_id, "action, actor_id, approver_id"
+        )
+
+    assert row is not None, "the lockout did not land"
+    assert row[0] == "pin.locked"
+    assert str(row[1]) == SUPERVISOR_ID
+    assert row[2] is None, "nobody authorised a lockout"

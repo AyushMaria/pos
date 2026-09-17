@@ -52,7 +52,7 @@ class PayloadBuilder:
     #: derived from the table below so that a test can name it without
     #: building anything, and cross-checked against the table on every call.
     SUPPORTED_ENTITIES: frozenset[str] = frozenset(
-        {"sale", "sale_review", "stock_movement", "unknown_scan", "override"}
+        {"sale", "sale_review", "stock_movement", "unknown_scan", "override", "audit"}
     )
 
     def __init__(self, db: Database, *, terminal_id: str) -> None:
@@ -66,7 +66,8 @@ class PayloadBuilder:
             "sale_review": self._sale_review,
             "stock_movement": self._stock_movement,
             "unknown_scan": self._unknown_scan,
-            "override": self._override,
+            "override": self._audit_row,
+            "audit": self._audit_row,
         }
         assert set(builders) == self.SUPPORTED_ENTITIES, (
             "SUPPORTED_ENTITIES and the builder table have drifted: "
@@ -192,8 +193,15 @@ class PayloadBuilder:
         record["resolved"] = bool(record.get("resolved"))
         return record
 
-    def _override(self, audit_id: str) -> dict[str, Any]:
-        """A supervisor grant, keyed on the audit row itself.
+    def _audit_row(self, audit_id: str) -> dict[str, Any]:
+        """A standalone audit row, keyed on itself.
+
+        Two entity names reach this: `override` for a minted grant and `audit`
+        for a lockout. Both are audit rows with no parent and the same shape,
+        so they share a builder; the names are kept apart on the wire because
+        `override` was already queued by terminals in the field before
+        lockouts existed, and renaming a value some till has in its outbox is
+        how a queue stops draining.
 
         Every other builder here is handed the id of a business record and
         re-reads it — a sale, a movement, a scan — and any audit rows travel

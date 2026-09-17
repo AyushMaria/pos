@@ -26,6 +26,14 @@ from app.domain.ids import new_id
 #: and who let them.
 OVERRIDE_GRANTED = "override.granted"
 
+#: An account locked by the throttle. **Queued**, unlike the individual
+#: refusals below, and the difference is who generates it: an attacker
+#: produces refusals at whatever rate they like, but a lockout is produced by
+#: the throttle, at most once per lockout event. It cannot be used to flood
+#: anything, and a supervisor's PIN locking out on a till at 11pm is exactly
+#: the row an owner should find without being told to go looking.
+PIN_LOCKED = "pin.locked"
+
 #: A supervisor PIN that was offered and refused. Written where the refusal
 #: happens, because five of these in a row against one supervisor is the most
 #: interesting thing that could happen at a till all week and nothing else
@@ -109,6 +117,80 @@ class AuditRepository:
                 ),
             )
         return audit_id
+
+    def record_lockout(
+        self,
+        *,
+        store_id: str,
+        locked_user_id: str,
+        locked_code: str,
+        consecutive_failures: int,
+        locked_until: datetime,
+        occurred_at: datetime,
+    ) -> str:
+        """Write the lockout, and queue it — one row per lockout event.
+
+        The individual refusals stay local: one row per attempt is an outbox
+        flood reachable from the login screen, and the sequence that makes
+        them evidence only exists on this terminal anyway.
+
+        The lockout is the bounded version of the same fact. It is generated
+        by the throttle rather than by whoever is typing, so the rate is
+        capped by construction — five attempts buy one row, and the next one
+        costs the attacker fifteen minutes. That makes it safe to push, and it
+        has to be pushed, because the screen built to answer "who did that?"
+        reads the cloud and would otherwise never show it.
+
+        `actor_id` is the locked account. There is no approver: nobody
+        authorised this, which is the point of it.
+        """
+        audit_id = new_id()
+        with self.db.write() as conn:
+            conn.execute(
+                """
+                INSERT INTO audit_log (
+                    id, store_id, actor_id, approver_id, action, entity,
+                    entity_id, after_json, occurred_at
+                ) VALUES (?, ?, ?, NULL, ?, 'permission', NULL, ?, ?)
+                """,
+                (
+                    audit_id,
+                    store_id,
+                    locked_user_id,
+                    PIN_LOCKED,
+                    json.dumps(
+                        {
+                            "employee_code": locked_code,
+                            "consecutive_failures": consecutive_failures,
+                            "locked_until": locked_until.isoformat(),
+                        }
+                    ),
+                    occurred_at.isoformat(),
+                ),
+            )
+            conn.execute(
+                """
+                INSERT INTO outbox (entity, entity_id, op, payload_json,
+                                    client_seq, created_at)
+                VALUES ('audit', ?, 'insert', ?, ?, ?)
+                """,
+                (
+                    audit_id,
+                    json.dumps({"audit_id": audit_id, "action": PIN_LOCKED}),
+                    self._next_client_seq(conn),
+                    occurred_at.isoformat(),
+                ),
+            )
+        return audit_id
+
+    def lockouts(self, limit: int = 100) -> list[dict[str, object]]:
+        """Lockouts recorded on this terminal, newest first."""
+        rows = self.db.query(
+            "SELECT * FROM audit_log WHERE action = ? "
+            "ORDER BY occurred_at DESC LIMIT ?",
+            (PIN_LOCKED, limit),
+        )
+        return [dict(row) for row in rows]
 
     def record_override_refused(
         self,

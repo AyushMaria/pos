@@ -567,7 +567,14 @@ def test_every_pushable_entity_is_one_sync_push_accepts() -> None:
          in path.read_text(encoding="utf-8")),
         key=lambda path: path.name,
     )
-    accepted = set(re.findall(r"when '([a-z_]+)' then", latest.read_text(encoding="utf-8")))
+    # A plpgsql CASE branch may name several values: `when 'override', 'audit'
+    # then`. Matching only the first was this test's own bug, found the day a
+    # branch was widened — it reported a supported entity as unaccepted, which
+    # is at least the safe direction to be wrong in.
+    branches = re.findall(
+        r"when\s+((?:'[a-z_]+'\s*,?\s*)+)then", latest.read_text(encoding="utf-8")
+    )
+    accepted = {name for branch in branches for name in re.findall(r"'([a-z_]+)'", branch)}
 
     assert accepted, f"no entity branches found in {latest.name} — the regex has stopped matching"
     missing = sorted(PayloadBuilder.SUPPORTED_ENTITIES - accepted)

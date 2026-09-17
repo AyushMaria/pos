@@ -209,3 +209,99 @@ def test_locking_one_person_does_not_stop_the_till(auth_service, users) -> None:
     session = auth_service._login_offline("C001", "4913")
     assert session.employee_code == "C001"
     assert users.get_by_employee_code("C001").consecutive_pin_failures == 0
+
+
+# ── The lock is a fact about the approver, not about the transport ──────────
+
+
+class _CloudThatAlwaysSaysYes:
+    """A reachable Supabase that accepts any PIN.
+
+    Deliberately permissive: the question is whether the local lock is even
+    consulted when the network is up, so a cloud that could refuse would
+    confuse the answer.
+    """
+
+    def __init__(self, identity) -> None:
+        self.identity = identity
+        self.calls = 0
+
+    async def authenticate_pin(self, employee_code, pin, store_code, terminal_code):
+        self.calls += 1
+        raise AssertionError(
+            "the cloud was asked to verify a PIN for a locked account — the "
+            "lock ran inside the offline branch instead of before the "
+            "transport choice, so plugging in the network clears it"
+        )
+
+    async def aclose(self) -> None:
+        return None
+
+
+@pytest.mark.asyncio
+async def test_being_online_does_not_clear_a_lockout(auth_service, users) -> None:
+    """The most ordinary action in the shop must not disable the throttle.
+
+    `authenticate-pin` counts in a `Map`, per function instance, with no idea
+    which till is asking or how often it has already been refused. If the
+    local lock lived inside the offline branch, an attacker would reach for
+    the network cable rather than the PIN pad.
+    """
+    _seed_supervisor(auth_service)
+    _wrong_logins(auth_service, lockout.FAILURES_BEFORE_LOCK)
+
+    auth_service.cloud = _CloudThatAlwaysSaysYes(users.get_by_employee_code("S001"))
+
+    with pytest.raises(PinLocked):
+        await auth_service.login("S001", "7241")
+
+    assert auth_service.cloud.calls == 0, "the cloud was consulted first"
+
+
+def test_the_lockout_is_queued_for_the_cloud(auth_service, db) -> None:
+    """One row per lockout event, and it has to leave the terminal.
+
+    Slice 5's viewer reads the cloud, so a lockout that stays in SQLite is
+    invisible to the one screen built to answer "who did that?".
+    """
+    _seed_supervisor(auth_service)
+    _wrong_logins(auth_service, lockout.FAILURES_BEFORE_LOCK)
+
+    rows = db.query("SELECT * FROM audit_log WHERE action = 'pin.locked'")
+    queued = db.query("SELECT * FROM outbox WHERE entity = 'audit'")
+
+    assert len(rows) == 1
+    assert len(queued) == 1
+    assert queued[0]["entity_id"] == rows[0]["id"]
+    assert rows[0]["approver_id"] is None, "nobody authorised a lockout"
+
+
+def test_the_attempts_themselves_are_not_queued(auth_service, db) -> None:
+    """The bound that makes the lockout safe to push.
+
+    An attacker generates refusals at whatever rate they like; the throttle
+    generates lockouts. If every attempt were queued, the login screen would
+    be an outbox flood with no credential required.
+    """
+    _seed_supervisor(auth_service)
+    _wrong_logins(auth_service, lockout.FAILURES_BEFORE_LOCK)
+
+    queued = db.query("SELECT * FROM outbox WHERE entity IN ('audit', 'override')")
+    assert len(queued) == 1, (
+        f"{len(queued)} rows queued for {lockout.FAILURES_BEFORE_LOCK} attempts — "
+        "the attempts are being pushed, not just the lockout"
+    )
+
+
+def test_a_second_lockout_costs_the_attacker_before_it_costs_the_outbox(
+    auth_service, db
+) -> None:
+    """Five attempts buy one row, and the next one costs fifteen minutes."""
+    _seed_supervisor(auth_service)
+    _wrong_logins(auth_service, lockout.FAILURES_BEFORE_LOCK * 4)
+
+    queued = db.query("SELECT * FROM outbox WHERE entity = 'audit'")
+    assert len(queued) == 1, (
+        "further attempts while already locked queued more rows; a locked "
+        "account must be refused before the counter is touched"
+    )
