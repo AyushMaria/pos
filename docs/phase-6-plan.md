@@ -5,6 +5,9 @@
 **Exit criteria:** receive a delivery by entering case codes, count a section,
 and have `stock_levels` reconcile against the ledger.
 
+> **Closed 17 September 2026.** Exit criteria met, all six definition-of-done
+> boxes ticked. See [Closed](#closed) at the end of this document.
+
 Six deliverables:
 
 - Product / barcode / price admin screens — the first real admin UI
@@ -449,3 +452,92 @@ resolved:
   go-live rather than after (plan §6 step 6).
 
 Start at slice 1.
+
+---
+
+## Closed
+
+**17 September 2026.** Weeks 14–15 of the plan.
+
+**Exit criteria met.** `scripts/reconcile_stock.sql` returns zero drift rows:
+every product's `stock_levels.on_hand` equals the sum of its ledger deltas. A
+delivery receives by case code, a section counts, and the two agree. That
+invariant is the phase, and everything else in it was a way of putting rows in
+that ledger.
+
+**Definition of done (plan §5), all six:**
+
+- [x] **Tests pass in CI, including the permission matrix.** Plus two
+      mechanical guards this phase added because the toolchain could not see
+      what it was missing: `scripts/check_dead_client.py` (every client
+      function must be called from a non-test file) and
+      `tests/test_route_coverage.py` (every route must have an HTTP-level
+      test, with a debt list that may only shrink — now ten, down from
+      eleven).
+- [x] **It runs from the packaged build.** One-folder PyInstaller build via
+      `packaging/pos.spec`, documented in `docs/packaged-build.md`. Schema
+      migrated, `/health` passed, and the served bundle verified
+      byte-identical to what Vite wrote — which is the check that matters,
+      since a six-day-stale bundle is indistinguishable from a current one
+      until you go looking for a specific button.
+- [x] **It works with the network disconnected, or fails with a message a
+      cashier can act on.** Selling is offline-first; the admin path is
+      online-only by decision 2 and says so in those words.
+- [x] **No new `float` in money paths, no new direct SQLite connections
+      outside repositories.** `scripts/check_no_float.py` still holds the
+      line on `app/domain`.
+- [x] **Audit rows exist for anything a manager would need to investigate
+      later.** 0019 put the five admin mutations in a trigger rather than in
+      Python, because the screen reaches PostgREST under the user's own token
+      and a client-side audit is only as honest as whoever holds it. It
+      earned its place within a day.
+- [x] **A non-developer has used it for 15 minutes.** No new defects.
+
+**Migrations 0014–0021.** Unlisted lines and the unknown-scan queue,
+resolution policy, catalogue editing, reorder points, the audit trail, grant
+narrowing, and scan outcomes.
+
+### What this phase actually taught
+
+Four defects in the last week of it. **None were found by a test suite.** All
+four were the same shape: the system reported success for something that had
+not happened.
+
+- A product edit that never left the browser, on a form that looked saved.
+- A queue entry closed with nothing catalogued, by a button that looked like
+  the two beside it — then an empty queue claiming every scan had found a
+  product.
+- A six-day-old UI bundle serving a screen that no longer existed in source.
+- A `.gitignore` rule written in UTF-16 by PowerShell, matching nothing, in
+  the file added to stop that exact mistake.
+
+The first two are fixed and carded. The third is why the packaged-build guide
+opens by rebuilding the UI and checking the timestamp. The fourth is fixed and
+verified by `git check-ignore`.
+
+The generalisation is worth carrying into phase 7: **look for actions that are
+destructive by omission** — ones that cost nothing to take, sit beside the
+actions that cost effort, and report the same success as them. The fix is
+rarely a better warning. It is making the claim checkable, the way 0021
+refuses a resolve when the barcode is on nothing.
+
+### Debt carried forward, recorded not hidden
+
+- **Per-table grant narrowing** (0020). Twenty-two tables in `public` still
+  grant `anon` and `authenticated` INSERT, UPDATE and DELETE table-wide, with
+  RLS the only thing refusing them. A table at a time, RLS suite green
+  between each.
+- **`anon` on POS tables** (0020). Nothing reads or writes as `anon`; making
+  that deny explicit needs the login path exercised end to end first.
+- **Twelve mutable `search_path`s** (0020). All SECURITY INVOKER, so hygiene
+  rather than escalation. Worth a sweep.
+- **Ten routes with no HTTP-level test** (`tests/test_route_coverage.py`).
+  The list may shrink and nothing else.
+- **`packaging/pos.spec` is the phase 6 shape of a phase 9 artefact.** No
+  signing, no installer, no updater, no `version.json`. Phase 9 grows it.
+- **`.env` resolution in a frozen build.** The packaged app reads settings
+  from `POS_*` environment variables because `env_file` resolves against the
+  working directory, not the executable. The durable fix belongs with phase 9
+  packaging.
+
+**Next: phase 7 — RBAC completion (weeks 16–17).**

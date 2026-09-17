@@ -283,10 +283,10 @@ in one week, none found by a test suite, all found by someone pressing things.
 ## The phase 6 checklist, for reference
 
 - [x] Tests pass in CI, including the permission matrix
-- [ ] It runs from the **packaged build**, not the dev environment
-- [ ] It works with the network disconnected, or fails with a message a
+- [x] It runs from the **packaged build**, not the dev environment
+- [x] It works with the network disconnected, or fails with a message a
       cashier can act on
 - [x] No new `float` in money paths, no new direct SQLite connections outside
       repositories
 - [x] Audit rows exist for anything a manager would need to investigate later
-- [ ] A non-developer has used it for 15 minutes
+- [x] A non-developer has used it for 15 minutes
