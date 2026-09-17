@@ -32,6 +32,22 @@ class SnapshotExpired(Exception):
     """Raised when an offline permission snapshot is too old to be trusted."""
 
 
+class NotOverridable(Exception):
+    """Raised when a permission is asked for that a supervisor may not lend.
+
+    Not the same as being refused: this says the key is outside
+    ``permissions.OVERRIDABLE`` entirely, because the write it authorises
+    would be refused by RLS at push time under the cashier's own claim. The
+    modal must never offer it, and the endpoint must never mint it — a grant
+    that passes here and quarantines at 2am is worse than a refusal at the
+    counter.
+    """
+
+    def __init__(self, permission: str) -> None:
+        super().__init__(permission)
+        self.permission = permission
+
+
 @dataclass(frozen=True, slots=True)
 class Session:
     """An authenticated cashier at this terminal."""

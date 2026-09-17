@@ -17,12 +17,15 @@ from __future__ import annotations
 
 import logging
 import threading
+from dataclasses import replace
 from datetime import datetime
 
 from app.config import Settings, get_settings
 from app.data.repositories.users import CachedUserRepository
+from app.domain import permissions
 from app.domain.identity import (
     CachedIdentity,
+    NotOverridable,
     Session,
     SnapshotExpired,
     snapshot_expiry,
@@ -46,6 +49,19 @@ class LoginFailed(RuntimeError):
 
 class NoOfflineIdentity(RuntimeError):
     """The cloud is unreachable and this employee has never logged in here."""
+
+
+class NotSignedIn(RuntimeError):
+    """A grant was minted with nobody at the till to receive it.
+
+    Its own exception rather than a silent no-op: an override authorised into
+    an empty store is a supervisor who typed their PIN for nothing, and the
+    screen has to say so.
+    """
+
+    def __init__(self, permission: str) -> None:
+        super().__init__(f"nobody is signed in to receive {permission}")
+        self.permission = permission
 
 
 class SessionStore:
@@ -81,6 +97,73 @@ class SessionStore:
     def access_token(self) -> str | None:
         with self._lock:
             return self._access_token
+
+    def grant(
+        self,
+        permission: str,
+        *,
+        until: datetime,
+        now: datetime | None = None,
+    ) -> Session:
+        """Lend the signed-in cashier a permission until ``until``.
+
+        `Session` is frozen, so this replaces it inside the store rather than
+        mutating it — and replaces it *in place*, which is the whole point:
+        the cashier stays signed in, their cart survives, and the supervisor
+        walks away. A supervisor authorising a void never signs the cashier
+        out (architecture §11.3).
+
+        **Time-boxed, not use-boxed.** The grant is a window, not a token: a
+        supervisor who authorises one void authorises every void for the next
+        ninety seconds. That is the architecture's choice and it is defensible
+        at a counter — the alternative is a supervisor standing there for a
+        three-line correction — but it should be a sentence somebody wrote
+        down rather than a property of the data structure nobody noticed.
+
+        Refuses three things rather than appearing to work:
+
+        * a permission outside `OVERRIDABLE`, because RLS would refuse the
+          write it authorises hours later, into the failures queue;
+        * a grant nobody is signed in to receive;
+        * a window that has already closed, which would mint a grant that
+          reads as success and does nothing.
+
+        Returns the session as it now stands, so a caller writing the audit
+        row records what was actually granted rather than what it asked for.
+        """
+        if not permissions.is_overridable(permission):
+            raise NotOverridable(permission)
+
+        now = now or utcnow()
+        if until <= now:
+            raise ValueError(
+                f"grant for {permission} expires at {until.isoformat()}, "
+                f"which is not after {now.isoformat()}"
+            )
+
+        with self._lock:
+            session = self._session
+            if session is None:
+                raise NotSignedIn(permission)
+
+            # Expired grants are dropped on the way past. `Session.allows`
+            # already ignores them, so this changes no behaviour — it keeps
+            # the dict from growing all shift and keeps a diagnostics screen
+            # from showing a list of things that are not true any more.
+            live = {
+                key: expiry
+                for key, expiry in session.overrides.items()
+                if expiry > now
+            }
+
+            # Never shorten a window. Two supervisors authorising the same key
+            # in the same minute should not leave the cashier with less time
+            # than the first one gave them.
+            held = live.get(permission)
+            live[permission] = max(until, held) if held else until
+
+            self._session = replace(session, overrides=live)
+            return self._session
 
 
 class AuthService:
