@@ -131,6 +131,51 @@ ROLE_PERMISSIONS: Final[dict[str, frozenset[str]]] = {
 
 ALL_PERMISSIONS: Final[frozenset[str]] = frozenset().union(*ROLE_PERMISSIONS.values())
 
+# ── What a supervisor may lend ──────────────────────────────────────────────
+#
+# A 90-second grant lives on this terminal. RLS only ever sees the JWT, and
+# there is no way to mint a new one offline — which is precisely the case the
+# phase 7 exit criteria insist must work. So a granted permission passes
+# `require()` here and then meets Postgres at the sync boundary holding
+# nothing but the cashier's own claim.
+#
+# **The rule: a permission is overridable only if the write it authorises is
+# already accepted under the cashier's own claim.** Anything else produces the
+# worst failure this system can have — the sale completes, the customer
+# leaves, and the row quarantines hours later with nobody watching.
+#
+# Checked against the real policies rather than reasoned about, in
+# `tests/test_rls.py::test_the_overridable_set_is_exactly_what_rls_accepts`.
+# The four below are accepted because RLS never asks *which* key justified a
+# row; it asks for `sale.create`, which the cashier already holds:
+#
+#   sale.discount.line       sale_lines   -> sale_lines_insert  (sale.create)
+#   sale.discount.unlimited  sale_lines   -> sale_lines_insert  (sale.create)
+#   price.override           sale_lines   -> sale_lines_insert  (sale.create)
+#   sale.void                sales        -> sales_insert       (sale.create
+#                                             + cashier_id = auth.uid())
+#
+# `cash.payout` is the counter-example and the reason this is a rule rather
+# than a list: `cash_movements_insert` asks for `cash.payout` by name, so a
+# granted payout would be refused at push time. `shift.close` and
+# `sale.refund` have no write path yet; when they get one, the test decides.
+OVERRIDABLE: Final[frozenset[str]] = frozenset(
+    {
+        SALE_DISCOUNT_LINE,
+        SALE_DISCOUNT_UNLIMITED,
+        PRICE_OVERRIDE,
+        SALE_VOID,
+    }
+)
+
+
+def is_overridable(permission: str) -> bool:
+    """May a supervisor lend this for ninety seconds?
+
+    False for anything unknown, so a typo grants nothing.
+    """
+    return permission in OVERRIDABLE
+
 
 def permissions_for(roles: frozenset[str]) -> frozenset[str]:
     """Union of the permissions granted by ``roles``. Unknown roles grant nothing."""

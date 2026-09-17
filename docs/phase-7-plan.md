@@ -440,3 +440,85 @@ The UPI gate *is* reachable, so it was checked by removing it and confirming
 the test failed. A test that asserts a button is absent passes just as well
 when the dialog never opened, and this project has shipped that mistake in
 other forms.
+
+---
+
+## Slice 3 — the decision, made before the modal
+
+*17 September 2026. The plan's instruction: decide and write down which keys
+are overridable and what each one's sync path does. Do not discover this
+per-key during slice 3.*
+
+### The rule
+
+**A permission is overridable only if the write it authorises is already
+accepted under the cashier's own claim.**
+
+Stated in `app/domain/permissions.py` as `OVERRIDABLE`, and justified against
+the real policies in `tests/test_rls.py` — each key is a real write, run under
+a cashier's claim, which does not carry it. Declaring the set is unavoidable,
+because a terminal at a counter cannot read `pg_policies`; taking the
+declaration on trust is not.
+
+### What the policies actually say
+
+The plan set out three scenarios and worried about the second — a write that
+pushes under a key the cashier does not hold, quarantining silently hours
+later. Reading the policies, scenario 2 does not arise for the sale path at
+all:
+
+| Override | Lands in | Policy asks for | Under a 90s grant |
+|---|---|---|---|
+| `sale.discount.line` | `sale_lines` | `sale.create`, via the parent sale | pushes |
+| `sale.discount.unlimited` | `sale_lines` | `sale.create` | pushes |
+| `price.override` | `sale_lines` | `sale.create` | pushes |
+| `sale.void` | `sales` | `sale.create` + `cashier_id = auth.uid()` | pushes |
+| `cash.payout` | `cash_movements` | **`cash.payout`** + `actor_id = auth.uid()` | **refused** |
+
+`sale_lines_insert` never asks which key justified the row — it asks whether
+the caller may take a sale. So the grant never has to reach Postgres, which is
+exactly what makes the offline case work: the supervisor's authority is spent
+on the terminal, and what arrives in the cloud is an ordinary line a cashier
+was entitled to write, carrying `overridden_by` and `override_reason` as facts
+rather than as credentials.
+
+`cash.payout` is the counter-example, and the reason this is a rule rather
+than a list. Its policy names the key, so a granted payout would be refused at
+push time — the silent-and-late failure this phase is most afraid of. It is
+not overridable. `shift.close` and `sale.refund` have no write path yet; when
+they get one, the test decides rather than a judgement call.
+
+### Why not the other two options
+
+**Widening RLS to accept a row naming an approver** would make every key
+overridable uniformly, at the cost of a migration and of widening the only
+layer that is actually security. `approver_id` is written by the terminal into
+an unencrypted SQLite file with no MAC — slice 4 exists because that file is
+editable — so a policy trusting it would convert a local file edit into real
+cloud access. The asymmetry the plan calls "the whole phase" is better left
+in place than papered over.
+
+**An explicit list of four** is what `OVERRIDABLE` looks like today, and would
+read the same. The difference is that nothing would tie it to the policies, so
+a future migration that made one of the four ask for its own key would move
+the failure from the test suite to a counter at 2am. This project has twice
+watched a hand-maintained list fall behind.
+
+### No schema change
+
+`sale_lines.overridden_by`, `sale_lines.override_reason` and
+`audit_log.approver_id` already exist in both schemas, and `sync_push` already
+carries all three. Slice 3 writes them; it does not add them.
+
+### What this settles, and what it does not
+
+Settled: which keys the modal may offer, and that a grant never needs to reach
+Postgres. Still open, in slice 3's own order — `SessionStore.grant()`,
+supervisor PIN verification that does not replace the session,
+`POST /overrides/authorize`, the `authorize-override` Edge Function, the audit
+row at the point the grant is minted, and the modal.
+
+The audit row remains the part worth not getting wrong. An override that
+leaves no trail launders an escalation into ordinary work, and the whole
+reason the sale path is safe to override is that what reaches the cloud looks
+ordinary.

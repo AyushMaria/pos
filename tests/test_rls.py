@@ -2065,3 +2065,164 @@ def test_receiving_stock_is_not_permission_to_adjust_it(pg: Any) -> None:
             "now(), %s, %s)",
             (STORE_ID, PRODUCT_ID, -5_000, TERMINAL_UUID, MANAGER_ID),
         )
+
+
+# ── What a supervisor may lend — phase 7 slice 3 ────────────────────────────
+#
+# `app/domain/permissions.py` states the rule: a permission is overridable
+# only if the write it authorises is already accepted under the cashier's own
+# claim. A 90-second grant lives on the terminal and Postgres never sees it,
+# so a key that fails this test produces the worst failure available — the
+# sale completes, the customer leaves, and the row quarantines at 2am.
+#
+# The set is declared there and justified here. Declaring it is unavoidable
+# (the terminal cannot read `pg_policies` at a counter), but nothing has to
+# take the declaration on trust: each key below is a real write, run under a
+# claim that does **not** carry the key, against the real policies.
+
+
+def _cashier_claims() -> str:
+    """A cashier's token. Holds `sale.create` and none of the overridables."""
+    return claims(CASHIER_ID, perms.CASHIER)
+
+
+def _a_sale(cur: Any) -> str:
+    """A completed sale belonging to the cashier, to hang lines off."""
+    sale_id = "019500aa-0000-7000-8000-00000000f001"
+    cur.execute(
+        "insert into public.sales (id, store_id, terminal_id, cashier_id, "
+        "status, client_created_at) values (%s, %s, %s, %s, 'completed', now())",
+        (sale_id, STORE_ID, TERMINAL_UUID, CASHIER_ID),
+    )
+    return sale_id
+
+
+def _line_written_under(pg: Any, jwt_claims: str, **overrides: Any) -> int:
+    """Insert one sale line as the holder of these claims; return rowcount."""
+    with pg.transaction(force_rollback=True):
+        cur = pg.cursor()
+        sale_id = _a_sale(cur)
+        cur.execute("set local role authenticated")
+        cur.execute("select set_config('request.jwt.claims', %s, true)", (jwt_claims,))
+        cur.execute(
+            "insert into public.sale_lines (id, sale_id, line_no, product_id, "
+            "description, qty_milli, unit_price, discount_amount, tax_amount, "
+            "line_total, overridden_by, override_reason) "
+            "values (gen_random_uuid(), %s, 1, %s, 'Probe', 1000, %s, %s, 0, %s, "
+            "%s, %s)",
+            (
+                sale_id,
+                PRODUCT_ID,
+                overrides.get("unit_price", 1000),
+                overrides.get("discount_amount", 0),
+                overrides.get("line_total", 1000),
+                overrides.get("overridden_by", SUPERVISOR_ID),
+                overrides.get("override_reason", "supervisor authorised"),
+            ),
+        )
+        return cur.rowcount
+
+
+def test_a_discounted_line_pushes_under_the_cashiers_own_claim(pg: Any) -> None:
+    """`sale.discount.line` is overridable because RLS never asks for it.
+
+    `sale_lines_insert` asks whether the caller may create a sale, not which
+    key justified the discount on it. So a line a supervisor authorised rides
+    the outbox under the cashier's token and is accepted — the grant never
+    needs to reach Postgres, which is what makes the offline case work.
+    """
+    assert perms.SALE_DISCOUNT_LINE not in perms.ROLE_PERMISSIONS[perms.CASHIER]
+    assert _line_written_under(pg, _cashier_claims(), discount_amount=200) == 1
+
+
+def test_a_price_override_pushes_under_the_cashiers_own_claim(pg: Any) -> None:
+    assert perms.PRICE_OVERRIDE not in perms.ROLE_PERMISSIONS[perms.CASHIER]
+    assert _line_written_under(pg, _cashier_claims(), unit_price=1) == 1
+
+
+def test_a_void_pushes_under_the_cashiers_own_claim(pg: Any) -> None:
+    """A void is a new `sales` row referencing the original (§1.4).
+
+    `sales_insert` wants `sale.create` and `cashier_id = auth.uid()`. Both are
+    true of the cashier who took the sale and asked for authorisation, so the
+    compensating row lands.
+    """
+    assert perms.SALE_VOID not in perms.ROLE_PERMISSIONS[perms.CASHIER]
+    with pg.transaction(force_rollback=True):
+        cur = pg.cursor()
+        original = _a_sale(cur)
+        cur.execute("set local role authenticated")
+        cur.execute(
+            "select set_config('request.jwt.claims', %s, true)", (_cashier_claims(),)
+        )
+        cur.execute(
+            "insert into public.sales (id, store_id, terminal_id, cashier_id, "
+            "status, original_sale_id, client_created_at) "
+            "values (gen_random_uuid(), %s, %s, %s, 'voided', %s, now())",
+            (STORE_ID, TERMINAL_UUID, CASHIER_ID, original),
+        )
+        assert cur.rowcount == 1
+
+
+def test_a_payout_is_refused_under_the_cashiers_own_claim(pg: Any) -> None:
+    """`cash.payout` is the counter-example, and the reason this is a rule.
+
+    `cash_movements_insert` asks for `cash.payout` by name. A cashier holding
+    a 90-second grant carries a JWT that does not, so the row is refused —
+    minutes or hours after the customer left, into the failures queue, with
+    nobody watching. That is why `cash.payout` is not in `OVERRIDABLE`, and
+    why a list of overridable keys maintained by hand would be a liability:
+    this is not a fact about the permission, it is a fact about its policy.
+    """
+    assert perms.CASH_PAYOUT not in perms.OVERRIDABLE
+
+    payout = (
+        "insert into public.cash_movements (id, session_id, direction, "
+        "amount, reason, actor_id, occurred_at) values "
+        "(gen_random_uuid(), %s, 'out', 500, 'probe', %s, now())"
+    )
+
+    def attempt(jwt_claims: str, actor: str) -> int:
+        with pg.transaction(force_rollback=True):
+            cur = pg.cursor()
+            # The till session the movement hangs off, created before the role
+            # drops: the FK is not what is under test, the policy is.
+            session_id = "019500aa-0000-7000-8000-00000000f900"
+            cur.execute(
+                "insert into public.register_sessions (id, store_id, terminal_id, "
+                "user_id, opened_at) values (%s, %s, %s, %s, now())",
+                (session_id, STORE_ID, TERMINAL_UUID, actor),
+            )
+            cur.execute("set local role authenticated")
+            cur.execute(
+                "select set_config('request.jwt.claims', %s, true)", (jwt_claims,)
+            )
+            cur.execute(payout, (session_id, actor))
+            return cur.rowcount
+
+    # The positive control, and the reason it is here: `pytest.raises` on a
+    # refusal passes just as well when the row is malformed, the FK is wrong
+    # or the column list has drifted. Running the identical statement under a
+    # supervisor — who holds `cash.payout` — proves the only variable that
+    # moved is the key.
+    assert attempt(claims(SUPERVISOR_ID, perms.SUPERVISOR), SUPERVISOR_ID) == 1
+
+    with pytest.raises(psycopg.errors.InsufficientPrivilege):
+        attempt(_cashier_claims(), CASHIER_ID)
+
+
+def test_every_overridable_key_is_a_real_permission() -> None:
+    """A typo in `OVERRIDABLE` would grant nothing and say nothing."""
+    assert perms.OVERRIDABLE <= perms.ALL_PERMISSIONS
+    assert perms.OVERRIDABLE, "nothing is overridable — the modal has no purpose"
+
+
+def test_nothing_the_cashier_already_holds_is_overridable() -> None:
+    """Overriding a key the cashier already has is a contradiction.
+
+    It would also hide a real bug: if `sale.create` were ever listed here, a
+    grant would appear to work for reasons that had nothing to do with the
+    grant, and the modal would look correct while doing nothing.
+    """
+    cashier = perms.ROLE_PERMISSIONS[perms.CASHIER]
+    assert not (perms.OVERRIDABLE & cashier), sorted(perms.OVERRIDABLE & cashier)
