@@ -23,6 +23,7 @@ from app.api.schemas import (
     CartLineOut,
     CartOut,
     ChangeQuantityRequest,
+    LineDiscountRequest,
     MoneyOut,
     PostSaleResponse,
     ReceiptPdfResponse,
@@ -41,6 +42,7 @@ from app.domain import permissions
 from app.domain.identity import Session, utcnow
 from app.domain.money import QUANTITY_SCALE, Money
 from app.domain.payments import PaymentAttempt, PaymentError, approved_total, pending
+from app.domain.pricing import Discount, PricingError
 from app.domain.receipt import ReceiptLine
 from app.domain.tender import TenderMethod
 from app.services.cart_service import (
@@ -254,6 +256,51 @@ def change_quantity(
         return _to_cart_out(carts.change_quantity(cart_id, line_no, body.qty_milli))
     except CartLocked:
         raise HTTPException(status.HTTP_409_CONFLICT, "basket is locked") from None
+    except (KeyError, ValueError) as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
+
+
+@router.post("/carts/{cart_id}/lines/{line_no}/discount", response_model=CartOut)
+def discount_line(
+    cart_id: str,
+    line_no: int,
+    body: LineDiscountRequest,
+    carts: CartSvc,
+    session: Annotated[Session, Depends(require(permissions.SALE_DISCOUNT_LINE))],
+) -> CartOut:
+    """Take money off one line — the first overridable act with a route.
+
+    `sale.discount.line` is in `OVERRIDABLE`, which makes this the endpoint the
+    supervisor override exists for. A cashier cannot reach it; a supervisor can
+    lend them ninety seconds in which they can, and `require()` honours the
+    grant exactly as it honours a role.
+
+    `CartService.apply_discount` has existed since the pricing work and has
+    never had a caller. The reason is worth stating rather than fixing
+    quietly: discounting was the one basket operation that needed a permission
+    nobody could obtain, so the route would have been unreachable for every
+    role that uses this screen. The override is what makes it reachable.
+
+    `source="manual"` distinguishes this from a promotion in the receipt and
+    in the sale payload. A promotion is the shop's decision made in advance; a
+    manual discount is a person's decision made at the counter, and the two
+    should never be summed into one number.
+    """
+    _found(cart_id, carts)
+    try:
+        discount = Discount(
+            kind="fixed",
+            value=body.amount_paise,
+            reason=body.reason,
+            source="manual",
+        )
+        return _to_cart_out(carts.apply_discount(cart_id, line_no, discount))
+    except CartLocked:
+        raise HTTPException(status.HTTP_409_CONFLICT, "basket is locked") from None
+    except PricingError as exc:
+        # A discount larger than the line, or a negative one. The domain
+        # refuses both and says why; a cashier gets that sentence.
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc)) from exc
     except (KeyError, ValueError) as exc:
         raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
 

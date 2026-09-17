@@ -153,6 +153,14 @@ PROBES: dict[str, Probe] = {
         {"product_id": "no-such-product", "delta_milli": -1000, "note": "probe"},
     ),
     perms.SALE_CREATE: Probe("POST", "/register/carts"),
+    # The first probe for an overridable key. A role that holds it outright
+    # gets 404 for the made-up cart, which counts as admitted; a cashier gets
+    # 403 and has to be lent it.
+    perms.SALE_DISCOUNT_LINE: Probe(
+        "POST",
+        "/register/carts/no-such-cart/lines/1/discount",
+        {"amount_paise": 500},
+    ),
     perms.PAYMENT_ATTEST: Probe("POST", "/register/payments/no-such-attempt/confirm"),
     perms.SALE_REVIEW_RESOLVE: Probe("GET", "/register/reviews"),
     perms.REPORT_MARGIN: Probe("GET", "/reports/margin"),
@@ -161,11 +169,16 @@ PROBES: dict[str, Probe] = {
 
 #: Permission keys with no route behind them yet.
 #:
-#: **This is the work order, not permission.** Nine of the twenty keys in
+#: **This is the work order, not permission.** Eight of the twenty keys in
 #: §11.1 gate nothing at the API layer, because the acts they describe have
-#: not been built. Five of them are slice 3's: a void, a refund, a line
-#: discount, an unlimited discount and a price override are exactly the
-#: permissions a supervisor override exists to lend. `cash.payout` and
+#: not been built. Four of them are slice 3's: a void, a refund, an unlimited
+#: discount and a price override are exactly the permissions a supervisor
+#: override exists to lend.
+#:
+#: `sale.discount.line` left this list when the override modal needed
+#: something to authorise. It is the first act in the application a cashier
+#: can only perform by being lent the key, which is what made the rest of the
+#: flow testable end to end rather than in pieces. `cash.payout` and
 #: `shift.close` wait on a cash-drawer screen; `user.manage` gets its first
 #: read-only surface in slice 5; `settings.manage` has no screen at all.
 #:
@@ -173,7 +186,6 @@ PROBES: dict[str, Probe] = {
 #: matrix has grown a hole, which should be harder than fixing it.
 NO_API_SURFACE: frozenset[str] = frozenset(
     {
-        perms.SALE_DISCOUNT_LINE,
         perms.SALE_DISCOUNT_UNLIMITED,
         perms.SALE_VOID,
         perms.SALE_REFUND,

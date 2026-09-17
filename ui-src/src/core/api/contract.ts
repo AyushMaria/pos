@@ -114,6 +114,16 @@ export interface HealthResponse {
   /** False when no Supabase project is configured (offline dev) */
   cloud_configured: boolean;
 }
+/** Money off one line, in paise, never a percentage as a fraction.
+
+The first act in the application gated on an overridable permission. A
+cashier cannot do it; a supervisor can lend them ninety seconds in which
+they can. */
+export interface LineDiscountRequest {
+  /** How much to take off this line */
+  amount_paise: number;
+  reason?: string;
+}
 export interface LoginRequest {
   employee_code: string;
   pin: string;

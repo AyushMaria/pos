@@ -317,6 +317,30 @@ body:has(.done) {
   color: var(--muted);
 }
 
+/* Sits beside the void cross and must not be mistaken for it at a glance:
+   one takes money off, the other takes the line away. */
+.lines .discount {
+  width: auto;
+  margin: 0 2px 0 0;
+  padding: 2px 10px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 16px;
+  line-height: 1;
+}
+
+.lines .discount:disabled {
+  color: var(--muted);
+  opacity: 0.4;
+}
+
+/* The sentence naming what a supervisor is being asked to authorise. It is
+   the only thing in the dialog they have to read before typing a PIN. */
+.dialog .why {
+  color: var(--muted);
+  margin: 0 0 12px;
+}
+
 .empty {
   color: var(--muted);
   padding: 28px 0;

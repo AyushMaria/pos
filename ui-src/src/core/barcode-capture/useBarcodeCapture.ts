@@ -24,15 +24,32 @@ export interface BarcodeCaptureOptions {
   minLength?: number;
   /** Ignore capture while the user is typing in these elements. */
   respectFocus?: boolean;
+  /**
+   * False while something on screen must not be interrupted by a scan.
+   *
+   * Three dialogs existed before this option and none of them wanted it: a
+   * cashier scanning the next item while the tender dialog is open should get
+   * it in the basket, which is the whole reason capture is global.
+   *
+   * The supervisor override is the first place that is wrong. A supervisor is
+   * authorising an act *against this basket*, and an item arriving across the
+   * counter mid-authorisation would change what they are approving between
+   * the asking and the doing.
+   */
+  enabled?: boolean;
   onScan: (code: string) => void;
 }
+
+/** The gap under which input is a machine rather than a person. */
+export const MACHINE_GAP_MS = 30;
 
 const TYPING_TAGS = new Set(["INPUT", "TEXTAREA", "SELECT"]);
 
 export function useBarcodeCapture({
-  maxGapMs = 30,
+  maxGapMs = MACHINE_GAP_MS,
   minLength = 4,
   respectFocus = true,
+  enabled = true,
   onScan,
 }: BarcodeCaptureOptions): void {
   // Refs, not state: a keystroke must not cause a re-render, and at scanner
@@ -46,6 +63,15 @@ export function useBarcodeCapture({
   }, [onScan]);
 
   useEffect(() => {
+    // No listener at all rather than an early return inside one. A disabled
+    // hook that still reads every keystroke would keep filling `buffer`, and
+    // the first Enter after the dialog closed would fire a code assembled
+    // from digits typed into somebody's PIN field.
+    if (!enabled) {
+      buffer.current = "";
+      return;
+    }
+
     function handle(event: KeyboardEvent) {
       const target = event.target as HTMLElement | null;
 
@@ -94,5 +120,5 @@ export function useBarcodeCapture({
 
     window.addEventListener("keydown", handle);
     return () => window.removeEventListener("keydown", handle);
-  }, [maxGapMs, minLength, respectFocus]);
+  }, [maxGapMs, minLength, respectFocus, enabled]);
 }

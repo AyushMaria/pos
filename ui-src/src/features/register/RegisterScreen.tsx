@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ApiError } from "../../core/api/client";
+import { overrides } from "../../core/api/overrides";
 import { catalog, register } from "../../core/api/register";
 import type {
   CartOut,
+  Permission,
   PostSaleResponse,
   ProductOut,
   SessionResponse,
@@ -11,6 +13,7 @@ import type {
   TenderResponse,
 } from "../../core/api/contract";
 import { useBarcodeCapture } from "../../core/barcode-capture/useBarcodeCapture";
+import { useScanShield } from "../../core/barcode-capture/useScanShield";
 import { PermissionGate } from "../../core/rbac/PermissionGate";
 import { SyncIndicator } from "../sync/SyncIndicator";
 
@@ -44,6 +47,16 @@ export function RegisterScreen({
   //: whether to sell it anyway. `""` means they opened the form by hand.
   const [unlisted, setUnlisted] = useState<string | null>(null);
   const [rates, setRates] = useState<TaxCodeOut[]>([]);
+  //: The line a cashier is discounting, while they decide how much.
+  const [discounting, setDiscounting] = useState<number | null>(null);
+  //: Set when an act was refused for want of a permission. The dialog it
+  //: opens performs the act itself once a supervisor has authorised, rather
+  //: than handing the key back and hoping the cashier is quick.
+  const [needsOverride, setNeedsOverride] = useState<{
+    permission: Permission;
+    label: string;
+    act: () => Promise<void>;
+  } | null>(null);
   const entryRef = useRef<HTMLInputElement>(null);
 
   const focusEntry = useCallback(() => entryRef.current?.focus(), []);
@@ -91,8 +104,45 @@ export function RegisterScreen({
     [cart, busy, focusEntry],
   );
 
+  const discountLine = useCallback(
+    async (lineNo: number, amountPaise: number) => {
+      if (!cart) return;
+      setBusy(true);
+      try {
+        setCart(await register.discountLine(cart.cart_id, lineNo, amountPaise));
+        setDiscounting(null);
+        setNeedsOverride(null);
+        setMessage(null);
+      } catch (error) {
+        if (error instanceof ApiError && error.status === 403) {
+          // Not a failure — the ordinary case. The cashier may not do this,
+          // so ask somebody who may, and let them do it.
+          setNeedsOverride({
+            permission: "sale.discount.line",
+            label: `take ${(amountPaise / 100).toFixed(2)} off line ${lineNo}`,
+            act: () => discountLine(lineNo, amountPaise),
+          });
+          return;
+        }
+        say(error instanceof ApiError ? error.message : "Could not discount that", true);
+      } finally {
+        setBusy(false);
+      }
+    },
+    [cart],
+  );
+
   // A scan anywhere on the page lands in the basket, even with a dialog open.
-  useBarcodeCapture({ onScan: addCode });
+  // That is right for the tender and unlisted dialogs — the next customer's
+  // items belong in the basket while a cashier counts change.
+  //
+  // It is wrong for exactly one dialog. A supervisor authorising an act
+  // against this basket must not have the basket change underneath them
+  // between the asking and the doing, and a wedge scanner is a keyboard: the
+  // digits would land in the PIN field and the trailing Enter would spend an
+  // attempt. `useScanShield` inside the dialog covers the field; this covers
+  // the basket.
+  useBarcodeCapture({ onScan: addCode, enabled: needsOverride === null });
 
   // Fetched once and kept. The form must open instantly with a queue waiting,
   // and GST slabs do not change during a shift.
@@ -315,7 +365,11 @@ export function RegisterScreen({
         </ul>
       )}
 
-      <LineList cart={cart} onVoid={(lineNo) => void voidLine(lineNo)} />
+      <LineList
+        cart={cart}
+        onVoid={(lineNo) => void voidLine(lineNo)}
+        onDiscount={setDiscounting}
+      />
       <Totals cart={cart} />
 
       <div className="tender">
@@ -337,6 +391,36 @@ export function RegisterScreen({
           New sale
         </button>
       </div>
+
+      {/* One dialog at a time. The amount has been chosen by the time a
+          supervisor is being asked for, and leaving the first one open
+          underneath puts two Cancel buttons on screen — which is confusing
+          at a counter and was caught by a test that could not tell them
+          apart either. */}
+      {discounting !== null && needsOverride === null && (
+        <DiscountDialog
+          lineNo={discounting}
+          busy={busy}
+          onCancel={() => {
+            setDiscounting(null);
+            focusEntry();
+          }}
+          onConfirm={(amountPaise) => void discountLine(discounting, amountPaise)}
+        />
+      )}
+
+      {needsOverride && (
+        <OverrideDialog
+          permission={needsOverride.permission}
+          label={needsOverride.label}
+          onCancel={() => {
+            setNeedsOverride(null);
+            setDiscounting(null);
+            focusEntry();
+          }}
+          onAuthorised={needsOverride.act}
+        />
+      )}
 
       {quote && (
         <TenderDialog
@@ -376,9 +460,11 @@ export function RegisterScreen({
 function LineList({
   cart,
   onVoid,
+  onDiscount,
 }: {
   cart: CartOut | null;
   onVoid: (lineNo: number) => void;
+  onDiscount: (lineNo: number) => void;
 }) {
   if (!cart || cart.lines.length === 0) {
     return <p className="empty">No items yet.</p>;
@@ -395,6 +481,19 @@ function LineList({
             </td>
             <td className="amt">{line.line_total.text}</td>
             <td>
+              {/* Offered to everyone, unlike the doors in the header. A
+                  cashier may not discount, but they may *ask* — hiding the
+                  button would leave them telling a customer to come back
+                  when the supervisor is free. */}
+              <button
+                type="button"
+                className="discount"
+                aria-label={`Discount line ${line.line_no}`}
+                disabled={cart.locked}
+                onClick={() => onDiscount(line.line_no)}
+              >
+                %
+              </button>
               <button
                 type="button"
                 className="void"
@@ -507,6 +606,172 @@ function UnlistedDialog({
           onClick={() => onConfirm({ description, rupees, tax_code: taxCode })}
         >
           Sell it anyway
+        </button>
+        <button type="button" className="secondary" onClick={onCancel}>
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function DiscountDialog({
+  lineNo,
+  busy,
+  onCancel,
+  onConfirm,
+}: {
+  lineNo: number;
+  busy: boolean;
+  onCancel: () => void;
+  onConfirm: (amountPaise: number) => void;
+}) {
+  const [amount, setAmount] = useState("");
+  const paise = Math.round(Number(amount) * 100);
+
+  return (
+    <div className="dialog" role="dialog" aria-label={`Discount line ${lineNo}`}>
+      <h3>Discount line {lineNo}</h3>
+      <label htmlFor="discount-amount">Amount off (₹)</label>
+      <input
+        id="discount-amount"
+        inputMode="decimal"
+        value={amount}
+        onChange={(event) => setAmount(event.target.value)}
+        autoFocus
+      />
+      <div className="row">
+        <button
+          type="button"
+          disabled={busy || !Number.isFinite(paise) || paise <= 0}
+          onClick={() => onConfirm(paise)}
+        >
+          Apply
+        </button>
+        <button type="button" className="secondary" onClick={onCancel}>
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * The supervisor override — architecture §11.3.
+ *
+ * **This dialog performs the act.** It does not hand a permission back to the
+ * caller and let them try again: the grant lasts ninety seconds, and a
+ * supervisor who is interrupted mid-authorisation would otherwise leave the
+ * cashier holding a key that expires before they use it, landing on a 403
+ * with nothing on screen to explain why. Authorising *is* the discount. The
+ * ninety seconds covers a round trip rather than somebody's next decision.
+ *
+ * **It reads `status`, not just the message.** Three outcomes need behaviour
+ * rather than wording: 409 means the session already holds the key and the act
+ * should simply happen; 423 means the approver is locked out, so retrying now
+ * cannot work and the button should say so; 503 means this terminal has never
+ * seen them, and the answer is a different person or a cable. A dialog that
+ * rendered `error.message` for all of them would say the right words and do
+ * the wrong thing.
+ */
+function OverrideDialog({
+  permission,
+  label,
+  onCancel,
+  onAuthorised,
+}: {
+  permission: Permission;
+  label: string;
+  onCancel: () => void;
+  onAuthorised: () => Promise<void>;
+}) {
+  const [code, setCode] = useState("");
+  const [pin, setPin] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  //: Set by a 423. Retrying cannot help until the stated time, so the button
+  //: stops inviting it.
+  const [lockedOut, setLockedOut] = useState(false);
+  //: A scan landed in the PIN box. Said out loud, because the alternative is
+  //: a supervisor watching their PIN vanish and typing it again faster.
+  const [scanned, setScanned] = useState(false);
+
+  // A wedge scanner is a keyboard. Without this, an item scanned across the
+  // counter types digits into the PIN field and its trailing Enter submits
+  // them — spending an attempt against a supervisor's PIN. Attempts are
+  // persisted and escalating, so a cashier could lock their own supervisor
+  // out by accident, with the shop open, and the audit row would name the
+  // supervisor and say `pin.locked`.
+  const shield = useScanShield({
+    onScanBlocked: () => {
+      setPin("");
+      setScanned(true);
+    },
+  });
+
+  async function submit() {
+    setBusy(true);
+    setError(null);
+    try {
+      await overrides.authorize(code, pin, permission);
+      await onAuthorised();
+    } catch (cause) {
+      if (!(cause instanceof ApiError)) {
+        setError("That did not work.");
+        return;
+      }
+      if (cause.status === 409) {
+        // Nothing needed authorising — the session already holds the key.
+        // Refusing here would be a dialog complaining about a permission the
+        // person already has, so do the thing instead.
+        await onAuthorised();
+        return;
+      }
+      if (cause.status === 423) setLockedOut(true);
+      setError(cause.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="dialog" role="dialog" aria-label="Supervisor authorisation">
+      <h3>Supervisor needed</h3>
+      <p className="why">A supervisor must authorise this: {label}.</p>
+      <label htmlFor="approver">Supervisor code</label>
+      <input
+        id="approver"
+        value={code}
+        onChange={(event) => setCode(event.target.value)}
+        autoFocus
+      />
+      <label htmlFor="approver-pin">PIN</label>
+      <input
+        id="approver-pin"
+        type="password"
+        inputMode="numeric"
+        value={pin}
+        onChange={(event) => setPin(event.target.value)}
+        onKeyDown={shield.onKeyDown}
+      />
+      {scanned && (
+        <p className="msg warn" role="alert">
+          That looked like a scan, not a PIN. Nothing was added and no attempt
+          was used — type the PIN again.
+        </p>
+      )}
+      {error && (
+        <p className="msg bad" role="alert">
+          {error}
+        </p>
+      )}
+      <div className="row">
+        <button
+          type="button"
+          disabled={busy || lockedOut || !code || pin.length < 4}
+          onClick={() => void submit()}
+        >
+          Authorise
         </button>
         <button type="button" className="secondary" onClick={onCancel}>
           Cancel

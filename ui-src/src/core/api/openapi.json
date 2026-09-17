@@ -561,6 +561,29 @@
         "title": "HealthResponse",
         "type": "object"
       },
+      "LineDiscountRequest": {
+        "additionalProperties": false,
+        "description": "Money off one line, in paise, never a percentage as a fraction.\n\nThe first act in the application gated on an overridable permission. A\ncashier cannot do it; a supervisor can lend them ninety seconds in which\nthey can.",
+        "properties": {
+          "amount_paise": {
+            "description": "How much to take off this line",
+            "exclusiveMinimum": 0.0,
+            "title": "Amount Paise",
+            "type": "integer"
+          },
+          "reason": {
+            "default": "",
+            "maxLength": 120,
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "amount_paise"
+        ],
+        "title": "LineDiscountRequest",
+        "type": "object"
+      },
       "LoginRequest": {
         "additionalProperties": false,
         "properties": {
@@ -3473,6 +3496,68 @@
           }
         },
         "summary": "Change Quantity",
+        "tags": [
+          "register"
+        ]
+      }
+    },
+    "/register/carts/{cart_id}/lines/{line_no}/discount": {
+      "post": {
+        "description": "Take money off one line \u2014 the first overridable act with a route.\n\n`sale.discount.line` is in `OVERRIDABLE`, which makes this the endpoint the\nsupervisor override exists for. A cashier cannot reach it; a supervisor can\nlend them ninety seconds in which they can, and `require()` honours the\ngrant exactly as it honours a role.\n\n`CartService.apply_discount` has existed since the pricing work and has\nnever had a caller. The reason is worth stating rather than fixing\nquietly: discounting was the one basket operation that needed a permission\nnobody could obtain, so the route would have been unreachable for every\nrole that uses this screen. The override is what makes it reachable.\n\n`source=\"manual\"` distinguishes this from a promotion in the receipt and\nin the sale payload. A promotion is the shop's decision made in advance; a\nmanual discount is a person's decision made at the counter, and the two\nshould never be summed into one number.",
+        "operationId": "discount_line_register_carts__cart_id__lines__line_no__discount_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "cart_id",
+            "required": true,
+            "schema": {
+              "title": "Cart Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "line_no",
+            "required": true,
+            "schema": {
+              "title": "Line No",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LineDiscountRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CartOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Discount Line",
         "tags": [
           "register"
         ]

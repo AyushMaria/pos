@@ -247,6 +247,18 @@ class ChangeQuantityRequest(ApiModel):
     qty_milli: int
 
 
+class LineDiscountRequest(ApiModel):
+    """Money off one line, in paise, never a percentage as a fraction.
+
+    The first act in the application gated on an overridable permission. A
+    cashier cannot do it; a supervisor can lend them ninety seconds in which
+    they can.
+    """
+
+    amount_paise: int = Field(gt=0, description="How much to take off this line")
+    reason: str = Field(default="", max_length=120)
+
+
 class TenderQuote(ApiModel):
     """What a method would collect, before the cashier commits to it."""
 

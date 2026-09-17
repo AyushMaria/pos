@@ -882,3 +882,96 @@ So the modal reads `ApiError.status` and maps it to an outcome, rather than
 rendering a message and hoping. Written down now; the mapping itself lands
 with the modal that calls it, because a helper with no caller is precisely the
 shape of dead code this repository has a check for.
+
+---
+
+## Slice 3 — the modal, and the act it needed first
+
+The modal had nothing to authorise. All four keys in `OVERRIDABLE` were in
+`NO_API_SURFACE`, so a dialog that performs the act it authorises would have
+been a dialog with no act — and `CartService.apply_discount` had been sitting
+there since the pricing work with no route and no caller, for a reason worth
+stating rather than fixing quietly: discounting needs a permission nobody at
+this screen holds, so the route would have been unreachable for every role
+that uses it. **The override is what makes it reachable.**
+
+So `POST /register/carts/{cart_id}/lines/{line_no}/discount` lands with the
+modal, gated on `sale.discount.line`, and `NO_API_SURFACE` shrinks by one for
+the first time. It is also what makes slice 3's acceptance criterion testable
+end to end rather than in pieces: refused, authorised, performed, and refused
+again once the window closes.
+
+One thing found while testing it and left alone: an amount larger than the
+line clamps to zero rather than going negative, because `price_line` caps each
+discount at what is left to discount. That is the boundary keeping a discount
+from becoming a refund — `sale.refund` is deliberately not overridable, and a
+negative line total would route straight round that decision. Worth flagging
+separately: a mistyped amount therefore gives the item away silently, which is
+a product question (refuse, or confirm) rather than a fault in the clamp.
+
+### A scanner is a keyboard, and this is the first dialog where that is wrong
+
+`RegisterScreen` captures scans globally, deliberately and with a comment
+saying so: a cashier scanning the next item while the tender dialog is open
+should get it in the basket. That is right for all three dialogs that existed.
+
+It is wrong for this one, in two directions at once.
+
+**Into the PIN field.** A wedge scanner types digits and appends Enter. With
+the PIN box focused, an item scanned across the counter mid-authorisation
+fills the field and submits it, spending an attempt against a supervisor's
+PIN. Attempts are now persisted and escalating, so a cashier could lock their
+own supervisor out by accident, with the shop open, and the audit row would
+say `pin.locked` and name the supervisor.
+
+**Into the basket.** A supervisor is authorising an act against *this* basket.
+An item arriving between the asking and the doing changes what they approved.
+
+These need two different fixes, which is the part worth writing down.
+`useBarcodeCapture` already skips every `INPUT`, so while the PIN box has
+focus the global hook is inert — suppressing it does nothing for the first
+problem, because that problem is not the hook's doing. The field needs its own
+guard, and the basket needs the hook turned off:
+
+* `useBarcodeCapture({ enabled })` — no listener at all while the dialog is
+  open, rather than an early return inside one, so the buffer cannot survive
+  the dialog and fire a code assembled from somebody's PIN afterwards.
+* `useScanShield` on the PIN input — the same timing rule, importing
+  `MACHINE_GAP_MS` rather than retyping it. The first character of a burst is
+  indistinguishable from a keystroke and lands; the second gives it away, and
+  from then on the field is cleared and the trailing Enter is swallowed. The
+  cashier is told what happened, because the alternative is a supervisor
+  watching their PIN vanish and typing it again faster.
+
+**The basket test was vacuous on its first run**, and the mutation check is
+what said so: deleting `enabled` entirely left all ten tests green. The scan
+had been typed with the approver-code box focused, where `respectFocus`
+already makes the hook inert — so it was asserting a protection that was not
+the one under test. Exactly the shape of the 401 that two layers could
+produce. Moving focus off the text fields first makes `enabled` the only thing
+that can refuse the scan, and the mutation now fails.
+
+All four mutations are caught by the intended test: capture never suppressed,
+the field unshielded, the Enter not swallowed, and a shield so aggressive that
+nobody could type a PIN — that last one fails five tests, including the
+human-speed positive control that exists to catch it.
+
+### The modal, as decided last slice
+
+It performs the act rather than enabling it, and it reads `ApiError.status`
+rather than only rendering the message. Three outcomes need behaviour:
+
+* **409** — the session already holds the key, so the dialog does the thing
+  instead of complaining about a permission the person already has.
+* **423** — the approver is locked out, so the button stops inviting a retry
+  that cannot work, and the message carries the unlock time.
+* **503** — this terminal has never seen them; another person can fix it from
+  the same dialog, so the button stays live.
+
+The discount button is offered to every cashier rather than hidden behind a
+`PermissionGate`. Hiding it would leave them telling a customer to come back
+when a supervisor is free; showing it is how they ask.
+
+One bug the tests caught on the way: the discount dialog stayed open behind
+the override dialog, putting two Cancel buttons on screen. A test that could
+not tell them apart either is how it surfaced.

@@ -67,6 +67,17 @@ export const register = {
       body: JSON.stringify({ qty_milli: qtyMilli }),
     }),
 
+  /**
+   * Money off one line — the only call here a cashier cannot make on their
+   * own. It answers 403 until a supervisor has lent `sale.discount.line`,
+   * and again ninety seconds later.
+   */
+  discountLine: (cartId: string, lineNo: number, amountPaise: number, reason = "") =>
+    request<CartOut>(`/register/carts/${cartId}/lines/${lineNo}/discount`, {
+      method: "POST",
+      body: JSON.stringify({ amount_paise: amountPaise, reason }),
+    }),
+
   voidLine: (cartId: string, lineNo: number) =>
     request<CartOut>(`/register/carts/${cartId}/lines/${lineNo}`, {
       method: "DELETE",
