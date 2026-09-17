@@ -342,10 +342,19 @@ def test_sync_push_is_deliberately_ungated(client: TestClient) -> None:
     and put it back in the queue, which are judgements about other people's
     work. This one only changes when.
 
-    The assertion runs in both directions on purpose. "Is not gated" alone
-    would also pass if the route disappeared, and the neighbours are checked
-    so that a future change gating all three cannot leave this comment
-    describing a system that no longer exists.
+    The assertion runs in three directions on purpose. "Is not gated" alone
+    would also pass if the route disappeared; the neighbours are checked so
+    that a future change gating all three cannot leave this docstring
+    describing a system that no longer exists; and the last one is the
+    difference between *ungated* and *unauthenticated*.
+
+    That third one guards a specific, likely mistake. `push_now` declares
+    `session: CurrentSession` and never mentions it again — the parameter
+    exists only to make FastAPI resolve the dependency. Someone reading
+    "requires nothing" directly above an argument the body never uses could
+    reasonably delete it, and without this line every test here would stay
+    green while the outbox drain became reachable to anyone who could reach
+    the port.
     """
     gated = gated_operations(client)
 
@@ -357,6 +366,14 @@ def test_sync_push_is_deliberately_ungated(client: TestClient) -> None:
         gated.get(Operation("POST", "/sync/failures/retry"))
         == perms.REPORT_SALES_STORE
     )
+
+    # `client` carries the terminal's own bearer token but nobody has signed
+    # in, so this is the session guard answering and not the token one. The
+    # detail is asserted rather than just the status, because both refusals
+    # are 401 and only one of them is the thing under test here.
+    refused = client.post("/sync/push")
+    assert refused.status_code == 401
+    assert refused.json()["detail"] == "not_signed_in"
 
 
 # ── Groundwork the three layers all depend on ───────────────────────────────

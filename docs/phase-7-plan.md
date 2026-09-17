@@ -373,8 +373,25 @@ deciding a refusal no longer applies are judgements about other people's work.
 This one only changes *when*.
 
 The slice 1 `xfail` is gone, replaced by a test that asserts the decision in
-both directions: push is ungated **and** both neighbours still require the
-key. "Is not gated" alone would also pass if the route were deleted.
+three directions: push is ungated, both neighbours still require the key, and
+**an unauthenticated caller still gets 401**.
+
+That third one matters more than it looks. *Ungated* is not *unauthenticated*.
+`push_now` declares `session: CurrentSession` and never mentions it again — the
+argument exists only to make FastAPI resolve the dependency, and it sits
+directly under a docstring that now says no permission is required. That is an
+unused parameter with a written invitation to delete it, and without the
+assertion every test in the suite would have stayed green while the outbox
+drain became reachable by anything that could reach the port. Checked by
+deleting the parameter: the call returns 503 instead of 401, because it sails
+past the guard and reaches the engine.
+
+Removing it from `UNTESTED` was not planned. Asserting that push still needs a
+session meant calling it over HTTP, which is the one thing
+`tests/test_route_coverage.py` had been asking for since phase 6 — so the
+route-coverage debt went from ten to nine as a side effect. A route whose
+rules nobody could state turned out to be a route nobody had called, which is
+probably not a coincidence.
 
 ### The audit list is empty
 
@@ -389,6 +406,17 @@ finds nothing, which is also what a search that has quietly stopped working
 reports. So the pattern is now tested against a sample rather than against the
 tree — rename `SessionResponse.permissions` and the test fails instead of the
 audit going green on an empty set.
+
+**The general rule, worth carrying past phase 7: any check whose passing state
+is "found nothing" needs a positive control.** The check and its own failure
+look identical from the outside, so something has to prove the instrument
+still works. This project has paid for the lesson four times already — the
+route-coverage walker that checked 1 of 46 operations and called the other 45
+gone, audit tests counting rows they had not created, a `.gitignore` rule in
+UTF-16 matching nothing, and a six-day-old UI bundle serving a screen that no
+longer existed in source. Each was a search that found nothing and reported
+success. Slice 1's three discovery guards and this one are the same defence in
+four places.
 
 ### Three controls gated, and one of them is a no-op today
 

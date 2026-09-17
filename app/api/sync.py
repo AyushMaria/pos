@@ -72,6 +72,15 @@ async def push_now(request: Request, session: CurrentSession) -> SyncStatusRespo
     show what was quarantined and put it back in the queue — reading refused
     sales and deciding a refusal no longer applies are both judgements about
     other people's work. This one only changes when.
+
+    **`session` is load-bearing, and unused on purpose.** No permission is not
+    no session: the argument never appears in the body, and exists so FastAPI
+    resolves the dependency and refuses a caller who has not signed in.
+    Deleting it — the obvious tidy-up for an unused parameter sitting under a
+    docstring that says nothing is required — would leave the drain reachable
+    by anything that can reach the port.
+    `test_sync_push_is_deliberately_ungated` asserts that 401, so the tidy-up
+    fails loudly instead of silently.
     """
     engine = _engine(request)
     await engine.cycle()

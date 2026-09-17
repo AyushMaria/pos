@@ -48,11 +48,17 @@ _METHODS = frozenset({"GET", "POST", "PUT", "PATCH", "DELETE"})
 #: `POST /admin/products` is deliberately absent — it is the reason this file
 #: exists, and it got its test in the same commit.
 #:
-#: Six of the ten are the slice 6 admin router, which is the honest shape of
+#: Six of the nine are the slice 6 admin router, which is the honest shape of
 #: that slice: thoroughly tested one layer below the thing the screen talks
 #: to. `POST /admin/unknown-scans/{scan_id}/resolve` left the list when the
 #: queue's Done button turned out to be closing entries without cataloguing
 #: anything — the layer below had always agreed with itself.
+#:
+#: `POST /sync/push` left in phase 7 slice 2, and not because anyone set out
+#: to test it. Deciding it needs no permission meant asserting that it still
+#: needs a *session*, and that assertion is the HTTP-level call this list was
+#: asking for. A route nobody could describe the rules of turned out to be a
+#: route nobody had called.
 UNTESTED: frozenset[tuple[str, str]] = frozenset(
     {
         ("GET", "/admin/products"),
@@ -64,7 +70,6 @@ UNTESTED: frozenset[tuple[str, str]] = frozenset(
         ("GET", "/catalog/lookup"),
         ("GET", "/catalog/size"),
         ("DELETE", "/register/carts/{cart_id}"),
-        ("POST", "/sync/push"),
     }
 )
 
