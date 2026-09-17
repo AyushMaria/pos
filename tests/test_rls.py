@@ -2226,3 +2226,180 @@ def test_nothing_the_cashier_already_holds_is_overridable() -> None:
     """
     cashier = perms.ROLE_PERMISSIONS[perms.CASHIER]
     assert not (perms.OVERRIDABLE & cashier), sorted(perms.OVERRIDABLE & cashier)
+
+
+# ── A grant on its way to the cloud — phase 7 slice 3 ───────────────────────
+#
+# `0022` added the first `sync_push` branch whose subject is an audit row
+# rather than a business record. Before it, the terminal could mint a grant
+# and had nowhere to send it, so the row stayed local with nothing queued
+# against it — unrecorded rather than delayed, and recoverable only by hand.
+
+
+def _override_envelope(audit_id: str, *, actor: str, approver: str) -> str:
+    return json.dumps(
+        [
+            {
+                "schema_version": 3,
+                "entity": "override",
+                "op": "insert",
+                "id": audit_id,
+                "client_seq": 1,
+                "data": {
+                    "id": audit_id,
+                    "store_id": STORE_ID,
+                    "actor_id": actor,
+                    "approver_id": approver,
+                    "action": "override.granted",
+                    "entity": "permission",
+                    "entity_id": None,
+                    "after_json": json.dumps(
+                        {
+                            "permission": "sale.void",
+                            "expires_at": "2026-09-17T10:01:30+00:00",
+                        }
+                    ),
+                    "occurred_at": "2026-09-17T10:00:00+00:00",
+                },
+            }
+        ]
+    )
+
+
+def _read_back_as_manager(cur: Any, audit_id: str, columns: str) -> tuple | None:
+    """Switch to a manager's claims before reading an audit row.
+
+    The cashier who pushed it cannot read it: `audit_log_select` asks for
+    `user.manage`. That asymmetry is deliberate — anyone may write an audit
+    row, reading the log is a manager's privilege — and it means a test that
+    reads back as the writer sees nothing and reports the push as lost.
+    """
+    cur.execute("set local role authenticated")
+    cur.execute(
+        "select set_config('request.jwt.claims', %s, true)",
+        (claims(MANAGER_ID, perms.MANAGER),),
+    )
+    cur.execute(
+        f"select {columns} from public.audit_log where id = %s", (audit_id,)
+    )
+    return cur.fetchone()
+
+
+def test_a_grant_pushes_under_the_cashiers_own_claim(pg: Any) -> None:
+    """The row names the supervisor; the token belongs to the cashier.
+
+    That is the whole shape of the phase 7 decision, at the boundary. The
+    supervisor's authority was spent on the terminal and never travels — what
+    arrives is a record written by somebody entitled to write it, naming
+    somebody else as the person who allowed the thing.
+
+    `audit_log_insert` asks only that the row belongs to the caller's store,
+    which is what makes `override` safe to push this way and what made
+    `permission` an overridable-safe key under the slice 3 rule.
+    """
+    audit_id = "019600aa-0000-7000-8000-00000000a001"
+    with pg.transaction(force_rollback=True):
+        _push(
+            pg,
+            _override_envelope(audit_id, actor=CASHIER_ID, approver=SUPERVISOR_ID),
+        )
+
+        row = _read_back_as_manager(
+            pg.cursor(),
+            audit_id,
+            "actor_id, approver_id, action, entity, entity_id, store_id",
+        )
+
+    assert row is not None, "the grant did not land"
+    assert str(row[0]) == CASHIER_ID
+    assert str(row[1]) == SUPERVISOR_ID
+    assert row[2] == "override.granted"
+    assert row[3] == "permission"
+    assert row[4] is None, "entity_id is a uuid; the permission lives in after_json"
+    assert str(row[5]) == STORE_ID
+
+
+def test_a_grant_names_two_different_people_on_arrival(pg: Any) -> None:
+    """An override naming one person twice is not an override.
+
+    Asserted on the far side rather than only where the row is built, because
+    this is the column the audit log exists for and the one nothing wrote
+    until now.
+    """
+    audit_id = "019600aa-0000-7000-8000-00000000a002"
+    with pg.transaction(force_rollback=True):
+        _push(
+            pg,
+            _override_envelope(audit_id, actor=CASHIER_ID, approver=SUPERVISOR_ID),
+        )
+        row = _read_back_as_manager(
+            pg.cursor(), audit_id, "actor_id <> approver_id"
+        )
+        assert row is not None and row[0] is True
+
+
+def test_pushing_the_same_grant_twice_changes_nothing(pg: Any) -> None:
+    """`on conflict (id) do nothing`, like every other branch.
+
+    A retry after a network drop must not turn one authorisation into two —
+    the audit log would then report an escalation that did not happen, which
+    is the same class of lie as failing to report one that did.
+    """
+    audit_id = "019600aa-0000-7000-8000-00000000a003"
+    envelope = _override_envelope(
+        audit_id, actor=CASHIER_ID, approver=SUPERVISOR_ID
+    )
+    with pg.transaction(force_rollback=True):
+        _push(pg, envelope)
+        _push(pg, envelope)
+
+        row = _read_back_as_manager(pg.cursor(), audit_id, "count(*)")
+        assert row is not None and row[0] == 1
+
+
+def test_a_grant_cannot_be_pushed_into_another_store(pg: Any) -> None:
+    """`audit_log_insert` scopes by store like everything else.
+
+    The row carries its own `store_id` precisely because it has no parent to
+    take one from, which makes this the one place that check can be made.
+    """
+    audit_id = "019600aa-0000-7000-8000-00000000a004"
+    envelope = json.loads(
+        _override_envelope(audit_id, actor=CASHIER_ID, approver=SUPERVISOR_ID)
+    )
+    envelope[0]["data"]["store_id"] = OTHER_STORE_ID
+
+    with (
+        pytest.raises(psycopg.errors.InsufficientPrivilege),
+        pg.transaction(force_rollback=True),
+    ):
+        _push(pg, json.dumps(envelope))
+
+
+def test_a_manager_can_read_a_grant_and_a_cashier_cannot(pg: Any) -> None:
+    """The point of pushing it: slice 5's viewer reads the cloud.
+
+    `audit_log_select` wants `user.manage`, so the person who goes looking for
+    "who authorised that void" can see it and the till cannot.
+    """
+    audit_id = "019600aa-0000-7000-8000-00000000a005"
+    with pg.transaction(force_rollback=True):
+        _push(
+            pg,
+            _override_envelope(audit_id, actor=CASHIER_ID, approver=SUPERVISOR_ID),
+        )
+
+        cur = pg.cursor()
+        for role, user_id, expected in (
+            (perms.MANAGER, MANAGER_ID, 1),
+            (perms.CASHIER, CASHIER_ID, 0),
+        ):
+            cur.execute("set local role authenticated")
+            cur.execute(
+                "select set_config('request.jwt.claims', %s, true)",
+                (claims(user_id, role),),
+            )
+            cur.execute(
+                "select count(*) from public.audit_log where id = %s", (audit_id,)
+            )
+            assert cur.fetchone()[0] == expected, role

@@ -13,6 +13,7 @@ consequence lands at the sync boundary hours later if it lands at all.
 
 from __future__ import annotations
 
+import json
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -313,7 +314,11 @@ def test_the_grant_names_both_people(till) -> None:
     assert row["approver_id"] == grant.approver_id
     assert row["actor_id"] != row["approver_id"]
     assert row["action"] == OVERRIDE_GRANTED
-    assert row["entity_id"] == perms.SALE_VOID
+    assert row["entity"] == "permission"
+    # Null on purpose: the cloud column is a uuid and a permission key is
+    # not one. The key is in after_json.
+    assert row["entity_id"] is None
+    assert json.loads(row["after_json"])["permission"] == perms.SALE_VOID
 
 
 def test_the_row_is_written_when_the_grant_is_minted(till) -> None:
@@ -463,34 +468,108 @@ def test_nobody_signed_in_is_refused_before_any_pin(auth_service) -> None:
     with pytest.raises(NotSignedIn):
         authorize(auth_service)
 
+# ── The trail has to leave the terminal ─────────────────────────────────────
+#
+# The first version of `record_override` wrote the audit row and queued
+# nothing, because there was no entity it could have named. That is not a
+# delayed trail, it is an unrecorded one: the outbox is the only thing that
+# remembers what still has to go, so a grant written without an outbox row has
+# nothing pointing at it anywhere. A later `sync_push` upgrade would find
+# nothing to send, and the overrides taken during whatever incident sent
+# somebody looking would be precisely the ones missing.
+#
+# A quarantined sale at least sits in the failures queue where someone can see
+# it. This would be silent and unrecoverable — the same family as everything
+# else this phase has turned up, one notch worse.
 
-# ── The gap this step leaves open ───────────────────────────────────────────
+
+def test_the_grant_is_queued_in_the_same_transaction(till, db) -> None:
+    """The rule every other writer in `repositories/` follows.
+
+    `sales.py` states it beside its own enqueue: a sale that is durable but
+    unqueued would never reach the cloud (§9.2). Asserted here on the pair,
+    because "the row exists but was not queued" is the failure this method
+    shipped with and it looked entirely fine.
+    """
+    authorize(till)
+
+    audit_rows = db.query("SELECT * FROM audit_log WHERE action = ?", (OVERRIDE_GRANTED,))
+    outbox_rows = db.query("SELECT * FROM outbox WHERE entity = 'override'")
+
+    assert len(audit_rows) == 1
+    assert len(outbox_rows) == 1
+    assert outbox_rows[0]["entity_id"] == audit_rows[0]["id"]
+    assert outbox_rows[0]["op"] == "insert"
+    assert outbox_rows[0]["synced_at"] is None
 
 
-@pytest.mark.xfail(
-    reason="phase 7 — nothing pushes a standalone audit row, so a minted "
-    "grant never leaves the terminal and slice 5's viewer cannot see it",
-    strict=True,
-)
-def test_an_override_row_can_be_pushed() -> None:
-    """The trail is written locally and stops there.
+def test_a_refused_override_queues_nothing(till, db) -> None:
+    """Both halves roll back together, which is what one transaction buys."""
+    with pytest.raises(CannotAuthoriseSelf):
+        authorize(till, approver_code="C001", pin="4913")
 
-    Audit rows in this system ride to the cloud attached to a parent entity:
-    `payloads.py` collects `entity = 'sale'` rows when it pushes a sale, and
-    `entity = 'stock_ledger'` rows when it pushes a movement. `sync_push`
-    accepts exactly three entities — `sale`, `stock_movement`, `sale_review`.
+    assert db.query("SELECT * FROM audit_log WHERE action = ?", (OVERRIDE_GRANTED,)) == []
+    assert db.query("SELECT * FROM outbox WHERE entity = 'override'") == []
 
-    A minted grant has no parent. It is written when the supervisor
-    authorises, which may be before any sale exists and may be before a sale
-    that never happens. So it stays on the terminal, and slice 5's audit
-    viewer — cloud-direct, like the rest of admin — will not show it.
 
-    That makes the audit log a document that is true except where it matters,
-    which is the thing the plan warns about in its own words. `audit_log_insert`
-    already accepts the row under the cashier's own claim, so the policy is not
-    the obstacle: what is missing is an `override` entity in `payloads.py` and
-    in `sync_push`. That is the next commit, and this marker comes off with it.
+def test_the_queued_grant_builds_into_an_envelope(till, db, settings) -> None:
+    """The pusher re-reads the row rather than trusting `payload_json`.
+
+    So the outbox pointer is only worth having if the builder can follow it.
+    This is the half that was missing: the whitelist covered every business
+    record the terminal writes, and a grant is not one.
     """
     from app.sync.payloads import PayloadBuilder
 
-    assert "override" in PayloadBuilder.SUPPORTED_ENTITIES
+    grant = authorize(till)
+    queued = db.query("SELECT * FROM outbox WHERE entity = 'override'")[0]
+
+    builder = PayloadBuilder(db, terminal_id="018f0000-0000-7000-8000-000000000200")
+    envelope = builder.build(
+        queued["entity"], queued["entity_id"], queued["op"], queued["client_seq"]
+    )
+
+    assert envelope.entity == "override"
+    assert envelope.data["actor_id"] == grant.actor_id
+    assert envelope.data["approver_id"] == grant.approver_id
+    assert envelope.data["store_id"] == grant.store_id
+    assert envelope.data["action"] == OVERRIDE_GRANTED
+
+
+def test_the_grant_shares_the_counter_the_sales_path_uses(till, db) -> None:
+    """One `client_seq` sequence, so a grant and the void it authorised keep
+    their order relative to each other — which is the pair anybody reading the
+    audit log actually wants."""
+    before = int(db.query_one("SELECT value FROM terminal_state WHERE key = 'client_seq'")[0])
+    authorize(till)
+    after = int(db.query_one("SELECT value FROM terminal_state WHERE key = 'client_seq'")[0])
+
+    assert after == before + 1
+
+
+def test_every_pushable_entity_is_one_sync_push_accepts() -> None:
+    """The whitelist on this side must match the `case` on the other.
+
+    It looked complete for four entities and was not, because nothing compared
+    the two lists. Reading the migration is crude and it is also the only
+    thing here that would have caught the omission.
+    """
+    import re
+
+    from app.sync.payloads import PayloadBuilder
+    from tests.conftest import REPO_ROOT
+
+    migrations = sorted((REPO_ROOT / "supabase" / "migrations").glob("*.sql"))
+    latest = max(
+        (path for path in migrations if "create or replace function public.sync_push"
+         in path.read_text(encoding="utf-8")),
+        key=lambda path: path.name,
+    )
+    accepted = set(re.findall(r"when '([a-z_]+)' then", latest.read_text(encoding="utf-8")))
+
+    assert accepted, f"no entity branches found in {latest.name} — the regex has stopped matching"
+    missing = sorted(PayloadBuilder.SUPPORTED_ENTITIES - accepted)
+    assert not missing, (
+        f"{latest.name} does not accept: {missing}. The terminal would queue "
+        "these and sync_push would raise 'unknown entity'."
+    )

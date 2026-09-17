@@ -47,6 +47,14 @@ def _dict(row: sqlite3.Row) -> dict[str, Any]:
 class PayloadBuilder:
     """Turns an outbox pointer into the record the server expects."""
 
+    #: Everything this builder knows how to turn into an envelope, and the
+    #: set `sync_push` must accept on the other side. Declared rather than
+    #: derived from the table below so that a test can name it without
+    #: building anything, and cross-checked against the table on every call.
+    SUPPORTED_ENTITIES: frozenset[str] = frozenset(
+        {"sale", "sale_review", "stock_movement", "unknown_scan", "override"}
+    )
+
     def __init__(self, db: Database, *, terminal_id: str) -> None:
         self.db = db
         #: The server's UUID for this till, not its counter-facing code.
@@ -58,7 +66,12 @@ class PayloadBuilder:
             "sale_review": self._sale_review,
             "stock_movement": self._stock_movement,
             "unknown_scan": self._unknown_scan,
+            "override": self._override,
         }
+        assert set(builders) == self.SUPPORTED_ENTITIES, (
+            "SUPPORTED_ENTITIES and the builder table have drifted: "
+            f"{sorted(set(builders) ^ self.SUPPORTED_ENTITIES)}"
+        )
         builder = builders.get(entity)
         if builder is None:
             raise PayloadError(f"nothing knows how to push a {entity!r}")
@@ -177,6 +190,32 @@ class PayloadBuilder:
         record = _dict(scan)
         record["terminal_id"] = self._terminal()
         record["resolved"] = bool(record.get("resolved"))
+        return record
+
+    def _override(self, audit_id: str) -> dict[str, Any]:
+        """A supervisor grant, keyed on the audit row itself.
+
+        Every other builder here is handed the id of a business record and
+        re-reads it — a sale, a movement, a scan — and any audit rows travel
+        alongside as part of that record's envelope. This one is different and
+        the difference is the reason it exists: a grant has no business record.
+        It is minted when the supervisor authorises and may be spent on
+        nothing, so `entity_id` is the `audit_log.id`, and this is the first
+        builder whose subject is an audit row rather than something an audit
+        row describes.
+
+        Worth saying out loud, because that asymmetry is what made the entity
+        whitelist look complete when it was not. Four entities covered every
+        business record the terminal writes, and the fifth kind of row — the
+        one that is only ever a record of who allowed what — had nowhere to go.
+        """
+        row = self.db.query_one("SELECT * FROM audit_log WHERE id = ?", (audit_id,))
+        if row is None:
+            raise PayloadError(f"override {audit_id} is queued but no longer exists")
+
+        record = _dict(row)
+        # `before_json` is always null for a grant: nothing existed before it.
+        record.pop("before_json", None)
         return record
 
     def _sale_review(self, review_id: str) -> dict[str, Any]:

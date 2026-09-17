@@ -1,0 +1,17 @@
+-- 005_audit_log_store - the column the cloud keys on, for a parentless row.
+--
+-- Same reasoning as 004 did for `unknown_scans`, and the same conclusion.
+-- `public.audit_log.store_id` exists and both its policies read it:
+-- `audit_log_insert` accepts `store_id is null or pos.in_store(store_id)`, and
+-- `audit_log_select` shows a manager rows in their own store.
+--
+-- Every audit row written so far has travelled attached to a parent entity,
+-- so the cloud took the store from the sale or the movement and the terminal
+-- never needed the column. A supervisor override has no parent: it is minted
+-- when the authorisation is given and may be spent on nothing. It has to name
+-- its own store or arrive as an orphan a manager cannot scope.
+--
+-- Threading it through the PayloadBuilder was rejected for 004 because it
+-- makes a second source of truth for something the row already knows. That
+-- argument has not changed.
+ALTER TABLE audit_log ADD COLUMN store_id TEXT;

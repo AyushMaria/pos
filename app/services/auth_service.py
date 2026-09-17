@@ -444,6 +444,7 @@ class AuthService:
             permission=permission,
             granted_at=now,
             expires_at=expires_at,
+            store_id=cashier.store_id,
             actor_id=cashier.user_id,
             actor_code=cashier.employee_code,
             approver_id=identity.user_id,

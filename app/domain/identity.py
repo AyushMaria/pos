@@ -93,6 +93,9 @@ class OverrideGrant:
     permission: str
     granted_at: datetime
     expires_at: datetime
+    #: The store the till belongs to. Carried because the row has no parent
+    #: entity to take it from, and a manager scopes the audit log by store.
+    store_id: str
     #: The cashier the grant was given to.
     actor_id: str
     actor_code: str
