@@ -436,3 +436,20 @@ export const PERMISSIONS: readonly Permission[] = [
   "stock.receive",
   "user.manage",
 ] as const;
+
+/**
+ * The matrix itself, so the UI can be tested against every role without a
+ * second copy of §11.1 to keep in step.
+ *
+ * Not for deciding anything at runtime: a session carries the permissions the
+ * server gave it, and that is what <PermissionGate> reads. This exists so
+ * `permissionMatrix.test.tsx` can assert all twenty keys against all five
+ * roles from the same source the other two layers use.
+ */
+export const ROLE_PERMISSIONS: Readonly<Record<Role, readonly Permission[]>> = {
+  "cashier": ["payment.attest", "product.read", "sale.create"],
+  "supervisor": ["cash.payout", "payment.attest", "price.override", "product.read", "report.sales.store", "sale.create", "sale.discount.line", "sale.refund", "sale.review.resolve", "sale.void", "shift.close"],
+  "inventory": ["product.create", "product.edit", "product.read", "stock.count", "stock.receive"],
+  "manager": ["cash.payout", "payment.attest", "price.override", "product.create", "product.edit", "product.read", "report.margin", "report.sales.store", "sale.create", "sale.discount.line", "sale.discount.unlimited", "sale.refund", "sale.review.resolve", "sale.void", "shift.close", "stock.adjust", "stock.count", "stock.receive", "user.manage"],
+  "admin": ["cash.payout", "payment.attest", "price.override", "product.create", "product.edit", "product.read", "report.margin", "report.sales.store", "sale.create", "sale.discount.line", "sale.discount.unlimited", "sale.refund", "sale.review.resolve", "sale.void", "settings.manage", "shift.close", "stock.adjust", "stock.count", "stock.receive", "user.manage"],
+} as const;

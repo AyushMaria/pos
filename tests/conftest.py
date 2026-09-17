@@ -154,6 +154,54 @@ def seeded_manager(auth_service: AuthService) -> dict[str, str]:
     return {"employee_code": "M001", "pin": "5820"}
 
 
+# ── One user per role ───────────────────────────────────────────────────────
+#
+# `seeded_cashier` and `seeded_manager` above predate this and are kept as they
+# are, because a dozen tests name them. The matrix needs all five roles and
+# needs them by role name, so it seeds from this table instead.
+#
+# The ids continue the series those two started, so a row in a failing test's
+# output still says which person it belonged to.
+
+ROLE_USERS: dict[str, tuple[str, str, str]] = {
+    # role -> (user_id, employee_code, pin)
+    perms.CASHIER: ("018f0000-0000-7000-8000-000000000001", "C001", "4913"),
+    perms.SUPERVISOR: ("018f0000-0000-7000-8000-000000000002", "S001", "7241"),
+    perms.MANAGER: ("018f0000-0000-7000-8000-000000000003", "M001", "5820"),
+    perms.INVENTORY: ("018f0000-0000-7000-8000-000000000004", "I001", "3608"),
+    perms.ADMIN: ("018f0000-0000-7000-8000-000000000005", "A001", "9157"),
+}
+
+
+@pytest.fixture
+def sign_in_as(auth_service: AuthService, client: TestClient):
+    """Seed a user holding exactly one role's permissions, and sign them in.
+
+    Returns the same `client`, now carrying that session. Calling it again
+    replaces the session, so one test can walk every role in turn without
+    building five applications.
+    """
+
+    def _sign_in(role: str) -> TestClient:
+        user_id, employee_code, pin = ROLE_USERS[role]
+        auth_service.seed_local_user(
+            user_id=user_id,
+            employee_code=employee_code,
+            full_name=f"{role.title()} Testperson",
+            store_id=TEST_STORE_ID,
+            pin=pin,
+            roles=frozenset({role}),
+            permissions=perms.permissions_for(frozenset({role})),
+        )
+        response = client.post(
+            "/auth/login", json={"employee_code": employee_code, "pin": pin}
+        )
+        assert response.status_code == 200, response.text
+        return client
+
+    return _sign_in
+
+
 @pytest.fixture
 def client(settings: Settings, db: Database) -> Iterator[TestClient]:
     """A client that already carries the session token and a loopback Host."""

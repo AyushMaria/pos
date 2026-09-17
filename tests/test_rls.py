@@ -16,6 +16,7 @@ CI does exactly that (see .github/workflows/ci.yml).
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -1875,3 +1876,192 @@ def test_the_ledger_still_applies_after_the_revoke(pg: Any) -> None:
             (PRODUCT_ID, STORE_ID),
         )
         assert cur.fetchone()[0] == before + 7000
+
+
+
+# ── The matrix, at the boundary — phase 7 slice 1 ───────────────────────────
+#
+# `tests/test_permission_matrix.py` asserts the Python and FastAPI layers and
+# explains why the three live apart. This is the layer that is actually
+# security: React hiding a button and FastAPI returning 403 are both UX, and
+# if the terminal is compromised these policies are what still holds.
+#
+# The policies are read out of `pg_policies` rather than transcribed. A list
+# of tables written by hand here would drift exactly the way this file's own
+# list of SQL files did before it was made to discover itself.
+
+PERM_IN_POLICY = re.compile(r"has_perm\('([a-z.]+)'::text\)")
+
+
+def _policy_expressions(pg: Any) -> list[tuple[str, str, str]]:
+    """(table, policy, the whole expression) for every policy in `public`."""
+    return [
+        (table, policy, f"{qual or ''} {check or ''}")
+        for table, policy, qual, check in pg.execute(
+            "select tablename, policyname, qual, with_check from pg_policies "
+            "where schemaname = 'public'"
+        ).fetchall()
+    ]
+
+
+def _key_gated_tables(pg: Any) -> dict[str, str]:
+    """Tables whose readability is exactly one permission key.
+
+    Three kinds of SELECT policy are deliberately excluded, because for them
+    "holds the key" is not the whole condition and a flat assertion would be
+    wrong rather than strict:
+
+    * anything naming `auth.uid()` — `employees`, `user_store_roles`,
+      `register_sessions` and `sales` all let a person read their own row
+      without the key, which existing tests here assert on purpose;
+    * tables carrying more than one permissive SELECT policy, since Postgres
+      ORs them together and the effective rule is neither one alone;
+    * policies naming several keys, which mean "any of these" — a different
+      claim, and the subject of the two tests at the end of this file.
+    """
+    by_table: dict[str, list[tuple[str, str]]] = {}
+    for table, policy, qual, in_check in pg.execute(
+        "select tablename, policyname, qual, with_check from pg_policies "
+        "where schemaname = 'public' and cmd = 'SELECT'"
+    ).fetchall():
+        by_table.setdefault(table, []).append((policy, f"{qual or ''} {in_check or ''}"))
+
+    gated: dict[str, str] = {}
+    for table, policies in by_table.items():
+        if len(policies) != 1:
+            continue
+        _policy, expression = policies[0]
+        if "uid()" in expression:
+            continue
+        keys = set(PERM_IN_POLICY.findall(expression))
+        if len(keys) == 1:
+            gated[table] = next(iter(keys))
+    return gated
+
+
+def test_every_permission_named_in_a_policy_is_a_real_key(pg: Any) -> None:
+    """A policy naming a key the matrix does not have never fires.
+
+    `pos.has_perm` is a containment test against the token's claim array, so a
+    typo — or a key renamed in `app/domain/permissions.py` and not here —
+    returns false for everybody, for ever, with no error. The table quietly
+    becomes unreadable and nothing says so.
+    """
+    unknown = {
+        policy: sorted(set(PERM_IN_POLICY.findall(expression)) - perms.ALL_PERMISSIONS)
+        for _table, policy, expression in _policy_expressions(pg)
+        if set(PERM_IN_POLICY.findall(expression)) - perms.ALL_PERMISSIONS
+    }
+    assert not unknown, (
+        "policies naming permission keys that are not in the matrix:\n  "
+        + "\n  ".join(f"{policy}: {keys}" for policy, keys in unknown.items())
+    )
+
+
+def test_the_discovery_is_not_vacuous(pg: Any) -> None:
+    """The regex above is load-bearing; assert it still finds the schema.
+
+    Every assertion derived from `pg_policies` passes trivially if the pattern
+    stops matching — a change in how Postgres renders a policy would turn this
+    whole section green and empty.
+    """
+    gated = _key_gated_tables(pg)
+    assert gated.get("products") == perms.PRODUCT_READ
+    assert gated.get("audit_log") == perms.USER_MANAGE
+    assert len(gated) >= 8, f"only {len(gated)} key-gated tables found: {gated}"
+
+
+@pytest.mark.parametrize("role", perms.ROLES)
+def test_select_matrix_at_the_boundary(pg: Any, role: str) -> None:
+    """A role without the key reads nothing from a table that requires it.
+
+    A denied SELECT under RLS is an empty set rather than an error, so the
+    assertion in the deny direction is "zero rows". The allow direction is not
+    asserted here: a table can be empty for honest reasons, and "may read" is
+    already covered by the named tests above.
+    """
+    user_id = {
+        perms.CASHIER: CASHIER_ID,
+        perms.SUPERVISOR: SUPERVISOR_ID,
+    }.get(role, MANAGER_ID)
+    held = perms.permissions_for(frozenset({role}))
+
+    for table, key in sorted(_key_gated_tables(pg).items()):
+        if key in held:
+            continue
+        rows = run_as(pg, claims(user_id, role), f"select count(*) from public.{table}")
+        assert rows[0][0] == 0, (
+            f"rls layer: {role} does not hold {key} but read {rows[0][0]} rows "
+            f"from public.{table}"
+        )
+
+
+# ── What the matrix found on its first run ──────────────────────────────────
+#
+# The phase 7 plan predicts one finding here: that `stock_ledger_insert`
+# "accepts a row if the caller holds **any** of `sale.create`,
+# `stock.receive`, `stock.count`, `stock.adjust`. It never compares the row's
+# `reason` to the key. A cashier can already push an adjustment today."
+#
+# Half of that is out of date and half of it is real, which is the argument
+# for writing the test before trusting the document. `0012` already tied the
+# `sale.create` disjunct to `ref_type = 'sale'`, so the cashier is refused.
+# The other three disjuncts are still unconditional, so the hole moved rather
+# than closed: it belongs to `inventory` now, not to `cashier`.
+
+
+def test_a_cashier_cannot_write_an_adjustment(pg: Any) -> None:
+    """`0012` tightened `sale.create` to the rows a sale actually writes.
+
+    A regression guard on a hole that is already shut. The plan still names
+    this one as open, and the cheapest way to keep a fixed thing fixed is to
+    say so in the suite rather than in a document.
+    """
+    with pytest.raises(Denied):
+        run_as(
+            pg,
+            claims(CASHIER_ID, perms.CASHIER),
+            "insert into public.stock_ledger (id, store_id, product_id, "
+            "delta_milli, reason, ref_type, occurred_at, terminal_id, user_id) "
+            "values (gen_random_uuid(), %s, %s, %s, 'adjustment', 'adjustment', "
+            "now(), %s, %s)",
+            (STORE_ID, PRODUCT_ID, -5_000, TERMINAL_UUID, CASHIER_ID),
+        )
+
+
+@pytest.mark.xfail(
+    reason="phase 7 — stock_ledger_insert ORs three stock keys unconditionally, "
+    "so stock.receive is enough to write an adjustment",
+    strict=True,
+)
+def test_receiving_stock_is_not_permission_to_adjust_it(pg: Any) -> None:
+    """Holding `stock.receive` should not write a `reason = 'adjustment'` row.
+
+    §11.1 gives `stock.receive` and `stock.count` to the inventory role and
+    reserves `stock.adjust` for manager and admin. The reason is written down
+    in `app/api/inventory.py`: receiving has a supplier's document behind it,
+    and an adjustment has only a sentence somebody typed.
+
+    `0012`'s own comment says "a receipt, a count, an adjustment: a stock
+    permission each", but the SQL under that comment is a flat OR of the three
+    — so any one of them admits a row of any `ref_type`. The comment describes
+    the intended policy and the code does not implement it.
+
+    The claims below carry a seeded employee's id with the inventory role's
+    permissions, because the FK on `user_id` wants a real employee and the
+    policy never looks at who the row names, only at what the token holds.
+    That is the isolation this test wants: one variable, the claim set.
+
+    `xfail(strict=True)` — the day the policy maps reason to key, this starts
+    passing and fails the run until the marker comes off with it.
+    """
+    with pytest.raises(Denied):
+        run_as(
+            pg,
+            claims(MANAGER_ID, perms.INVENTORY),
+            "insert into public.stock_ledger (id, store_id, product_id, "
+            "delta_milli, reason, ref_type, occurred_at, terminal_id, user_id) "
+            "values (gen_random_uuid(), %s, %s, %s, 'adjustment', 'adjustment', "
+            "now(), %s, %s)",
+            (STORE_ID, PRODUCT_ID, -5_000, TERMINAL_UUID, MANAGER_ID),
+        )

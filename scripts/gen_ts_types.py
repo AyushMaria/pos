@@ -124,6 +124,13 @@ def render() -> tuple[str, str]:
     )
     role_union = " | ".join(json.dumps(role) for role in perms.ROLES)
 
+    role_permissions = chr(10).join(
+        f"  {json.dumps(role)}: ["
+        + ", ".join(json.dumps(key) for key in sorted(perms.ROLE_PERMISSIONS[role]))
+        + "],"
+        for role in perms.ROLES
+    )
+
     contract = f"""// GENERATED FILE, DO NOT EDIT BY HAND.
 //
 // Sources: app/api/schemas.py (via OpenAPI) and app/domain/permissions.py.
@@ -147,6 +154,19 @@ export type Role = {role_union};
 export const PERMISSIONS: readonly Permission[] = [
 {chr(10).join(f'  {json.dumps(key)},' for key in sorted(perms.ALL_PERMISSIONS))}
 ] as const;
+
+/**
+ * The matrix itself, so the UI can be tested against every role without a
+ * second copy of §11.1 to keep in step.
+ *
+ * Not for deciding anything at runtime: a session carries the permissions the
+ * server gave it, and that is what <PermissionGate> reads. This exists so
+ * `permissionMatrix.test.tsx` can assert all twenty keys against all five
+ * roles from the same source the other two layers use.
+ */
+export const ROLE_PERMISSIONS: Readonly<Record<Role, readonly Permission[]>> = {{
+{role_permissions}
+}} as const;
 """
     return json.dumps(schema, indent=2, sort_keys=True) + "\n", contract
 
