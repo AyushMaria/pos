@@ -78,11 +78,15 @@ cashier's own claim; or carry `approver_id` into the push and widen the policy
 to accept a row that names an approver; or refuse to override anything that
 cannot be pushed. Do not discover this per-key during slice 3.
 
-A related finding worth fixing while you are in there: `stock_ledger_insert`
+~~A related finding worth fixing while you are in there: `stock_ledger_insert`
 (`0003_rls.sql:229`) accepts a row if the caller holds **any** of
 `sale.create`, `stock.receive`, `stock.count`, `stock.adjust`. It never
 compares the row's `reason` to the key. A cashier can already push an
-adjustment today. The RLS layer of the matrix test will find this on day one.
+adjustment today.~~ **Half wrong, and corrected by the matrix** — 0012 had
+already tied the `sale.create` disjunct to `ref_type = 'sale'`, so a cashier
+is refused. The hole moved rather than closing; see
+[What slice 1 found](#corrected). Struck here rather than deleted, because a
+finding this document got wrong is worth leaving visible.
 
 ---
 
