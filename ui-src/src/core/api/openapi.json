@@ -3903,7 +3903,7 @@
     },
     "/sync/push": {
       "post": {
-        "description": "Drain the queue now.\n\nFor the person who has just plugged the network back in and would rather\nwatch the backlog empty than trust that it will.",
+        "description": "Drain the queue now.\n\nFor the person who has just plugged the network back in and would rather\nwatch the backlog empty than trust that it will.\n\n`CurrentSession` rather than `require(...)`, and that is a decision rather\nthan an oversight \u2014 phase 7 slice 2 made it deliberately, because the\npermission matrix asked the question. Draining early is the same act as\nwaiting for the next cycle: every row was written under a permission that\nwas checked when it was written, the push runs under the terminal's own\ncredentials, and RLS refuses each row on its own merits either way. There\nis nothing here to escalate to.\n\nThe two neighbours below require `report.sales.store` and should. They\nshow what was quarantined and put it back in the queue \u2014 reading refused\nsales and deciding a refusal no longer applies are both judgements about\nother people's work. This one only changes when.",
         "operationId": "push_now_sync_push_post",
         "responses": {
           "200": {

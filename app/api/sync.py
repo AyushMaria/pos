@@ -59,6 +59,19 @@ async def push_now(request: Request, session: CurrentSession) -> SyncStatusRespo
 
     For the person who has just plugged the network back in and would rather
     watch the backlog empty than trust that it will.
+
+    `CurrentSession` rather than `require(...)`, and that is a decision rather
+    than an oversight — phase 7 slice 2 made it deliberately, because the
+    permission matrix asked the question. Draining early is the same act as
+    waiting for the next cycle: every row was written under a permission that
+    was checked when it was written, the push runs under the terminal's own
+    credentials, and RLS refuses each row on its own merits either way. There
+    is nothing here to escalate to.
+
+    The two neighbours below require `report.sales.store` and should. They
+    show what was quarantined and put it back in the queue — reading refused
+    sales and deciding a refusal no longer applies are both judgements about
+    other people's work. This one only changes when.
     """
     engine = _engine(request)
     await engine.cycle()

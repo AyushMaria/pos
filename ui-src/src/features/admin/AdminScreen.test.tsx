@@ -422,6 +422,24 @@ describe("working the queue is what closes it", () => {
     await waitFor(() => expect(api.resolveScan).toHaveBeenCalledWith("s1"));
   });
 
+  it("offers both ways of closing an entry to someone who may edit", async () => {
+    // Phase 7 slice 2 put "Existing product" and "Dismiss" behind
+    // <PermissionGate permission="product.edit">, which is the key their
+    // endpoints check. Today the Unknown scans tab needs that same key, so
+    // the gate hides nothing — and that is precisely why it is worth a test
+    // in this direction. A gate that is redundant now becomes load-bearing
+    // the day the tab is opened up, and until then the only way it can fail
+    // is by hiding a control from someone entitled to it.
+    const user = userEvent.setup();
+    api.unknownScans.mockResolvedValue({ scans: [SCAN] });
+
+    render(<AdminScreen session={person(["product.read", "product.edit"])} onClose={() => {}} />);
+    await user.click(screen.getByRole("button", { name: "Unknown scans" }));
+
+    expect(await screen.findByRole("button", { name: "Existing product" })).toBeDefined();
+    expect(screen.getByRole("button", { name: "Dismiss" })).toBeDefined();
+  });
+
   it("leaves the entry open when the code turns out to be spoken for", async () => {
     const user = userEvent.setup();
     api.unknownScans.mockResolvedValue({ scans: [SCAN] });

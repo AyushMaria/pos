@@ -342,3 +342,73 @@ the FastAPI dependency graph, the RLS tables off `pg_policies`, and the UI's
 `scripts/gen_ts_types.py`. Each has a guard asserting the discovery still
 finds something, because every one of them passes vacuously when it stops
 matching — which is this project's recurring bug wearing a test's clothes.
+
+---
+
+## What slice 2 settled
+
+*17 September 2026.*
+
+### `POST /sync/push` requires nothing, and that is the decision
+
+The plan asked for this to be decided rather than inherited. It is decided:
+**no permission**, recorded in the endpoint's own docstring, in the button's
+comment, and in `test_sync_push_is_deliberately_ungated`.
+
+Draining the queue early is the same act as waiting ninety seconds for the
+next cycle. Every row in the outbox was written under a permission that was
+checked when it was written; the push runs under the terminal's own
+credentials; RLS refuses each row on its own merits either way. There is
+nothing to escalate to, so a gate would buy nothing.
+
+It would cost something, though. The person who has just plugged the cable
+back in is usually the cashier, and the two keys that were available both
+exclude someone with a real claim on the button: `sale.create` leaves out the
+inventory role, whose received delivery is sitting in the same queue, and
+`report.sales.store` leaves out the cashier the docstring was written for.
+
+The two neighbours stay gated on `report.sales.store` and should. They show
+what was quarantined and put it back in the queue — reading refused sales and
+deciding a refusal no longer applies are judgements about other people's work.
+This one only changes *when*.
+
+The slice 1 `xfail` is gone, replaced by a test that asserts the decision in
+both directions: push is ungated **and** both neighbours still require the
+key. "Is not gated" alone would also pass if the route were deleted.
+
+### The audit list is empty
+
+All five ad-hoc `session.permissions.includes(...)` checks are now
+`useHasPermission`, so every gated control in the UI is findable by grepping
+for the component or the hook. `AD_HOC_PERMISSION_CHECKS` is `{}` and a file
+goes back on it only with a reason.
+
+Emptying it cost the audit its own proof. While the list had entries, "did the
+search find them?" was self-evident; now both audit tests assert that a search
+finds nothing, which is also what a search that has quietly stopped working
+reports. So the pattern is now tested against a sample rather than against the
+tree — rename `SessionResponse.permissions` and the test fails instead of the
+audit going green on an empty set.
+
+### Three controls gated, and one of them is a no-op today
+
+- **The UPI "Received" button** now needs `payment.attest`, the key
+  `POST /register/payments/{id}/confirm` checks. Whoever lacks it keeps
+  "Can't tell", which was already the path that holds the sale for a
+  supervisor — so the dialog stays usable rather than becoming a dead end.
+- **The queue's "Existing product" and "Dismiss"** now need `product.edit`.
+  **This changes nothing today**, because the Unknown scans tab already
+  requires the same key, and it is worth being plain about that rather than
+  counting it as a fix. The tab's permission is about navigation and these
+  are about the act; if the tab is ever opened up so a cashier can see what
+  is pending, the buttons that close an entry must not come with it.
+
+Because that gate is unreachable today it cannot be proven by behaviour, so
+its test runs the other way: with `product.edit`, both buttons are present.
+A redundant gate's only available failure is hiding a control from someone
+entitled to it, and that is the half that is testable.
+
+The UPI gate *is* reachable, so it was checked by removing it and confirming
+the test failed. A test that asserts a button is absent passes just as well
+when the dialog never opened, and this project has shipped that mistake in
+other forms.

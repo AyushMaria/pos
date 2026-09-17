@@ -192,8 +192,10 @@ NO_API_SURFACE: frozenset[str] = frozenset(
 #: belongs to the till that opened it, and `GET /catalog/size` answers "is the
 #: catalogue here yet", which the splash asks before anyone has signed in.
 #:
-#: `POST /sync/push` is in this list under protest — see
-#: `test_sync_push_is_gated`, which is the thing that will take it out again.
+#: `POST /sync/push` is here by decision rather than by default, which is what
+#: slice 2 settled and `test_sync_push_is_deliberately_ungated` records. It
+#: drains the outbox early; every row in it was written under a permission
+#: checked at the time, and RLS still refuses each one on its own merits.
 UNGATED: frozenset[Operation] = frozenset(
     {
         Operation("GET", "/health"),
@@ -325,24 +327,36 @@ def test_the_ungated_list_does_not_outlive_the_debt(client: TestClient) -> None:
 # ── The finding this file was written to make visible ───────────────────────
 
 
-@pytest.mark.xfail(
-    reason="phase 7 slice 2 — POST /sync/push has no require(); "
-    "its two siblings require report.sales.store",
-    strict=True,
-)
-def test_sync_push_is_gated(client: TestClient) -> None:
-    """Any signed-in cashier can force a drain of the outbox.
+def test_sync_push_is_deliberately_ungated(client: TestClient) -> None:
+    """`POST /sync/push` needs no permission, and that is the decision.
 
-    `GET /sync/failures` and `POST /sync/failures/retry` both require
-    `report.sales.store`. `POST /sync/push` requires nothing, which is either
-    a decision nobody wrote down or an oversight — the plan asks for it to be
-    decided rather than inherited.
+    Slice 1 found it ungated while both its neighbours in the same router
+    require `report.sales.store`, and could not tell whether that was a choice
+    or an oversight. Slice 2 made it a choice: draining the queue early is the
+    same act as waiting for the next cycle. The rows were written under
+    permissions checked when they were written, the push runs under the
+    terminal's own credentials, and RLS refuses each row on its own merits.
+    Asking sooner grants nothing.
 
-    `xfail(strict=True)`, so slice 2 cannot close this quietly: the day a key
-    is added, this test passes unexpectedly and fails the run until the marker
-    comes off with it.
+    Its neighbours are gated and should be — they show what was quarantined
+    and put it back in the queue, which are judgements about other people's
+    work. This one only changes when.
+
+    The assertion runs in both directions on purpose. "Is not gated" alone
+    would also pass if the route disappeared, and the neighbours are checked
+    so that a future change gating all three cannot leave this comment
+    describing a system that no longer exists.
     """
-    assert Operation("POST", "/sync/push") in gated_operations(client)
+    gated = gated_operations(client)
+
+    assert Operation("POST", "/sync/push") in all_operations(client)
+    assert Operation("POST", "/sync/push") not in gated
+
+    assert gated.get(Operation("GET", "/sync/failures")) == perms.REPORT_SALES_STORE
+    assert (
+        gated.get(Operation("POST", "/sync/failures/retry"))
+        == perms.REPORT_SALES_STORE
+    )
 
 
 # ── Groundwork the three layers all depend on ───────────────────────────────
@@ -382,20 +396,17 @@ def test_role_users_covers_every_role() -> None:
 
 UI_SRC = REPO_ROOT / "ui-src" / "src"
 
-#: Ad-hoc permission checks, by file, as slice 1 found them.
+#: Ad-hoc permission checks, by file. **Empty, and meant to stay that way.**
 #:
-#: **This is debt, not permission.** Slice 2 replaces each with
-#: `<PermissionGate>` or `useHasPermission`, so that an audit by grep finds
-#: every gated control. A number may only go down; raising one records that a
-#: screen grew a control the audit cannot see, which should be harder than
-#: using the component.
+#: Slice 1 found five — four in `AdminScreen.tsx`, one in
+#: `StockroomScreen.tsx`, two of them `.filter()` calls over a tab list. Slice
+#: 2 replaced all five with `useHasPermission`, so every gated control in the
+#: UI is now findable by grepping for the component or the hook.
 #:
-#: The plan says seven. It is five — two of them `.filter()` calls over a tab
-#: list, which is a reasonable shape and still invisible to the audit.
-AD_HOC_PERMISSION_CHECKS: dict[str, int] = {
-    "features/admin/AdminScreen.tsx": 4,
-    "features/stockroom/StockroomScreen.tsx": 1,
-}
+#: A file may be added back only with a reason. The point of the list is not
+#: the count; it is that gating a control without the component becomes
+#: something you have to write down.
+AD_HOC_PERMISSION_CHECKS: dict[str, int] = {}
 
 _AD_HOC = re.compile(r"session\??\.permissions\??\.includes\(")
 
@@ -446,18 +457,22 @@ def test_the_ui_audit_list_does_not_outlive_the_debt() -> None:
     )
 
 
-def test_the_ad_hoc_pattern_still_matches_something() -> None:
-    """The grep above is load-bearing, and a rename would silence it.
+def test_the_ad_hoc_pattern_would_still_catch_one() -> None:
+    """The grep above is load-bearing, and now it matches nothing.
 
-    If `SessionResponse.permissions` is ever renamed, `_AD_HOC` stops matching
-    and both tests above go green on an empty set — the audit would report
-    that slice 2 was finished when nothing had been done.
+    While the audit list had entries, "did it find them?" was its own proof.
+    Slice 2 emptied the list, so the two tests above are now asserting that a
+    search finds nothing — which is exactly what a search that has quietly
+    stopped working also reports.
+
+    So the pattern is tested against a sample instead of against the tree. If
+    `SessionResponse.permissions` is renamed, or the check is written some
+    third way, this fails rather than the audit going silently green.
     """
-    assert _ad_hoc_counts(), (
-        "no ad-hoc permission check found anywhere in ui-src. Either slice 2 "
-        "is complete — in which case empty AD_HOC_PERMISSION_CHECKS and delete "
-        "this test — or the pattern has stopped matching the code."
-    )
+    assert _AD_HOC.search("const may = session.permissions.includes('sale.void');")
+    assert _AD_HOC.search("if (session?.permissions?.includes(key)) return true;")
+    assert not _AD_HOC.search("const has = useHasPermission(session);")
+    assert not _AD_HOC.search('<PermissionGate session={session} permission="x">')
 
 
 def test_the_gate_is_actually_used() -> None:

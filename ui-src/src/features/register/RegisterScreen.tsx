@@ -361,6 +361,7 @@ export function RegisterScreen({
 
       {upi && (
         <UpiDialog
+          session={session}
           attempt={upi}
           busy={busy}
           onAttest={(amount, reference) => void attestUpi(amount, reference)}
@@ -567,12 +568,14 @@ function TenderDialog({
 }
 
 function UpiDialog({
+  session,
   attempt,
   busy,
   onAttest,
   onUnsure,
   onCancel,
 }: {
+  session: SessionResponse;
   attempt: TenderResponse;
   busy: boolean;
   onAttest: (amountPaise: number, reference: string) => void;
@@ -626,13 +629,22 @@ function UpiDialog({
       />
 
       <div className="row">
-        <button
-          type="button"
-          disabled={busy || !Number.isFinite(paise) || paise <= 0}
-          onClick={() => onAttest(paise, reference)}
-        >
-          Received
-        </button>
+        {/*
+          Saying money arrived is `payment.attest`, which is what
+          `POST /register/payments/{id}/confirm` checks. Someone without it
+          keeps the other two buttons: "Can't tell" is the honest answer when
+          you may not make the call yourself, and it is already the path that
+          holds the sale for a supervisor.
+        */}
+        <PermissionGate session={session} permission="payment.attest">
+          <button
+            type="button"
+            disabled={busy || !Number.isFinite(paise) || paise <= 0}
+            onClick={() => onAttest(paise, reference)}
+          >
+            Received
+          </button>
+        </PermissionGate>
         <button type="button" className="secondary" disabled={busy} onClick={onUnsure}>
           Can&rsquo;t tell
         </button>

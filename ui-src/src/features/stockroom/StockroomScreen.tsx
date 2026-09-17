@@ -7,6 +7,7 @@ import type {
   ReceiptLineOut,
   SessionResponse,
 } from "../../core/api/contract";
+import { useHasPermission } from "../../core/rbac/PermissionGate";
 
 /**
  * The back door - architecture 9.4.
@@ -48,9 +49,8 @@ export function StockroomScreen({
   // regardless would drop someone holding only `stock.count` onto a receiving
   // form that refuses them - a screen that looks broken rather than one that
   // is not for them.
-  const allowed = TABS.filter((entry) =>
-    session.permissions.includes(entry.permission),
-  );
+  const has = useHasPermission(session);
+  const allowed = TABS.filter((entry) => has(entry.permission));
   const [tab, setTab] = useState<Tab>(allowed[0]?.id ?? "receive");
 
   if (allowed.length === 0) {

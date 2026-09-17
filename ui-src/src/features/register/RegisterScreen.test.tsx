@@ -225,6 +225,35 @@ describe("upi", () => {
     await waitFor(() => expect(api.post).toHaveBeenCalled());
   });
 
+  it("does not offer Received to someone who may not attest", async () => {
+    // Saying money arrived is `payment.attest`. Hiding the button is UX —
+    // `POST /register/payments/{id}/confirm` refuses anyway — but the
+    // alternative is a cashier pressing it in front of a customer and
+    // learning the till is broken.
+    //
+    // What is left has to be usable, which is the half worth asserting:
+    // "Can't tell" holds the sale for a supervisor, and it is the honest
+    // answer for someone who may not make the call themselves.
+    const user = userEvent.setup();
+    render(<RegisterScreen session={{ ...session, permissions: ["sale.create"] }} />);
+    await screen.findByPlaceholderText(/scan, type a barcode/i);
+    await user.click(screen.getByRole("button", { name: "UPI" }));
+
+    const dialog = await screen.findByRole("dialog", { name: /upi/i });
+    expect(within(dialog).queryByRole("button", { name: "Received" })).toBeNull();
+    expect(within(dialog).getByRole("button", { name: /can.t tell/i })).toBeDefined();
+  });
+
+  it("still offers Received to someone who may attest", async () => {
+    // The other direction, because a gate that hides a control from the
+    // people who should have it fails quietly and is the likelier mistake.
+    const user = await openRegister();
+    await user.click(screen.getByRole("button", { name: "UPI" }));
+
+    const dialog = await screen.findByRole("dialog", { name: /upi/i });
+    expect(within(dialog).getByRole("button", { name: "Received" })).toBeDefined();
+  });
+
   it("keeps the sale open when the customer paid short", async () => {
     // Exit criterion: settled in cash *without leaving the sale*.
     api.attest.mockResolvedValue(

@@ -85,6 +85,18 @@ export function SyncIndicator({ session }: { session?: SessionResponse | null })
     <span className={`sync ${tone}`} title={detail(status)}>
       <span className="dot" aria-hidden="true" />
       <span className="label">{summary(status)}</span>
+      {/*
+        Deliberately ungated, unlike "Try again" below it. Draining the queue
+        early is the same act as waiting ninety seconds for the next cycle:
+        the rows were written under permissions already checked, they push
+        under the terminal's own credentials, and RLS still refuses each one
+        on its own merits. Nothing is granted by asking sooner.
+
+        And the person who has just plugged the cable back in is usually the
+        cashier. Gating this would hide the button from exactly the people who
+        want it, to prevent an act with no consequence. Recorded in phase 7
+        slice 2 and asserted by `test_sync_push_is_deliberately_ungated`.
+      */}
       {waiting && status.online && (
         <button type="button" className="link" disabled={pushing} onClick={() => void pushNow()}>
           {pushing ? "Sending…" : "Send now"}

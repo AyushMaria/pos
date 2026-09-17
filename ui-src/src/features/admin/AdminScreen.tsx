@@ -13,6 +13,7 @@ import type {
   TaxCodeOut,
   UnknownScanOut,
 } from "../../core/api/contract";
+import { PermissionGate, useHasPermission } from "../../core/rbac/PermissionGate";
 
 /**
  * Catalogue admin — phase 6 slice 6.
@@ -121,9 +122,8 @@ export function AdminScreen({
   session: SessionResponse;
   onClose: () => void;
 }) {
-  const allowed = TABS.filter((entry) =>
-    session.permissions.includes(entry.permission),
-  );
+  const has = useHasPermission(session);
+  const allowed = TABS.filter((entry) => has(entry.permission));
   const [tab, setTab] = useState<Tab>(allowed[0]?.id ?? "catalogue");
   // Raised by the product editor. A tab is a navigation like any other, and
   // it discarded edits as quietly as the back link did.
@@ -265,7 +265,7 @@ function CatalogueTab({
 }) {
   const [chosen, setChosen] = useState<AdminProductOut | null>(null);
   const [creating, setCreating] = useState(false);
-  const mayCreate = session.permissions.includes("product.create");
+  const mayCreate = useHasPermission(session)("product.create");
 
   if (creating) {
     return (
@@ -474,7 +474,7 @@ function ProductEditor({
   const [rates, setRates] = useState<TaxCodeOut[]>([]);
   const [leaving, setLeaving] = useState(false);
   const { busy, error, offline, run } = useCloudCall();
-  const mayEdit = session.permissions.includes("product.edit");
+  const mayEdit = useHasPermission(session)("product.edit");
 
   // Compared against the product as the server last returned it, so saving
   // clears this without a second round trip: `onDone` replaces the prop.
@@ -873,7 +873,7 @@ function QueueTab({ session }: { session: SessionResponse }) {
   // about and a second row cannot inherit the answer.
   const [dismissing, setDismissing] = useState<string | null>(null);
   const { busy, error, offline, run } = useCloudCall();
-  const mayCreate = session.permissions.includes("product.create");
+  const mayCreate = useHasPermission(session)("product.create");
 
   const load = useCallback(async () => {
     const body = await run(() => admin.unknownScans(false));
@@ -975,18 +975,31 @@ function QueueTab({ session }: { session: SessionResponse }) {
                 New product
               </button>
             )}
-            <button
-              type="button"
-              className="link"
-              disabled={busy}
-              onClick={() => {
-                setWorking(scan);
-                setMode("match");
-              }}
-            >
-              Existing product
-            </button>
-            {dismissing === scan.scan_id ? (
+            {/*
+              Both of these close a queue entry, and both reach
+              `POST /admin/unknown-scans/{id}/...`, which requires
+              `product.edit`. Today that is the same key the Unknown scans tab
+              itself needs, so the gate changes nothing — which is the point of
+              writing it down rather than relying on it. The tab's permission
+              is about navigation and these are about the act; if the tab is
+              ever opened up so a cashier can see what is pending, the buttons
+              that close an entry must not come with it.
+            */}
+            <PermissionGate session={session} permission="product.edit">
+              <button
+                type="button"
+                className="link"
+                disabled={busy}
+                onClick={() => {
+                  setWorking(scan);
+                  setMode("match");
+                }}
+              >
+                Existing product
+              </button>
+            </PermissionGate>
+            <PermissionGate session={session} permission="product.edit">
+              {dismissing === scan.scan_id ? (
               <>
                 <span className="muted">
                   Not a product? The code stays on record and what was sold
@@ -1016,16 +1029,17 @@ function QueueTab({ session }: { session: SessionResponse }) {
                   Keep it open
                 </button>
               </>
-            ) : (
-              <button
-                type="button"
-                className="link secondary"
-                disabled={busy}
-                onClick={() => setDismissing(scan.scan_id)}
-              >
-                Dismiss
-              </button>
-            )}
+              ) : (
+                <button
+                  type="button"
+                  className="link secondary"
+                  disabled={busy}
+                  onClick={() => setDismissing(scan.scan_id)}
+                >
+                  Dismiss
+                </button>
+              )}
+            </PermissionGate>
           </li>
         ))}
         {scans.length === 0 && !busy && !offline && (
