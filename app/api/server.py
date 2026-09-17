@@ -31,6 +31,7 @@ from app.api.dev_ui import DEV_LOGIN_PAGE
 from app.config import Settings, get_settings
 from app.data.db import Database
 from app.data.migrations import migrate
+from app.data.repositories.audit import AuditRepository
 from app.data.repositories.catalog import CatalogRepository
 from app.data.repositories.inventory import InventoryRepository
 from app.data.repositories.outbox import OutboxRepository
@@ -71,6 +72,7 @@ def build_app(
         migrate(db)
 
     users = CachedUserRepository(db)
+    audit = AuditRepository(db)
     catalog = CatalogRepository(db)
     inventory = InventoryRepository(db)
     unknown_scans = UnknownScanRepository(db)
@@ -152,6 +154,7 @@ def build_app(
         store_code=settings.store_code,
         terminal_code=settings.terminal_code,
         settings=settings,
+        audit=audit,
     )
 
     # Order matters: the outermost middleware runs first, so a request from a

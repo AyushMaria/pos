@@ -21,6 +21,7 @@ from app.api.server import build_app
 from app.config import Settings
 from app.data.db import Database
 from app.data.migrations import migrate
+from app.data.repositories.audit import AuditRepository
 from app.data.repositories.users import CachedUserRepository
 from app.domain import permissions as perms
 from app.domain.ids import new_id
@@ -114,7 +115,10 @@ def sessions() -> SessionStore:
 
 @pytest.fixture
 def auth_service(
-    users: CachedUserRepository, sessions: SessionStore, settings: Settings
+    users: CachedUserRepository,
+    sessions: SessionStore,
+    settings: Settings,
+    db: Database,
 ) -> AuthService:
     return AuthService(
         users=users,
@@ -123,6 +127,7 @@ def auth_service(
         store_code=settings.store_code,
         terminal_code=settings.terminal_code,
         settings=settings,
+        audit=AuditRepository(db),
     )
 
 

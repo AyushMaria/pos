@@ -21,11 +21,14 @@ from dataclasses import replace
 from datetime import datetime
 
 from app.config import Settings, get_settings
+from app.data.repositories.audit import AuditRepository
 from app.data.repositories.users import CachedUserRepository
 from app.domain import permissions
 from app.domain.identity import (
+    OVERRIDE_GRANT_TTL,
     CachedIdentity,
     NotOverridable,
+    OverrideGrant,
     Session,
     SnapshotExpired,
     snapshot_expiry,
@@ -49,6 +52,41 @@ class LoginFailed(RuntimeError):
 
 class NoOfflineIdentity(RuntimeError):
     """The cloud is unreachable and this employee has never logged in here."""
+
+
+class NothingToAuthorise(RuntimeError):
+    """The cashier already holds the permission being authorised.
+
+    Refused rather than waved through, because the alternative is an audit row
+    describing an escalation that never happened — and a modal that appears to
+    do something when it is doing nothing at all.
+    """
+
+    def __init__(self, permission: str) -> None:
+        super().__init__(f"the signed-in session already holds {permission}")
+        self.permission = permission
+
+
+class CannotAuthoriseSelf(RuntimeError):
+    """Somebody tried to approve their own override.
+
+    This is the control, not an edge case. Without it a cashier who knows
+    their own PIN approves their own void, and the audit row names the same
+    person twice while looking entirely ordinary.
+    """
+
+    def __init__(self, permission: str) -> None:
+        super().__init__(f"a person cannot authorise their own {permission}")
+        self.permission = permission
+
+
+class ApproverLacksPermission(RuntimeError):
+    """The approver does not hold what they were asked to lend."""
+
+    def __init__(self, permission: str, approver_code: str) -> None:
+        super().__init__(f"{approver_code} does not hold {permission}")
+        self.permission = permission
+        self.approver_code = approver_code
 
 
 class NotSignedIn(RuntimeError):
@@ -175,8 +213,10 @@ class AuthService:
         store_code: str,
         terminal_code: str,
         settings: Settings | None = None,
+        audit: AuditRepository | None = None,
     ) -> None:
         self.users = users
+        self.audit = audit
         self.sessions = sessions
         self.cloud = cloud
         self.store_code = store_code
@@ -314,3 +354,121 @@ class AuthService:
         )
         self.users.upsert(identity)
         return identity
+
+    # ── Supervisor override (architecture §11.3) ────────────────────────────
+
+    def authorize_override(
+        self,
+        *,
+        approver_code: str,
+        pin: str,
+        permission: str,
+        now: datetime | None = None,
+    ) -> OverrideGrant:
+        """Verify a second person and lend the cashier a permission.
+
+        The second use `pins.verify_pin` has ever had. The first,
+        `_login_offline`, verifies somebody and then *becomes* them. This one
+        verifies somebody and then walks away: the session in the store is
+        still the cashier's, with one extra key on it for ninety seconds.
+
+        Offline-first like everything else on the sale path. It reads
+        `cached_users`, so a supervisor who has never signed in on this
+        terminal cannot authorise anything here — which is a real limitation
+        of a real shop, and the reason it gets a sentence of its own rather
+        than "wrong PIN". The cloud path (`authorize-override`) is what covers
+        the supervisor who has never touched this till.
+
+        The order of the checks is deliberate. Anything that can be refused
+        without reading a PIN is refused first, so an impossible request never
+        becomes a reason to type a credential.
+        """
+        now = now or utcnow()
+        approver_code = approver_code.strip().upper()
+
+        # 1. Is this key lendable at all? Slice 3's rule, checked before
+        #    anybody is asked for anything.
+        if not permissions.is_overridable(permission):
+            raise NotOverridable(permission)
+
+        # 2. Is there a cashier to lend it to? `grant()` would refuse this
+        #    later anyway, but only after a supervisor had typed their PIN.
+        cashier = self.sessions.current
+        if cashier is None:
+            raise NotSignedIn(permission)
+
+        # 3. Does the cashier already hold it? Then nothing is being
+        #    authorised, and pretending otherwise would put a row in the audit
+        #    log describing an escalation that did not happen.
+        if permission in cashier.permissions:
+            raise NothingToAuthorise(permission)
+
+        identity = self.users.get_by_employee_code(approver_code)
+        if identity is None:
+            raise NoOfflineIdentity(
+                f"{approver_code} has not signed in on this terminal before, "
+                "so their PIN cannot be checked without the internet. Sign in "
+                "once on this till, or reconnect."
+            )
+
+        # 4. A person may not authorise themselves. This is the whole control:
+        #    a cashier who knows their own PIN would otherwise be able to
+        #    approve their own void, and the audit row would name them twice
+        #    and look perfectly ordinary.
+        if identity.user_id == cashier.user_id:
+            raise CannotAuthoriseSelf(permission)
+
+        if not pins.verify_pin(identity.pin_hash, pin, self.settings):
+            raise LoginFailed("that PIN was not recognised")
+
+        # 5. Is the approver still someone this terminal may believe? An
+        #    inactive employee, or one whose snapshot has aged out, cannot
+        #    authorise — the same rule that stops them signing in.
+        if not identity.is_usable(now=now):
+            raise LoginFailed(
+                f"{approver_code} cannot authorise from this terminal. Either "
+                "the account is not active, or this till has been offline too "
+                "long to trust what it remembers."
+            )
+
+        # 6. Does the approver actually hold what they are lending? Nobody can
+        #    give away what they do not have, and without this a second
+        #    cashier could authorise a void for the first.
+        if permission not in identity.permissions:
+            raise ApproverLacksPermission(permission, approver_code)
+
+        expires_at = now + OVERRIDE_GRANT_TTL
+        self.sessions.grant(permission, until=expires_at, now=now)
+
+        grant = OverrideGrant(
+            permission=permission,
+            granted_at=now,
+            expires_at=expires_at,
+            actor_id=cashier.user_id,
+            actor_code=cashier.employee_code,
+            approver_id=identity.user_id,
+            approver_code=identity.employee_code,
+        )
+
+        # The row is written where the grant is minted, not where it is spent.
+        # A grant nobody used is still a fact about the shop, and "a supervisor
+        # was called to this till eleven times today" is exactly the shape an
+        # audit log exists to show.
+        if self.audit is not None:
+            self.audit.record_override(grant)
+        else:  # pragma: no cover - only a terminal built without a database
+            log.error(
+                "override granted with no audit repository: %s to %s by %s",
+                permission,
+                grant.actor_code,
+                grant.approver_code,
+            )
+
+        log.info(
+            "override granted: %s to %s by %s until %s",
+            permission,
+            grant.actor_code,
+            grant.approver_code,
+            expires_at.isoformat(),
+        )
+        return grant

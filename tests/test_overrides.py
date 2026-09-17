@@ -17,13 +17,24 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
+from app.data.repositories.audit import OVERRIDE_GRANTED
 from app.domain import permissions as perms
 from app.domain.identity import (
     OVERRIDE_GRANT_TTL,
     NotOverridable,
     Session,
+    utcnow,
 )
-from app.services.auth_service import NotSignedIn, SessionStore
+from app.services.auth_service import (
+    ApproverLacksPermission,
+    CannotAuthoriseSelf,
+    LoginFailed,
+    NoOfflineIdentity,
+    NothingToAuthorise,
+    NotSignedIn,
+    SessionStore,
+)
+from tests.conftest import TEST_STORE_ID
 
 NOW = datetime(2026, 9, 17, 10, 0, 0, tzinfo=timezone.utc)
 
@@ -221,3 +232,265 @@ def test_signing_out_takes_the_grants_with_it() -> None:
     store.clear()
 
     assert store.current is None
+
+
+# ── Verifying the second person ─────────────────────────────────────────────
+#
+# `pins.verify_pin` has had exactly one caller since phase 1: `_login_offline`,
+# which verifies somebody and then *becomes* them. `authorize_override` is the
+# second, and it verifies somebody and then walks away.
+
+SUPERVISOR = {
+    "user_id": "018f0000-0000-7000-8000-000000000002",
+    "employee_code": "S001",
+    "pin": "7241",
+}
+
+
+@pytest.fixture
+def till(auth_service, seeded_cashier):
+    """A cashier signed in at the till, with a supervisor known to it."""
+    auth_service.seed_local_user(
+        user_id=SUPERVISOR["user_id"],
+        employee_code=SUPERVISOR["employee_code"],
+        full_name="Ravi Menon",
+        store_id=TEST_STORE_ID,
+        pin=SUPERVISOR["pin"],
+        roles=frozenset({perms.SUPERVISOR}),
+        permissions=perms.permissions_for(frozenset({perms.SUPERVISOR})),
+    )
+    auth_service.sessions.set(cashier(), access_token=None)
+    return auth_service
+
+
+def authorize(service, **kwargs):
+    call = {
+        "approver_code": SUPERVISOR["employee_code"],
+        "pin": SUPERVISOR["pin"],
+        "permission": perms.SALE_VOID,
+    }
+    call.update(kwargs)
+    return service.authorize_override(**call)
+
+
+def test_a_supervisor_lends_the_cashier_a_void(till) -> None:
+    grant = authorize(till)
+
+    assert till.sessions.current.allows(perms.SALE_VOID, now=utcnow())
+    assert grant.permission == perms.SALE_VOID
+    assert grant.actor_code == "C001"
+    assert grant.approver_code == "S001"
+
+
+def test_the_cashier_is_still_the_one_signed_in(till) -> None:
+    """The difference between this and `_login_offline`, in one assertion.
+
+    Both verify a PIN against `cached_users`. That one then replaces the
+    session with the person it verified; this one must not — the cashier has a
+    customer in front of them and a cart open.
+    """
+    authorize(till)
+
+    session = till.sessions.current
+    assert session.employee_code == "C001"
+    assert session.user_id != SUPERVISOR["user_id"]
+
+
+def test_the_grant_names_both_people(till) -> None:
+    """`audit_log.approver_id` has existed since 0001 with nothing writing it.
+
+    An override is the one path where somebody deliberately exceeds their
+    permissions. A row naming only the cashier would launder that into
+    ordinary work, which is worse than no row at all — it would look like the
+    cashier had the permission all along.
+    """
+    grant = authorize(till)
+    rows = till.audit.overrides()
+
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["actor_id"] == grant.actor_id
+    assert row["approver_id"] == grant.approver_id
+    assert row["actor_id"] != row["approver_id"]
+    assert row["action"] == OVERRIDE_GRANTED
+    assert row["entity_id"] == perms.SALE_VOID
+
+
+def test_the_row_is_written_when_the_grant_is_minted(till) -> None:
+    """Not when it is spent. A grant nobody used is still a fact about the shop.
+
+    Nothing here voids anything: the supervisor authorises and the test stops.
+    The row must exist anyway, because "a supervisor was called to this till
+    eleven times today" is exactly the shape an audit log is for.
+    """
+    authorize(till)
+    assert len(till.audit.overrides()) == 1
+
+
+# ── The refusals, which are most of it ──────────────────────────────────────
+
+
+def test_a_person_cannot_authorise_themselves(till) -> None:
+    """The whole control, and the one that would look fine if it were missing.
+
+    A cashier who knows their own PIN would otherwise approve their own void,
+    and the audit row would name the same person twice while reading
+    perfectly ordinarily.
+    """
+    with pytest.raises(CannotAuthoriseSelf):
+        authorize(till, approver_code="C001", pin="4913")
+
+    assert not till.sessions.current.allows(perms.SALE_VOID, now=utcnow())
+    assert till.audit.overrides() == []
+
+
+def test_an_approver_cannot_lend_what_they_do_not_hold(till) -> None:
+    """A second cashier is not a supervisor.
+
+    `sale.discount.unlimited` belongs to manager and admin; a supervisor does
+    not hold it, so they cannot lend it however senior they look.
+    """
+    with pytest.raises(ApproverLacksPermission) as refused:
+        authorize(till, permission=perms.SALE_DISCOUNT_UNLIMITED)
+
+    assert refused.value.approver_code == "S001"
+    assert till.audit.overrides() == []
+
+
+def test_a_supervisor_this_terminal_has_never_seen_is_named_as_such(till) -> None:
+    """Not "wrong PIN", which would send somebody looking for the wrong fault.
+
+    Offline this reads `cached_users`, so a supervisor who has never signed in
+    here cannot be checked at all. That is a real limitation of a real shop
+    and it gets its own sentence; the cloud path is what covers it.
+    """
+    with pytest.raises(NoOfflineIdentity) as refused:
+        authorize(till, approver_code="Z999")
+
+    assert "has not signed in on this terminal" in str(refused.value)
+
+
+def test_a_wrong_pin_is_refused(till) -> None:
+    with pytest.raises(LoginFailed):
+        authorize(till, pin="0000")
+
+    assert not till.sessions.current.allows(perms.SALE_VOID, now=utcnow())
+    assert till.audit.overrides() == []
+
+
+def test_a_permission_outside_the_rule_is_refused_before_any_pin(till) -> None:
+    """`cash.payout` never reaches the PIN prompt.
+
+    Ordering matters here rather than only the outcome: a request that cannot
+    succeed must not become a reason for somebody to type a credential.
+    """
+    with pytest.raises(NotOverridable):
+        authorize(till, permission=perms.CASH_PAYOUT, pin="definitely-wrong")
+
+    assert till.audit.overrides() == []
+
+
+def test_authorising_what_the_session_already_holds_is_refused(till) -> None:
+    """Nothing is being escalated, so nothing should be logged as an escalation.
+
+    Not reachable with a cashier at the till: no overridable key is one a
+    cashier holds, which `test_nothing_the_cashier_already_holds_is_overridable`
+    asserts. It is reachable when a *supervisor* is working the register — they
+    already hold `sale.void` — and that is a real shift in a small shop rather
+    than a contrived one.
+    """
+    till.sessions.set(
+        Session(
+            user_id=SUPERVISOR["user_id"],
+            employee_code=SUPERVISOR["employee_code"],
+            full_name="Ravi Menon",
+            store_id=TEST_STORE_ID,
+            roles=frozenset({perms.SUPERVISOR}),
+            permissions=perms.permissions_for(frozenset({perms.SUPERVISOR})),
+            authenticated_at=utcnow(),
+        ),
+        access_token=None,
+    )
+
+    with pytest.raises(NothingToAuthorise):
+        authorize(till, permission=perms.SALE_VOID)
+
+    assert till.audit.overrides() == []
+
+
+def test_an_approver_whose_snapshot_aged_out_cannot_authorise(till) -> None:
+    """The rule that stops them signing in stops them lending, too.
+
+    Fourteen days is the snapshot TTL. A terminal that has been off the
+    network longer than that is no longer entitled to believe what it
+    remembers about anybody — including that they are still a supervisor.
+    """
+    till.seed_local_user(
+        user_id=SUPERVISOR["user_id"],
+        employee_code=SUPERVISOR["employee_code"],
+        full_name="Ravi Menon",
+        store_id=TEST_STORE_ID,
+        pin=SUPERVISOR["pin"],
+        roles=frozenset({perms.SUPERVISOR}),
+        permissions=perms.permissions_for(frozenset({perms.SUPERVISOR})),
+        signed_at=utcnow() - timedelta(days=20),
+    )
+
+    with pytest.raises(LoginFailed) as refused:
+        authorize(till)
+
+    assert "offline too long" in str(refused.value)
+    assert till.audit.overrides() == []
+
+
+def test_a_revoked_approver_is_no_longer_known_to_the_terminal(till, users) -> None:
+    """`revoke()` deletes the snapshot rather than flagging it.
+
+    So a deactivated supervisor reads as somebody this till has never seen,
+    which is the honest thing for it to say: the terminal genuinely no longer
+    holds anything about them to check a PIN against.
+    """
+    users.revoke(SUPERVISOR["user_id"])
+
+    with pytest.raises(NoOfflineIdentity):
+        authorize(till)
+
+    assert till.audit.overrides() == []
+
+
+def test_nobody_signed_in_is_refused_before_any_pin(auth_service) -> None:
+    """A supervisor typing a PIN into an empty till gets told, not ignored."""
+    with pytest.raises(NotSignedIn):
+        authorize(auth_service)
+
+
+# ── The gap this step leaves open ───────────────────────────────────────────
+
+
+@pytest.mark.xfail(
+    reason="phase 7 — nothing pushes a standalone audit row, so a minted "
+    "grant never leaves the terminal and slice 5's viewer cannot see it",
+    strict=True,
+)
+def test_an_override_row_can_be_pushed() -> None:
+    """The trail is written locally and stops there.
+
+    Audit rows in this system ride to the cloud attached to a parent entity:
+    `payloads.py` collects `entity = 'sale'` rows when it pushes a sale, and
+    `entity = 'stock_ledger'` rows when it pushes a movement. `sync_push`
+    accepts exactly three entities — `sale`, `stock_movement`, `sale_review`.
+
+    A minted grant has no parent. It is written when the supervisor
+    authorises, which may be before any sale exists and may be before a sale
+    that never happens. So it stays on the terminal, and slice 5's audit
+    viewer — cloud-direct, like the rest of admin — will not show it.
+
+    That makes the audit log a document that is true except where it matters,
+    which is the thing the plan warns about in its own words. `audit_log_insert`
+    already accepts the row under the cashier's own claim, so the policy is not
+    the obstacle: what is missing is an `override` entity in `payloads.py` and
+    in `sync_push`. That is the next commit, and this marker comes off with it.
+    """
+    from app.sync.payloads import PayloadBuilder
+
+    assert "override" in PayloadBuilder.SUPPORTED_ENTITIES

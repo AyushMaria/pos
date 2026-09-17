@@ -76,6 +76,35 @@ class Session:
 
 
 @dataclass(frozen=True, slots=True)
+class OverrideGrant:
+    """One supervisor lending one permission to one cashier, for 90 seconds.
+
+    Names both people, because that is the entire point. An override is the
+    one path in this system where somebody deliberately exceeds their
+    permissions, and a row naming only the cashier would launder an escalation
+    into ordinary work.
+
+    Minted when the supervisor authorises, not when the cashier spends it: a
+    grant nobody used is still a fact about the shop, and the shape of "a
+    supervisor was called to this till eleven times today" is exactly what an
+    audit log is for.
+    """
+
+    permission: str
+    granted_at: datetime
+    expires_at: datetime
+    #: The cashier the grant was given to.
+    actor_id: str
+    actor_code: str
+    #: The supervisor who gave it.
+    approver_id: str
+    approver_code: str
+
+    def is_live(self, *, now: datetime) -> bool:
+        return now < self.expires_at
+
+
+@dataclass(frozen=True, slots=True)
 class CachedIdentity:
     """A locally cached identity, as stored in ``cached_users``."""
 
