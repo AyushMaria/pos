@@ -16,7 +16,7 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT / "scripts"))
 
-from check_no_float import check_file, check_paths  # noqa: E402
+from check_no_float import check_file, check_paths, python_files  # noqa: E402
 
 
 def write(tmp_path: Path, source: str) -> Path:
@@ -29,7 +29,21 @@ def write(tmp_path: Path, source: str) -> Path:
 
 
 def test_domain_has_no_floating_point() -> None:
-    violations = check_paths([REPO_ROOT / "app" / "domain"])
+    domain = REPO_ROOT / "app" / "domain"
+
+    # The positive control for the corpus. `test_violations_are_caught` below
+    # proves the hunter still catches a float; this proves it was pointed at
+    # something. An empty list of violations over an empty list of files is
+    # the same green as a clean domain, and the day `app/domain` is split up
+    # or renamed, only this line notices.
+    files = python_files([domain])
+    assert files, "no Python files under app/domain — the walk found nothing"
+    assert any(path.name == "money.py" for path in files), (
+        f"app/domain has {len(files)} files but no money.py — the float ban "
+        "is no longer looking at the package it exists for"
+    )
+
+    violations = check_paths([domain])
     assert violations == [], "\n".join(v.render(REPO_ROOT) for v in violations)
 
 

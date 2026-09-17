@@ -90,20 +90,63 @@ def callers() -> str:
 
 
 def main() -> int:
+    # Three ways this check can report success having looked at nothing, and
+    # it exists because a whole feature once shipped uncalled — the same shape
+    # of silence it is meant to detect. `ui-src/src` missing used to print
+    # "nothing to check" and exit 0, which is the friendliest possible way to
+    # stop working.
     if not SRC.is_dir():
-        print("no ui-src/src — nothing to check")
-        return 0
+        print(f"no {SRC.relative_to(ROOT)} — refusing to pass a check that read nothing")
+        return 2
+    if not API.is_dir():
+        print(f"no {API.relative_to(ROOT)} — the client moved and this check did not")
+        return 2
+
+    client_files = sorted(API.glob("*.ts"))
+    if not client_files:
+        print(f"no .ts files in {API.relative_to(ROOT)} — nothing was parsed")
+        return 2
 
     used = callers()
-    dead: list[str] = []
-    checked = 0
+    if not used.strip():
+        print("no non-test sources found — every function would look uncalled")
+        return 2
 
-    for path in sorted(API.glob("*.ts")):
+    dead: list[str] = []
+    seen: set[str] = set()
+
+    for path in client_files:
         for obj, names in members(path.read_text(encoding="utf-8")).items():
             for name in names:
-                checked += 1
+                seen.add(f"{obj}.{name}")
                 if not re.search(rf"\b{obj}\.{name}\b", used):
                     dead.append(f"{obj}.{name}")
+
+    checked = len(seen)
+    if not checked:
+        print(
+            f"parsed {len(client_files)} client file(s) and found no functions — "
+            "CLIENT or MEMBER has stopped matching how the client is written",
+        )
+        return 2
+
+    # The debt list as positive control, which is the trick
+    # `tests/test_route_coverage.py` gets for free: its two halves check each
+    # other, so neither can pass vacuously alone. Every name in
+    # KNOWN_UNCALLED was a real member when it was written down, so if the
+    # parser stops finding one, either the function is gone — in which case
+    # the list must shrink — or the parser is broken.
+    vanished = sorted(KNOWN_UNCALLED - seen)
+    if vanished:
+        print("These are in KNOWN_UNCALLED but no longer exist in the client:\n")
+        for entry in vanished:
+            print(f"  {entry}")
+        print(
+            "\nIf the function was deleted, remove it from KNOWN_UNCALLED."
+            "\nIf it is still there, the member parser has stopped matching and"
+            "\nthis check is no longer reading the client."
+        )
+        return 1
 
     new = sorted(set(dead) - KNOWN_UNCALLED)
     fixed = sorted(KNOWN_UNCALLED - set(dead))

@@ -138,13 +138,26 @@ def check_file(path: Path) -> list[Violation]:
     return hunter.violations
 
 
+def python_files(paths: list[Path]) -> list[Path]:
+    """Exactly the files `check_paths` will read.
+
+    Split out so the count reported at the end is the count actually checked,
+    and so both the script and `tests/test_no_float.py` can assert it is not
+    zero. A clean run over no files reads identically to a clean run over the
+    domain, and only one of those means anything.
+    """
+    return [
+        path
+        for target in paths
+        for path in sorted(target.rglob("*.py"))
+        if "__pycache__" not in path.parts
+    ]
+
+
 def check_paths(paths: list[Path]) -> list[Violation]:
     violations: list[Violation] = []
-    for target in paths:
-        for path in sorted(target.rglob("*.py")):
-            if "__pycache__" in path.parts:
-                continue
-            violations.extend(check_file(path))
+    for path in python_files(paths):
+        violations.extend(check_file(path))
     return violations
 
 
@@ -164,6 +177,20 @@ def main() -> int:
         print(f"no such path: {missing[0]}", file=sys.stderr)
         return 2
 
+    # The positive control. This check passes by finding nothing, and so does
+    # a check that read no files at all — if `app/domain` is emptied, split up
+    # or renamed under a path that still exists, the walk goes quiet and the
+    # run stays green. `--path` names a directory that exists, so the earlier
+    # guard does not cover it.
+    files = python_files(targets)
+    if not files:
+        print(
+            f"no Python files under {', '.join(args.path)} — refusing to "
+            "report success for a check that read nothing",
+            file=sys.stderr,
+        )
+        return 2
+
     violations = check_paths(targets)
     for violation in violations:
         print(violation.render(REPO_ROOT), file=sys.stderr)
@@ -177,8 +204,7 @@ def main() -> int:
         )
         return 1
 
-    checked = sum(1 for t in targets for _ in t.rglob("*.py"))
-    print(f"no floating point in {', '.join(args.path)} ({checked} files)")
+    print(f"no floating point in {', '.join(args.path)} ({len(files)} files)")
     return 0
 
 
