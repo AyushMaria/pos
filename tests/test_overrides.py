@@ -13,6 +13,7 @@ consequence lands at the sync boundary hours later if it lands at all.
 
 from __future__ import annotations
 
+import asyncio
 import json
 from datetime import datetime, timedelta, timezone
 
@@ -267,13 +268,21 @@ def till(auth_service, seeded_cashier):
 
 
 def authorize(service, **kwargs):
+    """Call `authorize_override` and wait for it.
+
+    The method became a coroutine when the online path was added — it has to
+    be, because the Edge Function call is awaited. Every test below is about
+    the offline behaviour and none of them is concurrent, so the helper runs
+    the loop and hands back the result. That keeps the awaiting in one place
+    instead of marking two dozen tests async to prove nothing.
+    """
     call = {
         "approver_code": SUPERVISOR["employee_code"],
         "pin": SUPERVISOR["pin"],
         "permission": perms.SALE_VOID,
     }
     call.update(kwargs)
-    return service.authorize_override(**call)
+    return asyncio.run(service.authorize_override(**call))
 
 
 def test_a_supervisor_lends_the_cashier_a_void(till) -> None:

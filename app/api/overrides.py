@@ -87,7 +87,7 @@ async def authorize(
     instead of a 400 that only this endpoint knows how to produce.
     """
     try:
-        grant = auth.authorize_override(
+        grant = await auth.authorize_override(
             approver_code=body.approver_code,
             pin=body.pin,
             permission=body.permission,

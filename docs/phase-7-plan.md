@@ -732,3 +732,153 @@ The Edge Function and the modal. The endpoint is offline-only today, which
 means an approver who has never signed in on this terminal cannot authorise —
 a real limitation of a real shop, answered with a 503 that says what to do
 rather than "wrong PIN".
+
+---
+
+## Slice 3 — `authorize-override`, and what it deliberately is not
+
+The Edge Function answers one question — *is this PIN right, and does this
+person hold this key in this store?* — and returns that and nothing else. The
+grant is minted on the terminal, into the session the cashier already has.
+
+It exists for the supervisor who has never signed in on a particular till.
+Offline, the hash being checked is the one this terminal remembers, so that
+person cannot authorise here; the 503 says so in a sentence they can act on.
+
+### The half that must never be copied
+
+`authenticate-pin` sits in the next directory and ends in about forty lines of
+`generateLink` + `verifyOtp` that mint a real Supabase session. Copying that
+file and deleting the wrong half would hand the till a supervisor's session
+every time a cashier voided a line — and it would look like it worked, because
+the grant would be minted too. The property has a name from the commit that
+built the offline path: *verify a second person without becoming them*.
+
+`test_only_the_login_function_mints_a_session` asserts it against the source.
+`SESSION_MINTING` is a set rather than an equality, because the interesting
+failure is a second entry appearing. Its positive control is the inclusion of
+`authenticate-pin`: the markers must still match the function that really does
+mint a session, so a typo in the pattern fails rather than passing everything.
+
+Its first run failed — on `authorize-override`, for a comment saying in as
+many words that it must never call `generateLink`. A text search cannot tell a
+warning from the thing it warns about, and a check that punishes the
+explanation teaches people to delete the explanation. It now matches code with
+whole-line comments stripped.
+
+`CloudApprover` sits directly above `CloudSession` in `supabase_auth.py` for
+the same reason. That one carries an access token, a refresh token and a PIN
+hash; this one carries none of the three. The difference between the two
+dataclasses is the entire security property.
+
+### The permission is read, never taken on trust
+
+The body names a permission because the terminal has to say what is being
+asked for. Whether the approver *holds* it is decided in the function, from
+`role_permissions`, exactly as the offline path decides it from the cached
+snapshot. Trusting the client's key — or returning the whole permission list
+for the terminal to check — would make the online path looser than the
+offline one.
+
+It buys something the cache cannot: freshness. A supervisor demoted this
+morning is refused online even though the cached snapshot still trusts them
+for the rest of its fortnight.
+
+Two things are deliberately *not* duplicated into Deno:
+
+* **`OVERRIDABLE`.** Whether a key is lendable at all is checked on the
+  terminal before anybody is asked for a PIN, and again in `SessionStore.grant`
+  where the grant is minted. A copy in the function would be a fourth
+  duplicated constant with nothing holding it in step, guarding a decision
+  already made twice on the only machine that can act on it.
+* **`OVERRIDE_GRANT_TTL`.** The terminal owns the window because the terminal
+  mints the grant. A second authority on the same number is how two clocks
+  start disagreeing. The entry stays in `DUPLICATED` as a trap: if anybody
+  ever does declare it there, it has to match.
+
+No `pin_hash` comes back either, so authorising does not cache the approver.
+An online override works for somebody who has never touched this till; an
+offline one still does not. Those stay different acts.
+
+### The mirror image of the transport bug
+
+The earlier finding was that the lock was consulted inside the offline branch,
+so being online *cleared* it. Wiring the online path surfaced the half that
+survived that fix: with a network up, every wrong PIN went to the Edge
+Function, came back 401, and **the local counter was never touched**. An
+attacker at the till could guess all night without ever accumulating towards a
+lockout, simply by leaving the cable in. Being online was not just failing to
+clear the lock — it was never reaching one.
+
+The cloud's own limiter does not cover for that, and this is where the
+per-instance caveat stops being a footnote: a `Map` in one Deno isolate,
+nominal, reset by a cold start. Online was the cheaper way to guess.
+
+A PIN the *server* rejected now counts against the local throttle, on both
+paths. The counter is a fact about attempts arriving at this terminal, whoever
+adjudicated them. One boundary, stated rather than hidden: it can only count
+against somebody this till has cached — an employee code it has never seen has
+no row to increment, and no cached hash to guess at either, so what is
+unthrottled there is the cloud's rate limit rather than anything on this
+machine.
+
+### Asked twice, because one question could not cover both cases
+
+`CannotAuthoriseSelf` is now checked in two places, and the second one exists
+because the first is unprovable on its own.
+
+Before a PIN is spent, all the terminal can compare is the code — the id
+comparison needs a cached identity, and the online path may not have one. That
+is enough for the ordinary attempt and it costs nothing. But a till whose
+cached row for the cashier has been revoked mid-shift, which `_revoke_cached`
+does when the server reports an account disabled, has nothing to compare ids
+against. So the identity the verifier actually returned is compared again
+after verification, where it cannot be fooled by the state of the cache.
+
+Isolating the first check needed the lesson from the endpoint's 401: both
+refusals raise the same exception, so the test asserts the *cost* instead —
+with the cashier's cached row revoked, a self-authorisation must not reach the
+Edge Function, because an attempt that does is a free PIN oracle for whoever
+is holding the till.
+
+### Two layers, one status
+
+Generalised from the 401: **when two layers answer with the same status for
+different reasons, a test that asserts the status cannot tell you which layer
+answered.** The way out is to find a request the inner layer rejects earlier
+and differently — or, failing that, to assert on what the request touched
+rather than what it returned.
+
+That matters for the whole `require()` family, because the matrix asserts
+"403 or not 403" for every gated operation and concludes something about a
+layer from it. Audited: `app/api/deps.py` is the only file in `app/api` that
+produces a 403, and the admin router had already chosen 422 for "RLS refused
+it", with a comment saying exactly why. So the matrix's 403 means what it says
+today.
+
+`test_require_is_the_only_thing_that_forbids` keeps it that way. `deps.py` is
+its positive control; `NON_REQUIRE_403` lists the exceptions with reasons, and
+`overrides.py` is the only entry — an ungated route whose 403s are about the
+approver rather than the caller.
+
+### The modal reads `status`, not just the message
+
+Decided before the modal is written, because the shortest path to a working
+one is the wrong one. `useCloudCall` collapses everything that is not
+`isUnavailable` into a single `error` string. The *sentences* would survive
+that, since `ApiError.message` is the server's `detail` and those are written
+for the counter — but the *behaviour* would not, and three of the eight
+outcomes need behaviour rather than wording:
+
+* **409** — the session already holds the key. Nothing is wrong: the modal
+  should close and let the act proceed, not show an error about it.
+* **423** — locked until a stated time. Retrying now cannot work, so the
+  submit button should be disabled until then rather than inviting another
+  attempt.
+* **503** — an approver this till has never seen, or no network. The remedy is
+  somebody else, or a cable; not a retry with the same PIN.
+
+So the modal reads `ApiError.status` and maps it to an outcome, rather than
+rendering a message and hoping. Written down now; the mapping itself lands
+with the modal that calls it, because a helper with no caller is precisely the
+shape of dead code this repository has a check for.

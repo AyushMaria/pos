@@ -34,6 +34,16 @@ class AccountDisabled(RuntimeError):
     """The server recognises the employee but the account is not active."""
 
 
+class ApproverNotPermitted(RuntimeError):
+    """The PIN was right and the person does not hold what they were asked to lend.
+
+    Separate from `InvalidCredentials` because it is a different sentence at
+    the counter — fetch somebody more senior, rather than retype. It is only
+    ever raised after a correct PIN, so it discloses nothing: you have to be
+    the approver already to learn that the approver lacks a key.
+    """
+
+
 @dataclass(frozen=True)
 class CloudSession:
     """What a successful online authentication yields."""
@@ -50,6 +60,26 @@ class CloudSession:
     refresh_token: str
     snapshot_signed_at: datetime
     snapshot_expires_at: datetime
+
+
+@dataclass(frozen=True)
+class CloudApprover:
+    """What a successful online *authorisation* yields — note what is missing.
+
+    No access token, no refresh token, no PIN hash. `CloudSession` above has
+    all three because logging in is becoming somebody; this is verifying
+    somebody and walking away. The two dataclasses sitting next to each other
+    is deliberate: the difference between them is the entire security property
+    of the override flow.
+    """
+
+    user_id: str
+    employee_code: str
+    full_name: str
+    store_id: str
+    roles: frozenset[str]
+    permission: str
+    verified_at: datetime
 
 
 def _parse_ts(value: str) -> datetime:
@@ -139,6 +169,69 @@ class SupabaseAuthClient:
             raise AuthUnavailable(f"authenticate-pin returned {response.status_code}")
 
         return _session_from_payload(response.json())
+
+    async def authorize_override(
+        self, approver_code: str, pin: str, permission: str, store_code: str
+    ) -> CloudApprover:
+        """Ask the cloud to verify a second person, and nothing more.
+
+        The asymmetry with `authenticate_pin` is the point: that one returns a
+        session and this one must not. `authorize-override` answers "is this
+        PIN right, and does this person hold this key in this store?" and the
+        grant is minted here, on the terminal, into the session the cashier
+        already has.
+
+        No `pin_hash` comes back either, so authorising does not cache the
+        approver on this till. An online override works for a supervisor who
+        has never touched this terminal; an offline one still does not, and
+        those stay different acts.
+        """
+        client = await self._http()
+        try:
+            response = await client.post(
+                f"{self.base_url}/functions/v1/authorize-override",
+                headers=self._headers,
+                json={
+                    "approver_code": approver_code,
+                    "pin": pin,
+                    "permission": permission,
+                    "store_code": store_code,
+                },
+            )
+        except httpx.HTTPError as exc:
+            raise AuthUnavailable(str(exc)) from exc
+
+        if response.status_code == 401:
+            raise InvalidCredentials("invalid employee code or PIN")
+        if response.status_code == 403:
+            error = response.json().get("error", "")
+            if error == "approver_lacks_permission":
+                raise ApproverNotPermitted(permission)
+            raise AccountDisabled(error or "account_disabled")
+        if response.status_code != 200:
+            # Same rule as `authenticate_pin`: anything that is not an explicit
+            # decision about this PIN is an outage, and the caller falls back to
+            # the cache rather than refusing. A 404 here is the likeliest of
+            # all — this function is newer than the projects it will be
+            # deployed to, and a till whose supervisor cannot authorise a void
+            # because a deployment is one function behind should fall back to
+            # the path that has always worked.
+            raise AuthUnavailable(f"authorize-override returned {response.status_code}")
+
+        payload = response.json()
+        approver = payload["approver"]
+        return CloudApprover(
+            # Indexed, not `.get`. This is a contract between two files in one
+            # repository; a missing key is a deployment that does not match
+            # this build, and a KeyError names it better than a None would.
+            user_id=approver["user_id"],
+            employee_code=approver["employee_code"],
+            full_name=approver["full_name"],
+            store_id=approver["store_id"],
+            roles=frozenset(approver.get("roles", [])),
+            permission=payload["permission"],
+            verified_at=_parse_ts(payload["verified_at"]),
+        )
 
     async def refresh(self, refresh_token: str) -> tuple[str, str]:
         """Exchange a refresh token for a new access token. Returns (access, refresh)."""

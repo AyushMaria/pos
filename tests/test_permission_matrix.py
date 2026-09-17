@@ -507,3 +507,56 @@ def test_the_gate_is_actually_used() -> None:
         for path in _ui_sources()
     )
     assert uses > 0, "no <PermissionGate> in ui-src"
+
+
+# ── What a 403 means, and why the matrix may believe it ─────────────────────
+
+#: Files in `app/api` allowed to produce a 403 that did not come from
+#: `require()`, and why.
+#:
+#: The matrix asserts "403 or not 403" for every gated operation. That reads a
+#: status code and concludes something about a *layer*, which only holds while
+#: one layer produces it. Two layers answering with the same status for
+#: different reasons is a test that cannot tell you which one answered — the
+#: trap `POST /overrides/authorize` fell into with its 401, where a dependency
+#: and a service both said `not_signed_in` and deleting the dependency changed
+#: nothing the test could see.
+#:
+#: `overrides.py` is here because refusing a self-authorisation and refusing an
+#: approver who lacks the key are both genuinely "forbidden", and the route is
+#: in `UNGATED` — it has no `require()` to be confused with, so the matrix
+#: never probes it.
+NON_REQUIRE_403: dict[str, str] = {
+    "overrides.py": "an ungated route; its 403s are about the approver",
+}
+
+API_DIR = Path(__file__).resolve().parent.parent / "app" / "api"
+
+
+def test_require_is_the_only_thing_that_forbids() -> None:
+    """A 403 from a gated route means the permission gate refused it.
+
+    The positive control is `deps.py`: `require()` must still be the thing
+    raising 403, or this check is asserting a property of an application that
+    no longer exists.
+    """
+    forbidding = {
+        path.name
+        for path in sorted(API_DIR.glob("*.py"))
+        if "HTTP_403_FORBIDDEN" in path.read_text(encoding="utf-8")
+    }
+
+    assert "deps.py" in forbidding, (
+        "require() no longer raises 403 — the matrix is reading a status code "
+        "that no longer means what it says"
+    )
+
+    surprises = sorted(forbidding - {"deps.py"} - set(NON_REQUIRE_403))
+    assert not surprises, (
+        "these files answer 403 without being the permission gate:\n  "
+        + "\n  ".join(surprises)
+        + "\n\nA second producer makes every 403 in the matrix ambiguous: the "
+        "assertion still passes, and it no longer tells you which layer "
+        "refused. Add it to NON_REQUIRE_403 with a reason, or use a status "
+        "that says what actually happened."
+    )

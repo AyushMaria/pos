@@ -33,6 +33,24 @@ from app.domain.identity import OVERRIDE_GRANT_TTL, SNAPSHOT_TTL
 FUNCTIONS_DIR = Path(__file__).resolve().parent.parent / "supabase" / "functions"
 
 
+def _code_only(source: str) -> str:
+    """The source with its whole-line `//` comments removed.
+
+    Written because the first run of `test_only_the_login_function_mints_a_session`
+    flagged `authorize-override` — for a comment saying, in as many words, that
+    it must never call `generateLink` or `verifyOtp`. A text search cannot tell
+    a warning from the thing it warns about, and a check that punishes the
+    explanation teaches people to delete the explanation.
+
+    Only comments that start a line are stripped, which is every comment in
+    this directory. Nothing touches the inside of a string, so `"https://..."`
+    survives intact and a marker cannot be hidden behind one.
+    """
+    return "\n".join(
+        line for line in source.splitlines() if not line.lstrip().startswith("//")
+    )
+
+
 def edge_sources() -> dict[str, str]:
     """Every Edge Function's source, keyed by function name."""
     return {
@@ -226,3 +244,80 @@ def test_an_in_memory_throttle_says_that_it_is_per_instance() -> None:
             "limit is per isolate. It resets on every cold start and does not "
             "exist across instances; the terminal's lockout is the binding one."
         )
+
+
+# ── One function mints sessions, and it is not the new one ──────────────────
+
+#: Markers that mean "this function hands back a login".
+#:
+#: Any one of them is enough. `generateLink` and `verifyOtp` are the supported
+#: way to sign a user in without their password; `access_token` and
+#: `refresh_token` are what that produces and what a caller would store.
+_SESSION_MARKERS = ("generateLink", "verifyOtp", "access_token", "refresh_token")
+
+#: The only function entitled to return a session.
+#:
+#: A table rather than an `assert name == "authenticate-pin"`, because the
+#: interesting failure is a *second* entry appearing, and a set says that
+#: plainly. Adding one means writing down that another Edge Function now logs
+#: somebody in, which should be hard to do by accident.
+SESSION_MINTING = frozenset({"authenticate-pin"})
+
+
+def test_only_the_login_function_mints_a_session() -> None:
+    """`authorize-override` verifies a second person; it must not become them.
+
+    The two functions share a directory, a decoy hash, a rate limiter and
+    two-thirds of their body. The half that differs is the half that matters:
+    `authenticate-pin` ends in `generateLink` + `verifyOtp` and returns a real
+    Supabase session. Copy that file to build the next one, delete the wrong
+    half, and a cashier voiding a line hands the till a supervisor's session —
+    which would look like it worked, because the grant would be minted too.
+
+    `9a59314` named the property when the offline path was written: *verify a
+    second person without becoming them.* This is that property, asserted
+    against the source rather than remembered.
+
+    Its own positive control is the inclusion of `authenticate-pin`: the
+    markers must still match the function that really does mint a session, so
+    a typo in the pattern fails here rather than passing everything.
+
+    Matched against code with the comments stripped. The first version of this
+    test failed on `authorize-override` for a comment explaining why it must
+    never mint a session — see `_code_only`.
+    """
+    minting = {
+        name
+        for name, source in edge_sources().items()
+        if any(marker in _code_only(source) for marker in _SESSION_MARKERS)
+    }
+
+    assert "authenticate-pin" in minting, (
+        "the login function no longer looks like it mints a session — the "
+        "markers have stopped matching, and this check is now vacuous"
+    )
+    assert minting == SESSION_MINTING, (
+        f"{sorted(minting - SESSION_MINTING)} returns a session. An override "
+        "authorises an act; it does not replace the person at the till."
+    )
+
+
+def test_the_override_function_checks_the_permission_for_itself() -> None:
+    """The online path must not be looser than the offline one.
+
+    Offline, `authorize_override` refuses an approver who does not hold the
+    key, reading the cached snapshot. If the Edge Function took the client's
+    word for it — or handed back a permission list for the terminal to check
+    — then having a network would lower the bar, which is the same inversion
+    the lockout exists to prevent one layer down.
+    """
+    source = edge_sources()["authorize-override"]
+    assert re.search(r'from\("role_permissions"\)', source), (
+        "authorize-override does not read role_permissions. Whether the "
+        "approver holds the key has to be decided server-side, from the "
+        "database, not from the body of the request."
+    )
+    assert re.search(r'\.eq\("permission_key", permission\)', source), (
+        "authorize-override reads role_permissions but does not filter by the "
+        "permission it was asked about"
+    )
