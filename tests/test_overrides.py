@@ -18,7 +18,8 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from app.data.repositories.audit import OVERRIDE_GRANTED
+from app.data.repositories.audit import OVERRIDE_GRANTED, OVERRIDE_REFUSED
+from app.domain import lockout
 from app.domain import permissions as perms
 from app.domain.identity import (
     OVERRIDE_GRANT_TTL,
@@ -33,6 +34,7 @@ from app.services.auth_service import (
     NoOfflineIdentity,
     NothingToAuthorise,
     NotSignedIn,
+    PinLocked,
     SessionStore,
 )
 from tests.conftest import TEST_STORE_ID
@@ -573,3 +575,87 @@ def test_every_pushable_entity_is_one_sync_push_accepts() -> None:
         f"{latest.name} does not accept: {missing}. The terminal would queue "
         "these and sync_push would raise 'unknown entity'."
     )
+
+
+# ── Guessing a supervisor's PIN at the till ─────────────────────────────────
+
+
+def test_repeated_wrong_pins_lock_the_approver(till) -> None:
+    """Without this, the override modal is a 10,000-guess oracle.
+
+    Argon2id verifies in 22.8 ms natively, so an unthrottled four-digit space
+    falls in about four minutes with the cable out — and success mints a grant
+    the audit log records as a legitimate supervisor authorisation. The trail
+    would name the supervisor and be wrong in exactly the way
+    `AuditRepository` is careful not to be.
+    """
+    for _ in range(lockout.FAILURES_BEFORE_LOCK - 1):
+        with pytest.raises(LoginFailed):
+            authorize(till, pin="0000")
+
+    with pytest.raises(PinLocked):
+        authorize(till, pin="0000")
+
+
+def test_a_locked_supervisor_cannot_authorise_with_the_right_pin(till) -> None:
+    """Otherwise the lock only delays the guess that works."""
+    for _ in range(lockout.FAILURES_BEFORE_LOCK):
+        with pytest.raises((LoginFailed, PinLocked)):
+            authorize(till, pin="0000")
+
+    with pytest.raises(PinLocked):
+        authorize(till)
+
+    assert till.audit.overrides() == [], "a locked account minted a grant"
+
+
+def test_a_locked_supervisor_does_not_stop_the_cashier(till) -> None:
+    """Per approver, never per terminal (§1.1)."""
+    for _ in range(lockout.FAILURES_BEFORE_LOCK):
+        with pytest.raises((LoginFailed, PinLocked)):
+            authorize(till, pin="0000")
+
+    session = till.sessions.current
+    assert session is not None
+    assert session.employee_code == "C001"
+    assert session.allows(perms.SALE_CREATE, now=utcnow())
+
+
+def test_every_refusal_leaves_a_row(till) -> None:
+    """Five failures against a supervisor's PIN is the most interesting thing
+    that could happen at a till all week, and nothing recorded it."""
+    for _ in range(3):
+        with pytest.raises(LoginFailed):
+            authorize(till, pin="0000")
+
+    refusals = till.audit.refusals()
+    assert len(refusals) == 3
+    row = refusals[0]
+    assert row["action"] == OVERRIDE_REFUSED
+    assert row["actor_id"] == "018f0000-0000-7000-8000-000000000001"
+    assert json.loads(row["after_json"])["approver_code"] == "S001"
+    assert json.loads(row["after_json"])["permission"] == perms.SALE_VOID
+
+
+def test_a_refusal_for_an_unknown_code_names_no_approver(till) -> None:
+    """A run of refusals naming codes that do not exist reads very differently
+    from one supervisor fumbling their own PIN, so the difference is kept."""
+    with pytest.raises(NoOfflineIdentity):
+        authorize(till, approver_code="Z999")
+
+    # No identity was found, so there is nothing to attribute and nothing to
+    # count against. The refusal is not recorded here because the failure is
+    # about the code, not the PIN — see the assertion below for what is.
+    assert till.audit.refusals() == []
+
+
+def test_a_successful_authorisation_clears_the_count(till, users) -> None:
+    """A supervisor who fumbles twice and then gets it right is not halfway to
+    a lockout for the rest of the day."""
+    for _ in range(2):
+        with pytest.raises(LoginFailed):
+            authorize(till, pin="0000")
+
+    authorize(till)
+
+    assert users.get_by_employee_code("S001").consecutive_pin_failures == 0

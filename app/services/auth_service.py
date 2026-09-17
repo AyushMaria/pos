@@ -54,6 +54,20 @@ class NoOfflineIdentity(RuntimeError):
     """The cloud is unreachable and this employee has never logged in here."""
 
 
+class PinLocked(RuntimeError):
+    """Too many wrong PINs in a row for this account.
+
+    Its own exception rather than a `LoginFailed`, because the screen has
+    something different to say: waiting will help, and trying again now will
+    not. Carries the moment the lock lifts so the message can name it.
+    """
+
+    def __init__(self, employee_code: str, until: datetime | None) -> None:
+        super().__init__(f"{employee_code} is locked until {until}")
+        self.employee_code = employee_code
+        self.until = until
+
+
 class NothingToAuthorise(RuntimeError):
     """The cashier already holds the permission being authorised.
 
@@ -287,6 +301,72 @@ class AuthService:
         self.sessions.set(session, cloud.access_token)
         return session
 
+
+    def _record_refusal(
+        self,
+        *,
+        permission: str,
+        cashier: Session,
+        approver_code: str,
+        approver_id: str | None,
+        now: datetime,
+        reason: str = "pin_rejected",
+    ) -> None:
+        if self.audit is None:  # pragma: no cover - terminal with no database
+            return
+        self.audit.record_override_refused(
+            permission=permission,
+            store_id=cashier.store_id,
+            actor_id=cashier.user_id,
+            actor_code=cashier.employee_code,
+            approver_code=approver_code,
+            approver_id=approver_id,
+            reason=reason,
+            occurred_at=now,
+        )
+
+    # ── The one place a cached PIN is checked ───────────────────────────────
+
+    def _verify_cached_pin(
+        self, identity: CachedIdentity, pin: str, *, now: datetime
+    ) -> None:
+        """Check a PIN against the cache, counting failures and honouring locks.
+
+        Both offline paths go through here, and that is the point. The one
+        that looks dangerous is `authorize_override`, because a guess mints a
+        grant the audit log will record as a legitimate supervisor
+        authorisation. The one that is actually worse is `_login_offline`,
+        which has been reachable since phase 1: it looks an employee up by
+        code, so a cashier who guesses a supervisor's PIN offline does not get
+        ninety seconds, they get that supervisor's whole session.
+
+        `authenticate-pin` has rate-limited the cloud path since it was
+        written. This side had nothing, and argon2id at the shipped parameters
+        verifies in 22.8 ms natively — a four-digit space in four minutes with
+        the cable out. The Edge Function's WebAssembly takes about 1.8 s for
+        the same work, which is where the comfortable intuition came from.
+
+        Raises `PinLocked` before touching argon2, so a locked account costs an
+        attacker nothing to discover and nothing to grind.
+        """
+        if identity.is_locked(now=now):
+            raise PinLocked(identity.employee_code, identity.pin_locked_until)
+
+        if pins.verify_pin(identity.pin_hash, pin, self.settings):
+            # Only write when there is something to forget, so an ordinary
+            # sign-in is still one read and no write.
+            if identity.consecutive_pin_failures or identity.pin_locked_until:
+                self.users.clear_pin_failures(identity.user_id)
+            return
+
+        until = self.users.record_pin_failure(identity.user_id, now=now)
+        if until is not None:
+            log.warning(
+                "pin locked for %s until %s", identity.employee_code, until.isoformat()
+            )
+            raise PinLocked(identity.employee_code, until)
+        raise LoginFailed("invalid employee code or PIN")
+
     def _login_offline(self, employee_code: str, pin: str) -> Session:
         identity = self.users.get_by_employee_code(employee_code)
         if identity is None:
@@ -295,11 +375,11 @@ class AuthService:
                 "terminal before. Connect to the internet and try again."
             )
 
-        if not pins.verify_pin(identity.pin_hash, pin, self.settings):
-            raise LoginFailed("invalid employee code or PIN")
+        now = utcnow()
+        self._verify_cached_pin(identity, pin, now=now)
 
         try:
-            session = identity.to_session(now=utcnow())
+            session = identity.to_session(now=now)
         except SnapshotExpired as exc:
             raise LoginFailed(
                 "This terminal has been offline too long. Connect to the "
@@ -418,8 +498,21 @@ class AuthService:
         if identity.user_id == cashier.user_id:
             raise CannotAuthoriseSelf(permission)
 
-        if not pins.verify_pin(identity.pin_hash, pin, self.settings):
-            raise LoginFailed("that PIN was not recognised")
+        try:
+            self._verify_cached_pin(identity, pin, now=now)
+        except (LoginFailed, PinLocked):
+            # Five failures against a supervisor's PIN is the most interesting
+            # thing that could happen at a till all week, and until now nothing
+            # would have recorded it. Written before the exception continues,
+            # so a refusal leaves a trail even though no grant was minted.
+            self._record_refusal(
+                permission=permission,
+                cashier=cashier,
+                approver_code=approver_code,
+                approver_id=identity.user_id,
+                now=now,
+            )
+            raise
 
         # 5. Is the approver still someone this terminal may believe? An
         #    inactive employee, or one whose snapshot has aged out, cannot

@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from datetime import datetime
 
 from app.data.db import Database
 from app.domain.identity import OverrideGrant
@@ -24,6 +25,12 @@ from app.domain.ids import new_id
 #: anyone asking the only question an audit log is really for: who did that,
 #: and who let them.
 OVERRIDE_GRANTED = "override.granted"
+
+#: A supervisor PIN that was offered and refused. Written where the refusal
+#: happens, because five of these in a row against one supervisor is the most
+#: interesting thing that could happen at a till all week and nothing else
+#: would notice. Local-only on purpose — see `record_override_refused`.
+OVERRIDE_REFUSED = "override.refused"
 
 
 class AuditRepository:
@@ -102,6 +109,69 @@ class AuditRepository:
                 ),
             )
         return audit_id
+
+    def record_override_refused(
+        self,
+        *,
+        permission: str,
+        store_id: str,
+        actor_id: str,
+        actor_code: str,
+        approver_code: str,
+        approver_id: str | None,
+        reason: str,
+        occurred_at: datetime,
+    ) -> str:
+        """A refused authorisation, kept where it happened.
+
+        Not queued, and that is deliberate rather than the omission this file
+        was corrected for once already. A refusal is evidence about *this
+        terminal* — somebody standing at this till trying supervisor PINs — and
+        the thing that makes it evidence is the sequence, which only exists
+        locally. Pushing each one individually would also hand an attacker a
+        way to fill the outbox from the login screen.
+
+        `approver_id` is null when the code matched nobody this terminal knows,
+        which is itself worth recording: a series of refusals naming employee
+        codes that do not exist reads very differently from a supervisor
+        fumbling their own PIN.
+        """
+        audit_id = new_id()
+        with self.db.write() as conn:
+            conn.execute(
+                """
+                INSERT INTO audit_log (
+                    id, store_id, actor_id, approver_id, action, entity,
+                    entity_id, after_json, occurred_at
+                ) VALUES (?, ?, ?, ?, ?, 'permission', NULL, ?, ?)
+                """,
+                (
+                    audit_id,
+                    store_id,
+                    actor_id,
+                    approver_id,
+                    OVERRIDE_REFUSED,
+                    json.dumps(
+                        {
+                            "permission": permission,
+                            "actor_code": actor_code,
+                            "approver_code": approver_code,
+                            "reason": reason,
+                        }
+                    ),
+                    occurred_at.isoformat(),
+                ),
+            )
+        return audit_id
+
+    def refusals(self, limit: int = 100) -> list[dict[str, object]]:
+        """Refused authorisations on this terminal, newest first."""
+        rows = self.db.query(
+            "SELECT * FROM audit_log WHERE action = ? "
+            "ORDER BY occurred_at DESC LIMIT ?",
+            (OVERRIDE_REFUSED, limit),
+        )
+        return [dict(row) for row in rows]
 
     def _next_client_seq(self, conn: sqlite3.Connection) -> int:
         """Per-terminal ordering (§9.2), from the counter everything shares.

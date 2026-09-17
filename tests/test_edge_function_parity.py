@@ -27,6 +27,7 @@ from pathlib import Path
 import pytest
 
 from app.config import get_settings
+from app.domain import lockout
 from app.domain.identity import OVERRIDE_GRANT_TTL, SNAPSHOT_TTL
 
 FUNCTIONS_DIR = Path(__file__).resolve().parent.parent / "supabase" / "functions"
@@ -133,3 +134,54 @@ def test_no_function_hardcodes_a_service_role_key() -> None:
         assert not re.search(r'["\']eyJ[A-Za-z0-9_-]{20,}', source), (
             f"{name}/index.ts appears to contain a literal JWT"
         )
+
+
+# ── The throttles are not the same number, and that is the point ────────────
+
+
+def test_the_cloud_still_rate_limits_at_all() -> None:
+    """The local lockout was built because this existed and had no counterpart.
+
+    If `authenticate-pin` ever stops rate-limiting, the reasoning in
+    `app/domain/lockout.py` is out of date and the asymmetry has flipped: the
+    terminal would be the only throttled path. Worth failing over rather than
+    discovering later.
+    """
+    source = edge_sources()["authenticate-pin"]
+
+    attempts = re.search(r"const\s+MAX_ATTEMPTS\s*=\s*(\d+)", source)
+    window = re.search(r"const\s+WINDOW_MS\s*=\s*([\d\s*]+);", source)
+
+    assert attempts, "authenticate-pin no longer declares MAX_ATTEMPTS"
+    assert window, "authenticate-pin no longer declares WINDOW_MS"
+    assert int(attempts.group(1)) > 0
+    assert eval(window.group(1).strip(), {"__builtins__": {}}) > 0
+
+
+def test_the_local_throttle_is_at_least_as_strict_as_the_cloud() -> None:
+    """The one comparison worth asserting between the two.
+
+    They are deliberately different shapes — the cloud's is a rolling window
+    in a `Map`, which is right for a function that restarts and wrong for a
+    terminal an attacker can restart at will. So this is not a parity test of
+    equal constants; it is the invariant that makes the pair defensible.
+
+    The cloud allows MAX_ATTEMPTS per WINDOW_MS, sustained, for ever. The
+    terminal must never be looser than that, or the offline path becomes the
+    cheaper way in — which is exactly the state this slice found.
+    """
+    source = edge_sources()["authenticate-pin"]
+    attempts = int(re.search(r"const\s+MAX_ATTEMPTS\s*=\s*(\d+)", source).group(1))
+    window_ms = eval(
+        re.search(r"const\s+WINDOW_MS\s*=\s*([\d\s*]+);", source).group(1).strip(),
+        {"__builtins__": {}},
+    )
+
+    cloud_per_hour = attempts * (3_600_000 / window_ms)
+    local_per_hour = lockout.guesses_per_hour()
+
+    assert local_per_hour <= cloud_per_hour, (
+        f"the terminal allows {local_per_hour:.0f} guesses/hour and the cloud "
+        f"allows {cloud_per_hour:.0f}. Offline is now the cheaper way to guess "
+        "a supervisor's PIN, which is the asymmetry this lockout exists to end."
+    )

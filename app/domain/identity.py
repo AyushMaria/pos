@@ -10,6 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 
+from app.domain import lockout
 from app.domain.permissions import has
 
 # A dismissed employee can open the till for at most this long before one
@@ -121,9 +122,19 @@ class CachedIdentity:
     permissions: frozenset[str]
     snapshot_signed_at: datetime
     snapshot_expires_at: datetime
+    #: Wrong PINs in a row. Reset by a correct one, not by time — see
+    #: `app/domain/lockout.py` for why a rolling window is the wrong shape
+    #: offline.
+    consecutive_pin_failures: int = 0
+    #: When the lock lifts. None means not locked; a value in the past means
+    #: the same thing, because nothing clears it on a timer.
+    pin_locked_until: datetime | None = None
 
     def is_usable(self, *, now: datetime) -> bool:
         return self.status == "active" and now < self.snapshot_expires_at
+
+    def is_locked(self, *, now: datetime) -> bool:
+        return lockout.is_locked(self.pin_locked_until, now=now)
 
     def to_session(self, *, now: datetime) -> Session:
         if self.status != "active":
