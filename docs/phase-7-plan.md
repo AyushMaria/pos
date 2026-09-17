@@ -522,3 +522,64 @@ The audit row remains the part worth not getting wrong. An override that
 leaves no trail launders an escalation into ordinary work, and the whole
 reason the sale path is safe to override is that what reaches the cloud looks
 ordinary.
+
+---
+
+## The house rule, found in slice 3 and worth keeping
+
+*17 September 2026.*
+
+Three bugs in one commit, and each answer was already in the repository —
+forty lines up in the file being copied from, or two migrations back. The
+diagnosis is not distance between layers. It is **distance between the file
+being edited and the file being referenced**: the authoring context drifts
+from the reference context, and everything each one says stays locally true.
+
+- `audit_log.entity_id` is a `uuid`. `0010` exists because that exact column
+  was once missing that exact cast.
+- `on conflict` cannot be used on `audit_log` by the cashier writing the row,
+  because detecting a conflict is a read and `audit_log_select` wants
+  `user.manage`. The sale branch handles it with `exception when
+  unique_violation` and says why — "same meaning as do nothing, reached
+  without a read" — forty lines above where the new branch went.
+- The writer cannot read back what it wrote, for the same reason.
+
+**The rule: when the new thing is an extension of an existing thing, do not
+copy it into a new buffer. Generate it from the original and assert what
+carried over.**
+
+`0022` was derived from `0014` by script and asserts all four original
+branches survived. `sync_push` has now been rewritten four times — 0008, 0010,
+0014, 0022 — and every rewrite carries the whole function, so every rewrite is
+a chance to silently drop a branch. Retyping it is the risk; the script is the
+countermeasure, and `scripts/` is where the next one belongs if there is a
+fifth.
+
+The same rule covers whitelists. `SUPPORTED_ENTITIES` was declared and then
+cross-checked against the builder table on every call, and a test reads the
+migration to confirm the other side accepts everything this side can queue.
+What made the old list look complete was that nothing ever asked it whether it
+was — the same "found nothing needs a positive control" from slice 2, pointed
+at a whitelist instead of a search.
+
+### Two questions answered before the Edge Function
+
+**A 422 echoed the submitted PIN.** FastAPI's default handler puts the
+offending value in `input`, so a PIN one character short came back in the
+response body of `/auth/login`. Nothing read it and nothing logged it — the UI
+only looks at `detail` when it is a string, and uvicorn runs `access_log=False`
+— which is the absence of a mistake rather than a defence against one, with a
+diagnostics screen that reads log files due in phase 9. A handler now drops
+`input` for `SENSITIVE_FIELDS` and keeps the location and the reason, so a 422
+still says which field was wrong. Checked by deleting the handler: the PIN test
+goes red and the positive control, which asserts a *harmless* field is still
+echoed, stays green.
+
+**The Edge Function directory had one duplicated constant with no parity
+test.** `SNAPSHOT_TTL_DAYS = 14` in `authenticate-pin`, independent of
+`SNAPSHOT_TTL` in `identity.py`; the argon2 parameters beside it have one and
+the file says so. `tests/test_edge_function_parity.py` now scans *every*
+`supabase/functions/*/index.ts` rather than a named file, so
+`authorize-override` is covered the day it lands rather than the day somebody
+remembers. Checked twice: drifting the value to 30 fails, and renaming the
+constant — which would otherwise silence the check — fails too.

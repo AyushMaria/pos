@@ -162,3 +162,66 @@ def test_the_websocket_refuses_a_foreign_origin(client: TestClient) -> None:
         pass
 
     assert refused.value.code == 1008
+
+
+# ── A 422 must not hand back what was sent ──────────────────────────────────
+
+
+def test_a_rejected_pin_does_not_come_back_in_the_body(client: TestClient) -> None:
+    """FastAPI's default handler echoes the offending value in `input`.
+
+    A PIN one character short came straight back in the response body. Nothing
+    read it — the UI only looks at `detail` when it is a string, and a 422's is
+    a list — and nothing logged it, because uvicorn runs with
+    `access_log=False`. That is the absence of a mistake rather than a defence
+    against one, and phase 9 adds a diagnostics screen that reads log files.
+    """
+    for bad in ("12", "9137428856310", 4913):
+        response = client.post(
+            "/auth/login", json={"employee_code": "C001", "pin": bad}
+        )
+        assert response.status_code == 422, bad
+        assert str(bad) not in response.text, (
+            f"the submitted PIN {bad!r} came back in the 422 body:\n{response.text}"
+        )
+
+
+def test_the_422_still_says_which_field_and_why(client: TestClient) -> None:
+    """Redaction that removes the diagnosis is a different bug.
+
+    The location and the reason survive; only the value goes. Without this a
+    handler that returned `{"detail": []}` would pass the test above.
+    """
+    response = client.post("/auth/login", json={"employee_code": "C001", "pin": "12"})
+    detail = response.json()["detail"]
+
+    assert detail, "the 422 says nothing at all"
+    assert detail[0]["loc"] == ["body", "pin"]
+    assert "at least 4" in detail[0]["msg"]
+    assert "input" not in detail[0]
+
+
+def test_a_harmless_field_is_still_echoed(client: TestClient) -> None:
+    """The positive control.
+
+    Everything above would also pass if the handler stripped `input` from every
+    error, which would be a blunter change than intended and would quietly make
+    every other 422 in the application harder to read. `employee_code` is not
+    sensitive, so its value must still come back.
+    """
+    response = client.post("/auth/login", json={"employee_code": "", "pin": "4913"})
+    detail = response.json()["detail"]
+
+    offending = [error for error in detail if error["loc"] == ["body", "employee_code"]]
+    assert offending, detail
+    assert "input" in offending[0], (
+        "non-sensitive inputs are being stripped too — the redaction is wider "
+        "than SENSITIVE_FIELDS says"
+    )
+
+
+def test_the_sensitive_set_is_matched_case_insensitively() -> None:
+    from app.api.server import SENSITIVE_FIELDS
+
+    assert SENSITIVE_FIELDS == {field.lower() for field in SENSITIVE_FIELDS}
+    assert "pin" in SENSITIVE_FIELDS

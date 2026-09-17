@@ -13,8 +13,10 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
-from fastapi.responses import HTMLResponse
+from fastapi import FastAPI, Request
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from app import __version__
@@ -53,6 +55,13 @@ from app.sync.puller import Puller
 from app.sync.pusher import Pusher
 
 log = logging.getLogger(__name__)
+
+#: Body fields whose submitted value must never come back in an error.
+#:
+#: A 422 still names the field and says what was wrong with it; only the value
+#: is dropped. Matched case-insensitively against every part of the error's
+#: `loc`, so a nested `{"credentials": {"pin": ...}}` is covered too.
+SENSITIVE_FIELDS = frozenset({"pin", "password", "secret", "token", "refresh_token"})
 
 UI_DIR = Path(__file__).resolve().parent.parent / "ui"
 
@@ -156,6 +165,43 @@ def build_app(
         settings=settings,
         audit=audit,
     )
+
+    @app.exception_handler(RequestValidationError)
+    async def _validation_error(
+        request: Request, exc: RequestValidationError
+    ) -> JSONResponse:
+        """422 without handing back what was sent.
+
+        FastAPI's default handler puts the offending value in `input`, so a
+        PIN one character short comes straight back in the response body:
+
+            {"type": "string_too_short", "loc": ["body", "pin"],
+             "input": "123", ...}
+
+        Nothing reads it today — the UI only looks at `detail` when it is a
+        string, and a 422's is a list — and nothing logs it, because uvicorn
+        runs with `access_log=False`. That is the absence of a mistake rather
+        than a defence against one, and phase 9 adds a diagnostics screen that
+        reads log files.
+
+        Written now because `/overrides/authorize` is about to become the
+        second route that takes a PIN, and a supervisor's PIN is the credential
+        most likely to be typed over somebody's shoulder and reused. One route
+        with this exposure is a thing to fix; two is a pattern.
+
+        The location and the reason survive, so a 422 still says which field
+        was wrong and why. Only the value goes.
+        """
+        errors = []
+        for error in exc.errors():
+            scrubbed = dict(error)
+            if any(str(part).lower() in SENSITIVE_FIELDS for part in error.get("loc", ())):
+                scrubbed.pop("input", None)
+            # `ctx` can carry the value back for some error types, and is only
+            # ever bounds and patterns for the rest.
+            scrubbed.pop("url", None)
+            errors.append(jsonable_encoder(scrubbed))
+        return JSONResponse(status_code=422, content={"detail": errors})
 
     # Order matters: the outermost middleware runs first, so a request from a
     # forged host is rejected before the token is even looked at.
