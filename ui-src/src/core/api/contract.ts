@@ -61,6 +61,30 @@ export interface AttestRequest {
   /** The UTR. With a static QR this is the only identifier the bank statement and this sale have in common — worth capturing. */
   reference?: string | null;
 }
+/** One audited act, named by the two people who could have been involved.
+
+`approver_code` is set only for an override. It is the field the whole
+audit log exists for: an escalation that names one person reads as
+ordinary work. */
+export interface AuditEntryOut {
+  id: string;
+  action: string;
+  entity?: string | null;
+  entity_id?: string | null;
+  store_id?: string | null;
+  occurred_at: string;
+  actor_code?: string | null;
+  actor_name?: string | null;
+  approver_code?: string | null;
+  approver_name?: string | null;
+  before?: unknown | null;
+  after?: unknown | null;
+}
+export interface AuditLogResponse {
+  entries: AuditEntryOut[];
+  /** Every action present in this store's log, for the filter */
+  actions?: string[];
+}
 export interface BarcodeAddRequest {
   barcode: string;
   pack_size?: number;

@@ -3,6 +3,7 @@ import { admin } from "../../core/api/admin";
 import { ApiError } from "../../core/api/client";
 import { catalog } from "../../core/api/register";
 import type {
+  AuditEntryOut,
   AdminBarcodeOut,
   AdminProductOut,
   LowStockOut,
@@ -33,9 +34,13 @@ const TABS: { id: Tab; label: string; permission: Permission }[] = [
   { id: "catalogue", label: "Catalogue", permission: "product.read" },
   { id: "queue", label: "Unknown scans", permission: "product.edit" },
   { id: "low", label: "Low stock", permission: "product.read" },
+  // The only control in this application behind `user.manage`, and the
+  // only read-only one here. A cashier never sees the tab; the router
+  // refuses the request; RLS refuses the read (§11.1).
+  { id: "audit", label: "Audit log", permission: "user.manage" },
 ];
 
-type Tab = "catalogue" | "queue" | "low";
+type Tab = "catalogue" | "queue" | "low" | "audit";
 
 const rupees = (paise: number) => (paise / 100).toFixed(2);
 const paise = (typed: string) => Math.round(Number(typed) * 100);
@@ -188,6 +193,7 @@ export function AdminScreen({
       )}
       {tab === "queue" && <QueueTab session={session} />}
       {tab === "low" && <LowStockTab />}
+      {tab === "audit" && <AuditTab />}
     </div>
   );
 }
@@ -1054,6 +1060,161 @@ function QueueTab({ session }: { session: SessionResponse }) {
       </ul>
     </section>
   );
+}
+
+// ── The audit log ─────────────────────────────────────────────────────────
+
+/**
+ * Who did that — architecture §11.5, and the first screen whose whole job is
+ * to answer that question.
+ *
+ * **A missing name is never a blank cell.** The log has three honest reasons
+ * for one and they mean different things: a seeded row has no actor at all; an
+ * actor whose roles are in another store is somebody this manager may not see,
+ * because `employees_select_self_or_manager` says so and the embed comes back
+ * empty rather than failing; and `approver` is null on everything that was not
+ * an override. Rendering all three as an empty cell is how somebody ends up
+ * filing a bug against the data.
+ */
+function AuditTab() {
+  const [entries, setEntries] = useState<AuditEntryOut[]>([]);
+  const [actions, setActions] = useState<string[]>([]);
+  const [action, setAction] = useState("");
+  const [since, setSince] = useState("");
+  const [until, setUntil] = useState("");
+  const { busy, error, offline, run } = useCloudCall();
+
+  const load = useCallback(async () => {
+    const body = await run(() =>
+      admin.audit({
+        action: action || undefined,
+        since: since || undefined,
+        until: until || undefined,
+      }),
+    );
+    if (body) {
+      setEntries(body.entries);
+      // Only ever replaced from a successful read, so a filtered view does
+      // not narrow the menu it was chosen from. The field is optional in
+      // the contract because an older service could omit it; an absent
+      // list is not the same as an empty one and must not wipe the menu.
+      if (body.actions) setActions(body.actions);
+    }
+  }, [run, action, since, until]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  return (
+    <section className="pane">
+      <CloudNotice offline={offline} error={error} />
+      <div className="filters">
+        <label htmlFor="audit-from">From</label>
+        <input
+          id="audit-from"
+          type="date"
+          value={since}
+          onChange={(event) => setSince(event.target.value)}
+        />
+        <label htmlFor="audit-to">To</label>
+        <input
+          id="audit-to"
+          type="date"
+          value={until}
+          onChange={(event) => setUntil(event.target.value)}
+        />
+        <label htmlFor="audit-action">Action</label>
+        <select
+          id="audit-action"
+          value={action}
+          onChange={(event) => setAction(event.target.value)}
+        >
+          <option value="">Everything</option>
+          {actions.map((name) => (
+            <option key={name} value={name}>
+              {name}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      <table className="grid">
+        <thead>
+          <tr>
+            <th>When</th>
+            <th>Action</th>
+            <th>Who</th>
+            <th>Authorised by</th>
+            <th>What</th>
+          </tr>
+        </thead>
+        <tbody>
+          {entries.map((entry) => (
+            <tr key={entry.id}>
+              <td>{new Date(entry.occurred_at).toLocaleString()}</td>
+              <td>{entry.action}</td>
+              <td><Who code={entry.actor_code} name={entry.actor_name} /></td>
+              <td>
+                {entry.approver_code || entry.approver_name ? (
+                  <Who code={entry.approver_code} name={entry.approver_name} />
+                ) : (
+                  // Not an override. Most rows are not, so this must read as
+                  // ordinary rather than as missing data.
+                  <span className="muted">—</span>
+                )}
+              </td>
+              <td className="what">{describe(entry)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+
+      {entries.length === 0 && !busy && !offline && (
+        <p className="muted">
+          Nothing in the log for those dates. An empty log and a refused one
+          look different: this one was read.
+        </p>
+      )}
+    </section>
+  );
+}
+
+/** A person, or the honest reason there is no name. */
+function Who({
+  code,
+  name,
+}: {
+  code?: string | null;
+  name?: string | null;
+}) {
+  if (name && code) {
+    return (
+      <>
+        {name} <span className="muted">({code})</span>
+      </>
+    );
+  }
+  if (code) return <>{code}</>;
+  // The embed came back empty. Either nobody did this — seeding, a trigger —
+  // or the person works in another store and this manager may not read their
+  // row. Both are facts about the log rather than gaps in it.
+  return <span className="muted">Not recorded</span>;
+}
+
+/** The one-line summary, from whichever half of the row carries it. */
+function describe(entry: AuditEntryOut): string {
+  // `after_json` is jsonb: anything, or nothing. Typed as unknown values and
+  // narrowed, rather than asserted into a shape the database never promised.
+  const after = (entry.after ?? {}) as Record<string, unknown>;
+  if (typeof after.permission === "string") return after.permission;
+  if (typeof after.resolution === "string") return after.resolution;
+  if ("resolution" in after && after.resolution === null) {
+    // Closed before 0021 existed, so nobody recorded which way. Saying so is
+    // better than an empty cell that looks like a rendering bug.
+    return "closed before outcomes were recorded";
+  }
+  return entry.entity ?? "";
 }
 
 // ── Low stock ─────────────────────────────────────────────────────────────

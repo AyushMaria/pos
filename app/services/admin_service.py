@@ -226,6 +226,48 @@ def _low_stock(row: dict[str, Any]) -> LowStockRow:
     )
 
 
+@dataclass(frozen=True)
+class AuditEntry:
+    """One row of the log, as a person reads it.
+
+    `actor_code` and `approver_code` are optional because the log has two
+    honest reasons for a missing name, and a screen that shows an empty cell
+    for either of them invites somebody to file a bug against the data.
+    """
+
+    id: str
+    action: str
+    entity: str | None
+    entity_id: str | None
+    store_id: str | None
+    occurred_at: str
+    actor_code: str | None
+    actor_name: str | None
+    approver_code: str | None
+    approver_name: str | None
+    before: Any
+    after: Any
+
+
+def _audit_entry(row: dict[str, Any]) -> AuditEntry:
+    actor = row.get("actor") or {}
+    approver = row.get("approver") or {}
+    return AuditEntry(
+        id=row["id"],
+        action=row["action"],
+        entity=row.get("entity"),
+        entity_id=row.get("entity_id"),
+        store_id=row.get("store_id"),
+        occurred_at=row["occurred_at"],
+        actor_code=actor.get("employee_code"),
+        actor_name=actor.get("full_name"),
+        approver_code=approver.get("employee_code"),
+        approver_name=approver.get("full_name"),
+        before=row.get("before_json"),
+        after=row.get("after_json"),
+    )
+
+
 class AdminService:
     def __init__(
         self,
@@ -553,6 +595,82 @@ class AdminService:
         return _stock_level(rows[0]) if rows else None
 
     # ── The unknown-scan queue ────────────────────────────────────────────
+
+    # ── The audit log ─────────────────────────────────────────────────────
+
+    async def audit_log(
+        self,
+        *,
+        store_id: str,
+        since: str | None = None,
+        until: str | None = None,
+        action: str | None = None,
+        entity_id: str | None = None,
+        limit: int = 100,
+    ) -> list[AuditEntry]:
+        """Who did that — architecture §11.5.
+
+        Read under the caller's own token like every other admin call, so
+        `audit_log_select` decides. It wants `user.manage`, which is the same
+        key that lets `employees_select_self_or_manager` return somebody
+        else's name — so anybody who can read this log can read the names in
+        it, and the embed below is not a second permission in disguise.
+
+        Rows with `store_id is null` are included deliberately: 0019 widened
+        the policy for exactly those, because a catalogue edit belongs to no
+        store and an audit nobody can read is not an audit.
+
+        The actor embed can still come back null, and the screen must not
+        render that as an empty cell. Two real causes: a row written by
+        seeding, which has no actor at all, and an actor whose roles are in
+        another store, whom this caller genuinely may not see. "System" and
+        "someone outside this store" are different sentences and neither is a
+        blank.
+        """
+        params: dict[str, Any] = {
+            "select": (
+                "id,store_id,action,entity,entity_id,before_json,after_json,"
+                "occurred_at,server_received_at,"
+                "actor:employees!audit_log_actor_id_fkey(employee_code,full_name),"
+                "approver:employees!audit_log_approver_id_fkey(employee_code,full_name)"
+            ),
+            "or": f"(store_id.eq.{store_id},store_id.is.null)",
+            "order": "occurred_at.desc",
+            "limit": str(min(limit, 500)),
+        }
+        if since:
+            params["occurred_at"] = f"gte.{since}"
+        if until:
+            # PostgREST takes one value per column, so a range needs the
+            # second bound under `and`.
+            params["and"] = f"(occurred_at.lte.{until})"
+        if action:
+            params["action"] = f"eq.{action}"
+        if entity_id:
+            params["entity_id"] = f"eq.{entity_id}"
+
+        rows = await self._send("GET", "audit_log", params=params)
+        return [_audit_entry(row) for row in rows]
+
+    async def audit_actions(self, *, store_id: str) -> list[str]:
+        """Every action that actually appears, for the filter.
+
+        Read from the data rather than from a list of constants. A hardcoded
+        menu would drift the moment somebody adds an action, and would offer
+        filters that return nothing — which reads as a broken screen rather
+        than an empty shop.
+        """
+        rows = await self._send(
+            "GET",
+            "audit_log",
+            params={
+                "select": "action",
+                "or": f"(store_id.eq.{store_id},store_id.is.null)",
+                "order": "action.asc",
+                "limit": "1000",
+            },
+        )
+        return sorted({row["action"] for row in rows if row.get("action")})
 
     async def unknown_scans(
         self, store_id: str, *, resolved: bool = False, limit: int = 100

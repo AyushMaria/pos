@@ -4,6 +4,7 @@ import type {
   AdminPriceOut,
   AdminProductOut,
   AdminProductsResponse,
+  AuditLogResponse,
   BarcodeAddRequest,
   BarcodesResponse,
   LowStockResponse,
@@ -81,6 +82,28 @@ export const admin = {
       method: "PUT",
       body: JSON.stringify(body),
     }),
+
+  /**
+   * The audit log — who did that, and who authorised it.
+   *
+   * Read-only and gated on `user.manage`, which this is the only caller of.
+   * `actions` comes back with the entries so the filter offers what the log
+   * actually contains rather than a menu of constants that can go stale.
+   */
+  audit: (filters: {
+    since?: string;
+    until?: string;
+    action?: string;
+    entityId?: string;
+  } = {}) => {
+    const query = new URLSearchParams();
+    if (filters.since) query.set("since", filters.since);
+    if (filters.until) query.set("until", filters.until);
+    if (filters.action) query.set("action", filters.action);
+    if (filters.entityId) query.set("entity_id", filters.entityId);
+    const suffix = query.toString();
+    return request<AuditLogResponse>(`/admin/audit${suffix ? `?${suffix}` : ""}`);
+  },
 
   unknownScans: (resolved = false) =>
     request<UnknownScansResponse>(`/admin/unknown-scans?resolved=${resolved}`),

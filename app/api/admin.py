@@ -28,6 +28,8 @@ from app.api.schemas import (
     AdminPriceOut,
     AdminProductOut,
     AdminProductsResponse,
+    AuditEntryOut,
+    AuditLogResponse,
     BarcodeAddRequest,
     BarcodesResponse,
     LowStockOut,
@@ -64,6 +66,10 @@ Admin = Annotated[AdminService, Depends(get_admin_service)]
 CanRead = Annotated[Session, Depends(require(permissions.PRODUCT_READ))]
 CanCreate = Annotated[Session, Depends(require(permissions.PRODUCT_CREATE))]
 CanEdit = Annotated[Session, Depends(require(permissions.PRODUCT_EDIT))]
+#: `user.manage` gates exactly one thing today, and it is read-only: the
+#: audit log. The key has existed since §11.1 with no route behind it,
+#: which `NO_API_SURFACE` has recorded as a hole rather than a decision.
+CanReadAudit = Annotated[Session, Depends(require(permissions.USER_MANAGE))]
 
 
 def _offline(exc: AdminUnavailable) -> HTTPException:
@@ -306,6 +312,68 @@ async def set_price(
     except AdminRejected as exc:
         raise _refused(exc) from exc
     return _price_out(price)
+
+
+# ── The audit log ─────────────────────────────────────────────────────────
+
+
+@router.get("/audit", response_model=AuditLogResponse)
+async def audit_log(
+    admin: Admin,
+    session: CanReadAudit,
+    since: str | None = Query(default=None),
+    until: str | None = Query(default=None),
+    action: str | None = Query(default=None),
+    entity_id: str | None = Query(default=None),
+    limit: int = Query(default=100, ge=1, le=500),
+) -> AuditLogResponse:
+    """The first screen whose whole job is to answer "who did that?".
+
+    Read-only, and read under the caller's own token: `audit_log_select` wants
+    `user.manage` and does the deciding. `require()` here is the second of the
+    three enforcement points — it makes the refusal a 403 with a sentence
+    instead of an empty list from PostgREST, which is the difference between
+    "you may not" and "nothing happened".
+
+    The actions list comes back with the entries so the filter offers what the
+    log actually contains. A menu of constants would offer filters that return
+    nothing, which reads as a broken screen rather than a quiet shop.
+    """
+    try:
+        entries = await admin.audit_log(
+            store_id=session.store_id,
+            since=since,
+            until=until,
+            action=action,
+            entity_id=entity_id,
+            limit=limit,
+        )
+        actions = await admin.audit_actions(store_id=session.store_id)
+    except AdminUnavailable as exc:
+        raise _offline(exc) from exc
+    except AdminRejected as exc:
+        raise _refused(exc) from exc
+
+    return AuditLogResponse(
+        entries=[
+            AuditEntryOut(
+                id=entry.id,
+                action=entry.action,
+                entity=entry.entity,
+                entity_id=entry.entity_id,
+                store_id=entry.store_id,
+                occurred_at=entry.occurred_at,
+                actor_code=entry.actor_code,
+                actor_name=entry.actor_name,
+                approver_code=entry.approver_code,
+                approver_name=entry.approver_name,
+                before=entry.before,
+                after=entry.after,
+            )
+            for entry in entries
+        ],
+        actions=actions,
+    )
 
 
 # ── The unknown-scan queue ────────────────────────────────────────────────

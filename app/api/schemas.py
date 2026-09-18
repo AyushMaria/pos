@@ -572,6 +572,36 @@ class UnknownScanOut(ApiModel):
     resolution: str | None = None
 
 
+class AuditEntryOut(ApiModel):
+    """One audited act, named by the two people who could have been involved.
+
+    `approver_code` is set only for an override. It is the field the whole
+    audit log exists for: an escalation that names one person reads as
+    ordinary work.
+    """
+
+    id: str
+    action: str
+    entity: str | None = None
+    entity_id: str | None = None
+    store_id: str | None = None
+    occurred_at: datetime
+    actor_code: str | None = None
+    actor_name: str | None = None
+    approver_code: str | None = None
+    approver_name: str | None = None
+    before: dict | None = None
+    after: dict | None = None
+
+
+class AuditLogResponse(ApiModel):
+    entries: list[AuditEntryOut]
+    actions: list[str] = Field(
+        default_factory=list,
+        description="Every action present in this store's log, for the filter",
+    )
+
+
 class UnknownScansResponse(ApiModel):
     scans: list[UnknownScanOut]
 

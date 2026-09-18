@@ -165,11 +165,15 @@ PROBES: dict[str, Probe] = {
     perms.SALE_REVIEW_RESOLVE: Probe("GET", "/register/reviews"),
     perms.REPORT_MARGIN: Probe("GET", "/reports/margin"),
     perms.REPORT_SALES_STORE: Probe("GET", "/sync/failures"),
+    # Cloud-direct, so a role that holds the key reaches Supabase and gets a
+    # 503 on a terminal with no project configured. That counts as admitted:
+    # the guard let it through to the part that had an opinion.
+    perms.USER_MANAGE: Probe("GET", "/admin/audit"),
 }
 
 #: Permission keys with no route behind them yet.
 #:
-#: **This is the work order, not permission.** Eight of the twenty keys in
+#: **This is the work order, not permission.** Seven of the twenty keys in
 #: §11.1 gate nothing at the API layer, because the acts they describe have
 #: not been built. Four of them are slice 3's: a void, a refund, an unlimited
 #: discount and a price override are exactly the permissions a supervisor
@@ -179,8 +183,12 @@ PROBES: dict[str, Probe] = {
 #: something to authorise. It is the first act in the application a cashier
 #: can only perform by being lent the key, which is what made the rest of the
 #: flow testable end to end rather than in pieces. `cash.payout` and
-#: `shift.close` wait on a cash-drawer screen; `user.manage` gets its first
-#: read-only surface in slice 5; `settings.manage` has no screen at all.
+#: `shift.close` wait on a cash-drawer screen; `settings.manage` has no
+#: screen at all.
+#:
+#: `user.manage` left in slice 5, gating `GET /admin/audit` — the first
+#: screen whose whole job is to answer "who did that?", and the first use
+#: of a key that had sat in §11.1 since phase 1 with nothing behind it.
 #:
 #: A key may only leave this set. Adding one means writing down that the
 #: matrix has grown a hole, which should be harder than fixing it.
@@ -192,7 +200,6 @@ NO_API_SURFACE: frozenset[str] = frozenset(
         perms.PRICE_OVERRIDE,
         perms.CASH_PAYOUT,
         perms.SHIFT_CLOSE,
-        perms.USER_MANAGE,
         perms.SETTINGS_MANAGE,
     }
 )
