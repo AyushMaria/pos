@@ -15,7 +15,13 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 
-from app.api.deps import CurrentSession, get_cart_service, get_sale_service, require
+from app.api.deps import (
+    CurrentSession,
+    StartOfSale,
+    get_cart_service,
+    get_sale_service,
+    require,
+)
 from app.api.schemas import (
     AddLineRequest,
     AttemptOut,
@@ -158,6 +164,10 @@ def _to_attempt_out(attempt: PaymentAttempt) -> AttemptOut:
 @router.post("/carts", response_model=CartOut, status_code=status.HTTP_201_CREATED)
 def open_cart(
     session: Annotated[Session, Depends(require(permissions.SALE_CREATE))],
+    # The one dependency that acts on a revocation. A new basket is where a
+    # deactivation lands, because the last one belonged to a customer who was
+    # standing there.
+    _start: StartOfSale,
     carts: CartSvc,
 ) -> CartOut:
     return _to_cart_out(carts.open(session))

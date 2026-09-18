@@ -57,6 +57,7 @@ from app.sync.engine import SyncEngine
 from app.sync.payloads import PayloadBuilder
 from app.sync.puller import Puller
 from app.sync.pusher import Pusher
+from app.sync.revocations import RevocationChecker, RevocationSweep
 
 log = logging.getLogger(__name__)
 
@@ -140,6 +141,25 @@ def build_app(
 
     outbox = OutboxRepository(db)
     engine = _build_sync_engine(db, outbox, sessions, settings)
+    if engine is not None:
+        # Built here rather than inside `_build_sync_engine` because it needs
+        # the user repository and the session store, and the engine is
+        # deliberately ignorant of both: `app.sync` and `app.services` are
+        # independent siblings in the import contract, so the session crosses
+        # that line as two callables rather than as an import.
+        engine.revocations = RevocationSweep(
+            checker=RevocationChecker(
+                base_url=settings.supabase_url,
+                anon_key=settings.supabase_anon_key,
+                token_provider=lambda: sessions.access_token,
+                store_code=settings.store_code,
+            ),
+            users=users,
+            current_user_id=lambda: (
+                sessions.current.user_id if sessions.current else None
+            ),
+            on_self_revoked=sessions.mark_revoked,
+        )
 
     @asynccontextmanager
     async def lifespan(instance: FastAPI) -> AsyncIterator[None]:
@@ -149,6 +169,8 @@ def build_app(
         # never starts a background task, which is what keeps the suite quiet.
         if engine is not None:
             engine.publish = instance.state.events.broadcast
+            if engine.revocations is not None:
+                engine.revocations.publish = instance.state.events.broadcast
             engine.start()
         yield
         if engine is not None:

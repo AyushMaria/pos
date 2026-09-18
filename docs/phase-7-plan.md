@@ -1177,3 +1177,95 @@ expiry by hand, so they proved the comparison worked and nothing proved the
 value came from the verified row. Two tests now assert the provenance, one per
 transport. Same shape as everything else this phase: a control that reads a
 number, and nothing checking where the number came from.
+
+### The house rule, third instance: a vacuous pass wearing RLS
+
+Slice 2 found it in a walker that checked 1 of 46 operations and reported the
+other 45 as absent. Slice 3 found it in whitelists nothing asked to justify
+themselves. Slice 4 found it in a policy:
+
+> Adding `employees` to the puller's `ENTITIES` would have shipped green,
+> pulled one row, revoked the person whose deactivation was already handled at
+> next login, and missed every cached supervisor — the entire population
+> `cached_users` exists to hold. **A keyset pull returning one row is
+> indistinguishable from one that worked.**
+
+The general form: *any check whose passing state is "found nothing" needs a
+positive control* — and RLS is a new way to produce "found nothing" that has
+nothing to do with the code being wrong. The query is correct, the pagination
+is correct, the terminal is correctly authenticated, and the answer is one row
+because the database decided the caller may not see the rest.
+
+### And the same rule, turned on the tests
+
+The mutation that survived slice 4's first pass is the sharper version.
+Widening the expiry inside `to_session` changed nothing any test could see,
+because every test set the expiry by hand. The suite proved the *comparison*
+and never proved the *provenance* — and provenance was the entire point of
+sealing the row.
+
+**A test that constructs its own input cannot tell you where production gets
+one.** Worth saying separately from the positive-control rule, because a suite
+can be full of positive controls and still have this hole: all of them build
+their own fixtures.
+
+## Slice 4, built: `check-revocations`
+
+### What the function will not become
+
+* **It answers about ids the caller already has, and returns only the revoked
+  subset.** A status per id would make it an existence oracle: post any UUID,
+  learn whether it belongs to that shop. The response is a subset of the
+  input, so a caller learns which of its own rows to drop and nothing else.
+* **It verifies the caller's JWT**, and refuses the anon key explicitly — that
+  key is on every request this project makes and proves nothing. This is the
+  first place a cashier's token is exchanged for privileged reads, so the
+  exchange has to be earned. Unlike its two neighbours it keeps `--verify-jwt`
+  on, because they are called before anybody has a session and this one is not.
+* **It scopes to the caller's own store**, checked against `user_store_roles`
+  server-side rather than trusted from the body.
+
+### The open basket finishes
+
+The obvious implementation of "the till drops them" is to clear the session on
+`auth.revoked`. At a counter that means a customer with eleven items scanned
+watches the screen drop to a login prompt because somebody in an office
+processed a leaver at 11:40. Deactivation is almost never an emergency — a
+leaver, or a role change — and finishing the sale in front of you is nearly
+always right. "Revoke immediately" reads as the responsible choice and
+produces the irresponsible outcome.
+
+So `mark_revoked()` is a fact about the session, not a sign-out, and the
+refusal lands at `POST /register/carts` — the next sale. By then the cached
+row is already gone, so they cannot sign in again or authorise anything; what
+they can still do is take the money for the basket already on the screen.
+
+### Fail open, said where somebody will look
+
+An unreachable `check-revocations` purges nothing. A shop cannot be locked out
+of its own till by a network blip, and this runs on a background cycle where
+nobody is watching. The consequence is that **the sealed snapshot TTL becomes
+the only bound on a dismissed employee while this path is down** —
+load-bearing rather than belt-and-braces — and that sentence is at the call
+site in `app/sync/revocations.py` rather than only here, because a plan
+document is not what anybody opens during an incident.
+
+### Which layer refused, and a path that does not exist
+
+The acceptance step — "deactivate, sync, watch the till drop them" — passes on
+the local purge alone and says nothing about the server. The honest pair:
+
+* **The terminal refuses immediately.** The cached row is purged.
+* **The cloud refuses within the hour.** Permissions live in the JWT and the
+  TTL is an hour, so a revoked cashier's existing access token satisfies RLS
+  until it expires. Documented trade, not a gap.
+
+Found while writing the second of those: **nothing in this application calls
+`SupabaseAuthClient.refresh`, and `keychain.load_refresh_token` has no caller
+either.** The refresh token is written at login and never read. So "the server
+refuses at token refresh" describes a path that does not exist — the access
+token simply expires, every push gets a 401, the pusher correctly reads that
+as transient, and it retries for ever with a credential that can never work
+again. Nothing is lost, because the queue keeps everything; nothing leaves
+either, until somebody signs in again. Safe direction, wrong for how long, and
+the next thing worth fixing.

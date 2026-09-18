@@ -268,6 +268,16 @@ class CachedUserRepository(Repository):
             )
             self._reseal(conn, user_id)
 
+    def cached_user_ids(self) -> list[str]:
+        """Every identity this terminal remembers.
+
+        The input to a revocation check. Unsealed on purpose: this asks *which
+        rows exist*, not what they say, and a tampered row that is about to be
+        purged anyway should still be named rather than hidden by its own
+        broken seal.
+        """
+        return [r[0] for r in self._rows("SELECT user_id FROM cached_users")]
+
     def revoke(self, user_id: str) -> None:
         """Purge a snapshot after the server reports the user deactivated.
 

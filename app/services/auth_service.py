@@ -130,6 +130,9 @@ class SessionStore:
         self._lock = threading.Lock()
         self._session: Session | None = None
         self._access_token: str | None = None
+        #: Set when the cloud says the person signed in here no longer works
+        #: for this shop. Not a sign-out: see `mark_revoked`.
+        self._revoked = False
 
     @property
     def current(self) -> Session | None:
@@ -145,6 +148,32 @@ class SessionStore:
         with self._lock:
             self._session = None
             self._access_token = None
+            self._revoked = False
+
+    def mark_revoked(self) -> None:
+        """The person at this till has been deactivated in the cloud.
+
+        **Deliberately not `clear()`.** Signing them out here is the obvious
+        implementation and the wrong one: at a counter it means a customer
+        with eleven items scanned watches the screen drop to a login prompt
+        because somebody in an office processed a leaver at 11:40. A
+        deactivation is almost never an emergency — it is a leaver or a role
+        change — and finishing the sale in front of you is nearly always
+        right.
+
+        So this is a fact about the session, and the refusal lands at the next
+        sale rather than the current one. Their cached identity has already
+        been purged by then, so they cannot sign in again or authorise
+        anything; what they can still do is take the money for the basket that
+        is already on the screen.
+        """
+        with self._lock:
+            self._revoked = True
+
+    @property
+    def revoked(self) -> bool:
+        with self._lock:
+            return self._revoked
 
     @property
     def access_token(self) -> str | None:

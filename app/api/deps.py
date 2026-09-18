@@ -81,6 +81,34 @@ def current_session(
 CurrentSession = Annotated[Session, Depends(current_session)]
 
 
+def start_of_sale(
+    session: CurrentSession,
+    sessions: Annotated[SessionStore, Depends(get_session_store)],
+) -> Session:
+    """The one place a revocation takes effect, and it is a boundary.
+
+    Used only where a *new* sale begins. Everything else on the register keeps
+    working, because the basket already on the screen belongs to a customer
+    standing there and a leaver processed at 11:40 is not a reason to abandon
+    it (architecture §11.4).
+
+    Signing them out happens here rather than in the background, so the
+    message arrives when somebody is looking at the screen between customers
+    instead of mid-transaction.
+    """
+    if sessions.revoked:
+        sessions.clear()
+        raise HTTPException(
+            status.HTTP_401_UNAUTHORIZED,
+            "This account has been deactivated. The last sale was completed; "
+            "please sign in with another account.",
+        )
+    return session
+
+
+StartOfSale = Annotated[Session, Depends(start_of_sale)]
+
+
 def require(permission: str) -> Callable[..., Session]:
     """Dependency factory: reject the request unless the session may do this."""
 

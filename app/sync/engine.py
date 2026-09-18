@@ -28,6 +28,7 @@ from app.data.repositories.outbox import OutboxRepository
 from app.domain.identity import utcnow
 from app.sync.puller import Puller
 from app.sync.pusher import DrainResult, Pusher
+from app.sync.revocations import RevocationSweep
 
 log = logging.getLogger(__name__)
 
@@ -75,6 +76,9 @@ class SyncEngine:
     puller: Puller
     #: Called with the status dict after every cycle, so the UI hears about a
     #: backlog without polling for it.
+    #: Optional so a terminal with no cloud, and every test that builds an
+    #: engine to watch the outbox, keeps working unchanged.
+    revocations: RevocationSweep | None = None
     publish: Any = None
     status: SyncStatus = field(default_factory=SyncStatus)
     _task: asyncio.Task[None] | None = field(default=None, init=False)
@@ -123,8 +127,30 @@ class SyncEngine:
         result = await self._push()
         if not result.stopped_early:
             await self._pull()
+            await self._sweep_revocations()
         await self._refresh()
         return result
+
+    async def _sweep_revocations(self) -> None:
+        """Drop cached identities the cloud no longer recognises.
+
+        **Fails open, and the whole cycle is built that way.** Nothing here may
+        interrupt a sale, so an unreachable function is logged and forgotten —
+        which means the sealed snapshot TTL is the only thing bounding a
+        dismissed employee while this path is down. That is a load-bearing
+        role rather than a backstop, and `app/sync/revocations.py` says so at
+        the call it makes.
+
+        Deliberately after the pull rather than before: a terminal that cannot
+        reach Supabase to pull will not reach it to ask this either, and
+        putting it second keeps one failure from looking like two.
+        """
+        if self.revocations is None:
+            return
+        try:
+            await self.revocations.run()
+        except Exception as exc:  # pragma: no cover - defence in depth
+            log.warning("revocation sweep failed: %s", exc)
 
     async def _push(self) -> DrainResult:
         try:
