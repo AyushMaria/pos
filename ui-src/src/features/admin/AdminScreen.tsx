@@ -1154,10 +1154,20 @@ function AuditTab() {
             <tr key={entry.id}>
               <td>{new Date(entry.occurred_at).toLocaleString()}</td>
               <td>{entry.action}</td>
-              <td><Who code={entry.actor_code} name={entry.actor_name} /></td>
               <td>
-                {entry.approver_code || entry.approver_name ? (
-                  <Who code={entry.approver_code} name={entry.approver_name} />
+                <Who
+                  id={entry.actor_id}
+                  code={entry.actor_code}
+                  name={entry.actor_name}
+                />
+              </td>
+              <td>
+                {entry.approver_id ? (
+                  <Who
+                    id={entry.approver_id}
+                    code={entry.approver_code}
+                    name={entry.approver_name}
+                  />
                 ) : (
                   // Not an override. Most rows are not, so this must read as
                   // ordinary rather than as missing data.
@@ -1180,11 +1190,26 @@ function AuditTab() {
   );
 }
 
-/** A person, or the honest reason there is no name. */
+/**
+ * A person, or the honest reason there is no name — and the two reasons are
+ * not the same answer.
+ *
+ * `id` is what separates them. RLS does not refuse an embed it disallows, it
+ * omits it, so an actor in another store and an actor that never existed both
+ * arrive with `code` and `name` empty. The id is present in the first case
+ * and absent in the second.
+ *
+ * Saying "System" for both would end an investigation that had somewhere left
+ * to go: a manager reading it concludes a machine made the change. "Someone
+ * outside this store" names a person-shaped gap and points at the next step,
+ * which is to ask the owner, who can read that row.
+ */
 function Who({
+  id,
   code,
   name,
 }: {
+  id?: string | null;
   code?: string | null;
   name?: string | null;
 }) {
@@ -1196,10 +1221,15 @@ function Who({
     );
   }
   if (code) return <>{code}</>;
-  // The embed came back empty. Either nobody did this — seeding, a trigger —
-  // or the person works in another store and this manager may not read their
-  // row. Both are facts about the log rather than gaps in it.
-  return <span className="muted">Not recorded</span>;
+  if (id) {
+    return (
+      <span className="muted" title={id}>
+        Someone outside this store
+      </span>
+    );
+  }
+  // No id at all: nobody performed this. Seeding, or a trigger.
+  return <span className="muted">System</span>;
 }
 
 /** The one-line summary, from whichever half of the row carries it. */

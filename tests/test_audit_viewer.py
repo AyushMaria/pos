@@ -52,10 +52,41 @@ class FakePostgrest:
         )
 
     def handle(self, request: httpx.Request) -> httpx.Response:
+        """Reply, but only with the columns that were actually asked for.
+
+        Added after a mutation survived: deleting `actor_id` from the select
+        changed nothing, because this fake handed back whatever the test had
+        lined up regardless of the query. Real PostgREST returns the columns
+        in `select` and no others, so the test was asserting on a field the
+        service would never have received.
+
+        That is the rule this project wrote down two slices ago — *a test that
+        constructs its own input cannot tell you where production gets one* —
+        walked into by the fake rather than by the test. Projecting here makes
+        every assertion in this file about a payload PostgREST could produce.
+        """
         self.seen.append(request)
-        if self.replies:
-            return self.replies.pop(0)
-        return httpx.Response(200, json=[])
+        if not self.replies:
+            return httpx.Response(200, json=[])
+
+        reply = self.replies.pop(0)
+        selected = _selected(unquote(str(request.url)))
+        if selected is None:
+            return reply
+
+        body = json.loads(reply.content or b"[]")
+        if not isinstance(body, list):
+            return reply
+        projected = [
+            {key: value for key, value in row.items() if key in selected}
+            for row in body
+            if isinstance(row, dict)
+        ]
+        return httpx.Response(
+            reply.status_code,
+            content=json.dumps(projected).encode(),
+            headers={"Content-Type": "application/json"},
+        )
 
     @property
     def client(self) -> httpx.AsyncClient:
@@ -66,6 +97,36 @@ class FakePostgrest:
 
     def first_query(self) -> str:
         return unquote(str(self.seen[0].url))
+
+
+def _selected(url: str) -> set[str] | None:
+    """The top-level names a PostgREST `select` asks for.
+
+    `id,store_id,actor:employees!fk(employee_code,full_name)` selects `id`,
+    `store_id` and the embed named `actor`. Nested lists are skipped by depth,
+    not by regex, because a bracket inside an embed is not a separator.
+    """
+    if "select=" not in url:
+        return None
+    raw = url.split("select=", 1)[1].split("&", 1)[0]
+
+    names: set[str] = set()
+    depth = 0
+    current = ""
+    for character in raw:
+        if character == "(":
+            depth += 1
+        elif character == ")":
+            depth -= 1
+        elif character == "," and depth == 0:
+            names.add(current.split(":", 1)[0].split("(", 1)[0])
+            current = ""
+            continue
+        if depth == 0 and character not in "()":
+            current += character
+    if current:
+        names.add(current.split(":", 1)[0].split("(", 1)[0])
+    return {name for name in names if name}
 
 
 @pytest.fixture
@@ -86,6 +147,8 @@ def row(**overrides: Any) -> dict:
         "action": "override.granted",
         "entity": "sale",
         "entity_id": None,
+        "actor_id": "018f0000-0000-7000-8000-000000000001",
+        "approver_id": "018f0000-0000-7000-8000-000000000002",
         "before_json": None,
         "after_json": {"permission": "sale.discount.line"},
         "occurred_at": "2026-09-17T11:30:00+00:00",
@@ -119,32 +182,41 @@ async def test_an_override_names_the_cashier_and_the_supervisor(rest) -> None:
 
 
 @pytest.mark.asyncio
-async def test_a_row_with_no_actor_is_not_an_error(rest) -> None:
-    """Seeded rows have no actor. The screen must say so rather than show a gap."""
-    rest.will_return([row(actor=None, approver=None)])
+async def test_a_row_nobody_performed_has_no_actor_id(rest) -> None:
+    """Seeding, or a trigger. There is no person to name and no gap either."""
+    rest.will_return([row(actor_id=None, approver_id=None, actor=None, approver=None)])
 
     entries = await service(rest).audit_log(store_id=STORE)
 
+    assert entries[0].actor_id is None
     assert entries[0].actor_code is None
-    assert entries[0].actor_name is None
-    assert entries[0].approver_code is None
 
 
 @pytest.mark.asyncio
-async def test_an_actor_this_caller_cannot_see_reads_the_same_as_none(rest) -> None:
-    """The embed returns null rather than erroring, and that is the trap.
+async def test_an_unreadable_actor_is_a_person_not_the_system(rest) -> None:
+    """The distinction the select nearly failed to carry.
 
     `employees_select_self_or_manager` scopes to the caller's own store, so an
-    actor whose roles are elsewhere comes back as an absent embed — identical
-    in the payload to a row that never had an actor. The service cannot tell
-    them apart and does not pretend to; what matters is that neither becomes a
-    blank cell by accident.
+    actor whose roles are elsewhere comes back as an *absent embed* — RLS does
+    not refuse it, it omits it. Without `actor_id` in the select that is
+    byte-identical to a row nobody performed, and the screen would say
+    "System" for both.
+
+    It matters more than it sounds. A manager investigating a price change who
+    reads "System" concludes a machine did it and stops. "Someone outside this
+    store" names a person-shaped gap, and the next step is to ask the owner,
+    who can read that row. Conflating them turns a lead into a dead end, in
+    the one screen built to prevent exactly that.
     """
     rest.will_return([row(actor={}, approver={})])
 
     entries = await service(rest).audit_log(store_id=STORE)
 
-    assert entries[0].actor_code is None
+    assert entries[0].actor_code is None, "the name is genuinely unreadable"
+    assert entries[0].actor_id is not None, (
+        "a person did this and the row no longer says so — the query has "
+        "stopped carrying actor_id, and the screen will call them the system"
+    )
 
 
 # ── What is asked for ───────────────────────────────────────────────────────

@@ -335,6 +335,18 @@
             ],
             "title": "Actor Code"
           },
+          "actor_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Set whenever a person did this, even if their name cannot be read",
+            "title": "Actor Id"
+          },
           "actor_name": {
             "anyOf": [
               {
@@ -368,6 +380,17 @@
               }
             ],
             "title": "Approver Code"
+          },
+          "approver_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Approver Id"
           },
           "approver_name": {
             "anyOf": [

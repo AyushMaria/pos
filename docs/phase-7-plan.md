@@ -1269,3 +1269,33 @@ as transient, and it retries for ever with a credential that can never work
 again. Nothing is lost, because the queue keeps everything; nothing leaves
 either, until somebody signs in again. Safe direction, wrong for how long, and
 the next thing worth fixing.
+
+### Fifth instance, and the first inside a PostgREST embed
+
+`audit_log?select=...,actor:employees!fk(employee_code,full_name)` returns
+`actor: null` for a row nobody performed **and** for a row whose actor works in
+another store. RLS does not refuse an embed it disallows — it omits it — so
+"not there" and "not yours" arrive byte-identical.
+
+The fix is one column: select `actor_id` as well as the embed. No id means
+nobody did this; an id with no readable row means somebody did and this caller
+may not see who.
+
+**The second is the one the screen exists for.** A manager investigating a
+price change who reads "System" concludes a machine made the change and stops.
+"Someone outside this store" names a person-shaped gap and points at the next
+step — ask the owner, who can read that row. Conflating them turns a lead into
+a dead end, quietly, in the one screen built to prevent that.
+
+### The rule caught the fake this time
+
+The mutation for it — drop `actor_id` from the select, watch the test go red —
+**failed to fail.** `FakePostgrest` replied with whatever the test had lined up
+regardless of the query, so the test was asserting on a field the service
+would never have received.
+
+That is *a test that constructs its own input cannot tell you where production
+gets one*, written down two slices ago, arriving through the fake rather than
+the test. The fake now projects its reply to the columns the `select` asked
+for, which makes every assertion in that file about a payload PostgREST could
+actually produce — and three mutations now fail on the intended test.

@@ -241,8 +241,13 @@ class AuditEntry:
     entity_id: str | None
     store_id: str | None
     occurred_at: str
+    #: Present whenever a person did this, whether or not their row is
+    #: readable. The pair (`actor_id`, `actor_code`) is what separates "the
+    #: system did this" from "somebody did this and you cannot see who".
+    actor_id: str | None
     actor_code: str | None
     actor_name: str | None
+    approver_id: str | None
     approver_code: str | None
     approver_name: str | None
     before: Any
@@ -259,8 +264,10 @@ def _audit_entry(row: dict[str, Any]) -> AuditEntry:
         entity_id=row.get("entity_id"),
         store_id=row.get("store_id"),
         occurred_at=row["occurred_at"],
+        actor_id=row.get("actor_id"),
         actor_code=actor.get("employee_code"),
         actor_name=actor.get("full_name"),
+        approver_id=row.get("approver_id"),
         approver_code=approver.get("employee_code"),
         approver_name=approver.get("full_name"),
         before=row.get("before_json"),
@@ -621,16 +628,26 @@ class AdminService:
         store and an audit nobody can read is not an audit.
 
         The actor embed can still come back null, and the screen must not
-        render that as an empty cell. Two real causes: a row written by
-        seeding, which has no actor at all, and an actor whose roles are in
-        another store, whom this caller genuinely may not see. "System" and
-        "someone outside this store" are different sentences and neither is a
-        blank.
+        render that as an empty cell. Two real causes, and `actor_id` is what
+        tells them apart: a row written by seeding has no actor at all, while
+        an actor whose roles are in another store has an id and no readable
+        row. "System" and "someone outside this store" are different
+        sentences, and only the second one gives a manager somewhere to go
+        next — the owner can read that row even when this caller cannot.
         """
         params: dict[str, Any] = {
             "select": (
                 "id,store_id,action,entity,entity_id,before_json,after_json,"
                 "occurred_at,server_received_at,"
+                # The ids as well as the embeds, and that is the whole
+                # difference between two answers. Without `actor_id`, a row
+                # nobody performed and a row performed by somebody this
+                # caller may not read arrive identically — both as a null
+                # embed — because RLS does not refuse an embed, it omits it.
+                # With it, "the system did this" and "a person did this and
+                # you cannot see who" separate cleanly, and only the second
+                # gives a manager somewhere to go next.
+                "actor_id,approver_id,"
                 "actor:employees!audit_log_actor_id_fkey(employee_code,full_name),"
                 "approver:employees!audit_log_approver_id_fkey(employee_code,full_name)"
             ),

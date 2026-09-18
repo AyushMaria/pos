@@ -586,8 +586,13 @@ class AuditEntryOut(ApiModel):
     entity_id: str | None = None
     store_id: str | None = None
     occurred_at: datetime
+    actor_id: str | None = Field(
+        default=None,
+        description="Set whenever a person did this, even if their name cannot be read",
+    )
     actor_code: str | None = None
     actor_name: str | None = None
+    approver_id: str | None = None
     approver_code: str | None = None
     approver_name: str | None = None
     before: dict | None = None

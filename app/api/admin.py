@@ -363,6 +363,8 @@ async def audit_log(
                 entity_id=entry.entity_id,
                 store_id=entry.store_id,
                 occurred_at=entry.occurred_at,
+                actor_id=entry.actor_id,
+                approver_id=entry.approver_id,
                 actor_code=entry.actor_code,
                 actor_name=entry.actor_name,
                 approver_code=entry.approver_code,

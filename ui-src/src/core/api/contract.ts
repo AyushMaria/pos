@@ -73,8 +73,11 @@ export interface AuditEntryOut {
   entity_id?: string | null;
   store_id?: string | null;
   occurred_at: string;
+  /** Set whenever a person did this, even if their name cannot be read */
+  actor_id?: string | null;
   actor_code?: string | null;
   actor_name?: string | null;
+  approver_id?: string | null;
   approver_code?: string | null;
   approver_name?: string | null;
   before?: unknown | null;
