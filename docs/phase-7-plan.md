@@ -975,3 +975,40 @@ when a supervisor is free; showing it is how they ask.
 One bug the tests caught on the way: the discount dialog stayed open behind
 the override dialog, putting two Cancel buttons on screen. A test that could
 not tell them apart either is how it surfaced.
+
+### The discount boundary — refuse strictly greater, allow exactly equal
+
+Settled rather than left as a product question, and the reasoning is the one
+that keeps recurring in this phase: **a refusal does not eliminate an act, it
+relocates it.**
+
+Refusing everything above the line total would mean a cashier who needs to
+give an item away — damaged stock, a goodwill gesture, a regular who is short
+— deletes the line instead. That is `sale.create` work: no supervisor, no
+grant, no audit row. A recorded act performed by two people becomes an
+unrecorded act performed by one.
+
+A confirmation step was rejected outright. A confirm inside a modal that has
+already confirmed is a second control costing nothing to press, sitting where
+somebody has already committed to pressing things.
+
+So the split is at the boundary:
+
+* **equal to the line total → allowed.** "Free" is expressible, and arrives in
+  the log as an authorised discount naming a cashier and a supervisor.
+* **above it → 422**, with the line total in the message, because there is no
+  reading of ₹99,999 off a ₹10 line that anybody meant.
+
+`price_line`'s clamp stays exactly where it is, as domain defence-in-depth,
+and is now unreachable through the API. It carries a comment saying so —
+unreachable from one caller is not the same as unnecessary, and the domain
+does not get to assume its callers checked. A test asserts the unreachability
+rather than the claim being left to rot in a comment.
+
+**One ordering point follows from the modal performing the act.** The amount
+is validated against the line *before* a supervisor is summoned. Otherwise a
+typo mints a grant, writes an audit row naming an authorisation, and only then
+fails at the server — leaving a record that a supervisor approved something
+that never happened, which is the exact row `AuditRepository` exists not to
+produce. The server still refuses the same amount and has to; the client check
+is about who gets asked, not about what is allowed.

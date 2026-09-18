@@ -3,6 +3,7 @@ import { ApiError } from "../../core/api/client";
 import { overrides } from "../../core/api/overrides";
 import { catalog, register } from "../../core/api/register";
 import type {
+  CartLineOut,
   CartOut,
   Permission,
   PostSaleResponse,
@@ -400,6 +401,7 @@ export function RegisterScreen({
       {discounting !== null && needsOverride === null && (
         <DiscountDialog
           lineNo={discounting}
+          line={cart?.lines.find((line) => line.line_no === discounting) ?? null}
           busy={busy}
           onCancel={() => {
             setDiscounting(null);
@@ -615,23 +617,46 @@ function UnlistedDialog({
   );
 }
 
+/**
+ * How much comes off one line.
+ *
+ * **The amount is checked here, before a supervisor is summoned.** That
+ * ordering follows from the override dialog performing the act: if a typo
+ * were allowed through, it would mint a grant, write an audit row naming an
+ * authorisation, and *then* fail at the server — leaving a record saying a
+ * supervisor authorised something that never happened. The server still
+ * refuses the same amount, and has to; this stops anybody being asked to
+ * approve a number that was never going to work.
+ *
+ * Equal to the line total is allowed on both sides. Giving an item away is
+ * real, and this is the path where it lands in the log with two names on it.
+ */
 function DiscountDialog({
   lineNo,
+  line,
   busy,
   onCancel,
   onConfirm,
 }: {
   lineNo: number;
+  line: CartLineOut | null;
   busy: boolean;
   onCancel: () => void;
   onConfirm: (amountPaise: number) => void;
 }) {
   const [amount, setAmount] = useState("");
   const paise = Math.round(Number(amount) * 100);
+  const lineTotal = line?.line_total.paise ?? 0;
+  const tooMuch = Number.isFinite(paise) && paise > lineTotal;
 
   return (
     <div className="dialog" role="dialog" aria-label={`Discount line ${lineNo}`}>
       <h3>Discount line {lineNo}</h3>
+      {line && (
+        <p className="why">
+          {line.description} — {line.line_total.text}
+        </p>
+      )}
       <label htmlFor="discount-amount">Amount off (₹)</label>
       <input
         id="discount-amount"
@@ -640,10 +665,16 @@ function DiscountDialog({
         onChange={(event) => setAmount(event.target.value)}
         autoFocus
       />
+      {tooMuch && (
+        <p className="msg bad" role="alert">
+          That is more than the line is worth. {line?.line_total.text} makes it
+          free.
+        </p>
+      )}
       <div className="row">
         <button
           type="button"
-          disabled={busy || !Number.isFinite(paise) || paise <= 0}
+          disabled={busy || !Number.isFinite(paise) || paise <= 0 || tooMuch}
           onClick={() => onConfirm(paise)}
         >
           Apply

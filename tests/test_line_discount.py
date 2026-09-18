@@ -50,6 +50,19 @@ def _seed_supervisor(auth_service) -> None:
     )
 
 
+def _authorise(client, permission=perms.SALE_DISCOUNT_LINE):
+    response = client.post(
+        "/overrides/authorize",
+        json={
+            "approver_code": SUPERVISOR["employee_code"],
+            "pin": SUPERVISOR["pin"],
+            "permission": permission,
+        },
+    )
+    assert response.status_code == 200, response.text
+    return response.json()
+
+
 def _discount(client, cart_id, amount_paise=500, **body):
     return client.post(
         f"/register/carts/{cart_id}/lines/1/discount",
@@ -180,41 +193,70 @@ def test_the_window_is_the_ttl_the_domain_says(till, basket, auth_service) -> No
 # ── What the endpoint refuses on its own account ────────────────────────────
 
 
-def test_a_discount_larger_than_the_line_makes_it_free_and_no_less(
+def test_a_discount_larger_than_the_line_is_refused(
     till, basket, auth_service
 ) -> None:
-    """The boundary that keeps a discount from becoming a refund.
+    """Above the line total there is no reading of the number anybody meant.
 
-    Written expecting a 422 and corrected to match what the code does, which
-    is better than what was expected: `price_line` clamps each discount to
-    what is left to discount, so an absurd amount takes the line to zero and
-    stops. A negative line total would be a refund wearing a discount's
-    clothes — and `sale.refund` is deliberately *not* in `OVERRIDABLE`, so
-    reaching it through a discount grant would route round that decision
-    entirely.
-
-    Worth flagging rather than only asserting: a mistyped amount gives the
-    item away silently. That is a product question — refuse, or confirm —
-    rather than a bug in the clamp, which is doing exactly what it should.
+    The message names the line total rather than the amount typed, because the
+    number the cashier is missing is the one they did not type.
     """
     _seed_supervisor(auth_service)
-    till.post(
-        "/overrides/authorize",
-        json={
-            "approver_code": SUPERVISOR["employee_code"],
-            "pin": SUPERVISOR["pin"],
-            "permission": perms.SALE_DISCOUNT_LINE,
-        },
-    )
+    _authorise(till)
 
-    before = till.get(f"/register/carts/{basket}").json()
+    line = till.get(f"/register/carts/{basket}").json()["lines"][0]
     response = _discount(till, basket, amount_paise=99_999_99)
+
+    assert response.status_code == 422
+    detail = response.json()["detail"]
+    # The figure the cashier needs is the line total, not the one they typed.
+    assert line["line_total"]["text"] in detail, detail
+
+
+def test_a_discount_equal_to_the_line_is_allowed(till, basket, auth_service) -> None:
+    """Free has to be expressible, and this is the path that records it.
+
+    Giving an item away is real in a kirana shop — damaged stock, a goodwill
+    gesture, a regular who is short. Refusing it here would not stop the act.
+    It would move it to deleting the line, which is `sale.create` work needing
+    no supervisor and leaving no audit row, trading a recorded act by two
+    people for an unrecorded one by one.
+    """
+    _seed_supervisor(auth_service)
+    _authorise(till)
+
+    line_total = till.get(f"/register/carts/{basket}").json()["lines"][0]
+    response = _discount(till, basket, amount_paise=line_total["line_total"]["paise"])
 
     assert response.status_code == 200, response.text
     cart = response.json()
-    assert cart["total_before_rounding"]["paise"] == 0, "the basket went past free"
-    assert cart["discount_total"]["paise"] == before["total_before_rounding"]["paise"], (
-        "the discount recorded more than the line was worth"
+    assert cart["total_before_rounding"]["paise"] == 0
+    assert cart["discount_total"]["paise"] == line_total["line_total"]["paise"]
+
+
+def test_the_clamp_is_no_longer_reachable_through_the_api(
+    till, basket, auth_service
+) -> None:
+    """`price_line` still caps a discount at what is left to discount.
+
+    That cap is domain defence-in-depth and stays, because the domain does not
+    get to assume its callers checked. But nothing arriving through the API can
+    reach it any more: every fixed discount the service accepts is at most the
+    line total, so the clamp has nothing left to clamp.
+
+    Asserted rather than assumed, because "unreachable" is exactly the sort of
+    claim that rots — and because a later change that widened the service check
+    would otherwise be caught by nothing at all.
+    """
+    _seed_supervisor(auth_service)
+    _authorise(till)
+
+    line = till.get(f"/register/carts/{basket}").json()["lines"][0]
+    exact = line["line_total"]["paise"]
+
+    assert _discount(till, basket, amount_paise=exact).status_code == 200
+    assert _discount(till, basket, amount_paise=1).status_code == 422, (
+        "the line is already free; anything more would need the clamp"
     )
 
 

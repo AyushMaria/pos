@@ -318,8 +318,28 @@ class CartService:
     def apply_discount(
         self, cart_id: str, line_no: int, discount: Discount
     ) -> OpenCart:
+        """Take money off a line, up to and including all of it.
+
+        **Equal is allowed; greater is refused.** Giving an item away is a real
+        thing in a shop — damaged stock, a goodwill gesture, a regular who is
+        short — so "free" has to be expressible, and this is the path where it
+        arrives in the log as an authorised discount naming a cashier *and* a
+        supervisor. Refusing it here would not stop the act; it would move it
+        to deleting the line, which is `sale.create` work needing no
+        authorisation and leaving no audit row. That trades a recorded act by
+        two people for an unrecorded one by one.
+
+        Above the line total there is no reading of the number that anybody
+        meant, so it is refused with the line total in hand for the message.
+        """
         open_cart = self.get(cart_id)
         self._require_open_basket(open_cart)
+
+        if discount.kind == "fixed":
+            line_total = open_cart.cart.line(line_no).line_total
+            if discount.value > line_total.paise:
+                raise DiscountExceedsLine(line_no, line_total.paise, discount.value)
+
         open_cart.cart = open_cart.cart.apply_discount(line_no, discount)
         return open_cart
 
@@ -361,6 +381,26 @@ class CartLocked(RuntimeError):
         super().__init__(reason or "the basket is locked; a payment was taken")
         self.cart_id = cart_id
         self.reason = reason
+
+
+class DiscountExceedsLine(ValueError):
+    """More money off a line than the line is worth.
+
+    Deliberately not a clamp at this layer. `price_line` caps a discount at
+    what is left to discount, which is the right behaviour for the domain and
+    the wrong one for a till: a mistyped 99999 would quietly give an item away
+    and the totals would still add up. The domain keeps its cap as
+    defence-in-depth; this refuses before anybody relies on it.
+    """
+
+    def __init__(self, line_no: int, line_total_paise: int, asked_paise: int) -> None:
+        super().__init__(
+            f"line {line_no} is worth {line_total_paise} paise; "
+            f"{asked_paise} cannot come off it"
+        )
+        self.line_no = line_no
+        self.line_total_paise = line_total_paise
+        self.asked_paise = asked_paise
 
 
 class AttemptNotFound(KeyError):

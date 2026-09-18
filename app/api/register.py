@@ -50,6 +50,7 @@ from app.services.cart_service import (
     CartLocked,
     CartNotFound,
     CartService,
+    DiscountExceedsLine,
     OpenCart,
     UnknownBarcode,
     UnlistedItemRejected,
@@ -59,6 +60,16 @@ from app.services.receipt_render import receipt_path, render_html, render_pdf, r
 from app.services.sale_service import SaleNotSettled, SaleService
 
 router = APIRouter(prefix="/register", tags=["register"])
+
+
+def _rupees(paise: int) -> str:
+    """Paise to a rupee string, for the one error message that needs one.
+
+    The UI formats money everywhere else. This is a sentence rather than a
+    figure, and a cashier reading "1000 paise" would have to do arithmetic
+    while somebody waits.
+    """
+    return f"\u20b9{paise // 100}.{paise % 100:02d}"
 
 CartSvc = Annotated[CartService, Depends(get_cart_service)]
 SaleSvc = Annotated[SaleService, Depends(get_sale_service)]
@@ -297,9 +308,18 @@ def discount_line(
         return _to_cart_out(carts.apply_discount(cart_id, line_no, discount))
     except CartLocked:
         raise HTTPException(status.HTTP_409_CONFLICT, "basket is locked") from None
+    except DiscountExceedsLine as exc:
+        # The one refusal a cashier is likely to meet, so it names the number
+        # they need rather than the one they typed.
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            f"Line {exc.line_no} is {_rupees(exc.line_total_paise)}. A discount "
+            f"cannot be more than that — {_rupees(exc.line_total_paise)} makes "
+            "it free.",
+        ) from exc
     except PricingError as exc:
-        # A discount larger than the line, or a negative one. The domain
-        # refuses both and says why; a cashier gets that sentence.
+        # A negative discount, or a percentage over 100%. The domain refuses
+        # both and says why; a cashier gets that sentence.
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc)) from exc
     except (KeyError, ValueError) as exc:
         raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc

@@ -135,6 +135,17 @@ def price_line(line: LineInput) -> PricedLine:
         # item takes ₹30, not ₹50 — otherwise the basket starts paying the
         # customer, and a promotion misconfiguration becomes a cash leak.
         if amount > running:
+            # Defence in depth, and deliberately kept after the API stopped
+            # being able to reach it: `CartService.apply_discount` refuses a
+            # fixed discount larger than the line, so nothing that arrives
+            # through `POST /register/.../discount` can get here.
+            #
+            # Kept because this is the domain, and the domain does not get to
+            # assume its callers checked. A negative line total is a refund
+            # wearing a discount's clothes — and `sale.refund` is deliberately
+            # not in `OVERRIDABLE`, so reaching it this way would route round
+            # that decision entirely. Unreachable from one caller is not the
+            # same as unnecessary.
             amount = running
         if amount.is_zero:
             continue

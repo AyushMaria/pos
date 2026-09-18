@@ -273,3 +273,34 @@ describe("the status decides the behaviour, not just the words", () => {
     expect(screen.getByRole("button", { name: /authorise/i })).toBeEnabled();
   });
 });
+
+describe("a typo must not cost a supervisor's authorisation", () => {
+  it("refuses more than the line is worth before anybody is summoned", async () => {
+    const user = await openRegister();
+
+    await user.click(screen.getByLabelText(/discount line 1/i));
+    await user.type(screen.getByLabelText(/amount off/i), "999");
+
+    expect(screen.getByText(/more than the line is worth/i)).toBeVisible();
+    expect(screen.getByRole("button", { name: /apply/i })).toBeDisabled();
+    // The ordering that matters. The override dialog performs the act, so an
+    // amount that cannot succeed must never reach it: it would mint a grant,
+    // write an audit row naming an authorisation, and then fail — leaving a
+    // record that a supervisor approved something that never happened.
+    expect(api.discountLine).not.toHaveBeenCalled();
+    expect(authorize).not.toHaveBeenCalled();
+    expect(screen.queryByRole("dialog", { name: /supervisor/i })).toBeNull();
+  });
+
+  it("allows exactly the line total, which is how free is expressed", async () => {
+    const user = await openRegister();
+
+    await user.click(screen.getByLabelText(/discount line 1/i));
+    await user.type(screen.getByLabelText(/amount off/i), "10");
+
+    // Refusing this would not stop an item being given away — it would move
+    // it to deleting the line, which needs no supervisor and leaves no row.
+    expect(screen.getByRole("button", { name: /apply/i })).toBeEnabled();
+    expect(screen.queryByText(/more than the line is worth/i)).toBeNull();
+  });
+});
