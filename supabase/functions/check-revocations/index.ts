@@ -28,10 +28,18 @@
 // subset of the input, so a caller learns nothing it did not already know
 // except which of its own rows to drop.
 //
-// **It verifies the caller's JWT.** This is the first place a cashier's token
-// is exchanged for a privileged read, so the exchange has to be earned: no
-// token, no answer. `--verify-jwt` is the default and is left on, unlike its
-// two neighbours, which are called before anybody has a session.
+// **It verifies the caller's JWT itself.** This is the first place a cashier's
+// token is exchanged for a privileged read, so the exchange has to be earned.
+//
+// The platform's own `verify_jwt` is not that check and must not be mistaken
+// for it: the anon key *is* a signed project JWT, so a gateway configured to
+// require one lets the anon key straight through. `authenticate-pin` is
+// deployed with `verify_jwt: true` despite its own comment saying
+// `--no-verify-jwt`, and it works — which is the proof that the flag is not
+// deciding anything here. The check that matters is below, in code: the anon
+// key is refused by name, and `auth.getUser()` is called under the caller's
+// own token so a forged or expired one fails rather than being taken at face
+// value.
 //
 // **It scopes to the caller's own store.** A valid token from one shop must
 // not be able to ask about another shop's staff.

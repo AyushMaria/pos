@@ -248,12 +248,34 @@ async def test_the_newest_row_comes_first(rest) -> None:
 async def test_a_date_range_reaches_the_query(rest) -> None:
     """Both bounds, which PostgREST needs asked for in two different ways."""
     await service(rest).audit_log(
-        store_id=STORE, since="2026-09-01", until="2026-09-18"
+        store_id=STORE,
+        since="2026-09-01T00:00:00+05:30",
+        until="2026-09-19T00:00:00+05:30",
     )
 
     query = rest.first_query()
-    assert "occurred_at=gte.2026-09-01" in query
-    assert "occurred_at.lte.2026-09-18" in query
+    assert "occurred_at=gte.2026-09-01T00:00:00+05:30" in query
+    assert "occurred_at.lt.2026-09-19T00:00:00+05:30" in query
+
+
+@pytest.mark.asyncio
+async def test_the_upper_bound_is_exclusive(rest) -> None:
+    """`lte` against a day boundary excludes the day it names.
+
+    Found by an acceptance run, before it was run. The target row happened at
+    18:35 UTC, a filter for "up to the 15th" sent `lte.2026-09-15`, and
+    Postgres read that as midnight at the *start* of the 15th — so asking for
+    the 15th returned nothing that happened on it. The caller now passes the
+    first instant it does not want.
+    """
+    await service(rest).audit_log(store_id=STORE, until="2026-09-16T00:00:00Z")
+
+    query = rest.first_query()
+    assert "occurred_at.lt." in query
+    assert "lte." not in query, (
+        "an inclusive upper bound against a date is a range that excludes its "
+        "own last day"
+    )
 
 
 @pytest.mark.asyncio

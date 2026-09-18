@@ -1299,3 +1299,102 @@ gets one*, written down two slices ago, arriving through the fake rather than
 the test. The fake now projects its reply to the columns the `select` asked
 for, which makes every assertion in that file about a payload PostgREST could
 actually produce — and three mutations now fail on the intended test.
+
+## Slice 5 — the acceptance run, and the two bugs it found before it started
+
+### The date filter could never match a single day
+
+The acceptance script warned that the target row — `scan.dismissed`,
+2026-09-15 18:35 UTC — is 00:05 IST on the **16th**, so filtering "the 15th"
+by local date would return nothing and look like a broken screen. Reading that
+before running it turned up something worse.
+
+`<input type="date">` yields `YYYY-MM-DD`, which was sent as-is and read by
+Postgres as **UTC midnight**. The table renders `toLocaleString()`. So:
+
+* **Display and filter disagreed by a day.** The row shows on the 16th and
+  answered to a search for the 15th.
+* **`lte.<date>` made a single-day range zero-width.** "From the 15th to the
+  15th" is `>= midnight` and `<= midnight` — an instant, not a day. **Every
+  same-day filter returned nothing, on any date, in any timezone.**
+
+Verified against the real row: before the fix, filtering the 15th *and*
+filtering the 16th both found nothing. After it, the 16th finds it and the
+15th does not, which is the day it is displayed on.
+
+The fix is a local-day conversion in the UI, because only the screen knows
+which day the person meant, and an exclusive upper bound in the service,
+because a range naming a day should contain it. A line on screen says the
+times are this terminal's, so nobody compares a timestamp here with one from
+elsewhere and reads a five-and-a-half-hour gap as a discrepancy.
+
+A viewer whose date filter can never match is worse than one with no filter at
+all, because it answers.
+
+### What the live data confirms
+
+Read directly from the project rather than by clicking:
+
+| | |
+|---|---|
+| Rows | 34, exactly as the script predicted |
+| Actions | 7: `scan.resolved` 11, `sale.post` 8, `product.updated` 6, `barcode.added` 4, `barcode.withdrawn` 3, `product.created` 1, `scan.dismissed` 1 |
+| Target row | `scan.dismissed`, M001 Priya Nair, barcode 7622202819933, `resolution: dismissed` |
+| Approvers | **none** — every row's `approver_id` is null, so the column is an em dash throughout |
+| Actors | **all 34 present** — no row exercises "System" |
+| Stores | **all 34 have a `store_id`** — no row exercises the null-store branch |
+| Range | 2026-08-23 to 2026-09-16 IST, so a default window must reach back weeks |
+
+### Two corrections to the script, and one gap in the trail
+
+**`product.created` does not carry the barcode.** Its `after_json` holds the
+product's own columns and nothing else, so filtering to it and expecting
+7622202819933 shows an empty "What". The link is in `barcode.added` and
+`scan.resolved`, both at 00:08:50 — the code appears in three rows, not two.
+
+**The story in the data is better than "dismissed, then catalogued".** The
+same code was dismissed at 00:05:43 and resolved at 00:08:50, three minutes
+apart, by the same person. The log carries every step.
+
+**But the screen cannot ask the question that finds it.** "What happened to
+this barcode?" spans three rows with three different `entity_id`s, and the
+filter has no way to search `after_json`. A manager can answer "who did that?"
+and cannot yet answer "what happened to this code?" — which is the next
+increment for this screen, not a fault in it.
+
+### `store_id is null` is dead in practice
+
+0019 widened `audit_log_select` because "a catalogue edit belongs to no store",
+and the viewer's query and its test both cover that case. **No row in the live
+data has a null `store_id`**, catalogue edits included. Either the trigger sets
+one or the rationale was aspirational; the branch is right to keep, but it is
+carrying no weight today and nobody should read the live pass as exercising it.
+
+### What the live run cannot prove
+
+* **"System"** needs a row with a null `actor_id`. None exists.
+* **"Someone outside this store"** needs a second store. None exists.
+* **The override flow, online.** `audit_log` holds no `override` rows at all.
+
+All three stay proven by test only. The first two are the sentences that
+distinguish three different absences, which is exactly the kind of thing a
+green acceptance run gets quietly credited with covering.
+
+### Only one Edge Function is deployed
+
+`authenticate-pin` is live at version 3. `authorize-override` and
+`check-revocations` are written, tested and **not deployed**, so slice 3's
+online path and slice 4's revocation sweep have never run against real
+Supabase. Slice 3's own exit criterion is the *offline* override, which needs
+no deployment; the deployed function is what makes the online half real.
+
+Order: slice 5 now, deploy the two functions, then slice 3's and slice 4's
+acceptance runs.
+
+**And the deployment falsified a comment.** `authenticate-pin` is deployed with
+`verify_jwt: true` even though its own header says `--no-verify-jwt`, and it
+works — because the anon key *is* a signed project JWT, so a gateway that
+demands one lets it straight through. `check-revocations` claimed to differ
+from "its two neighbours" on that flag; the claim was wrong and the distinction
+was never the flag. What actually separates it is in its code: the anon key
+refused by name, and `auth.getUser()` under the caller's own token.

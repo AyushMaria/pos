@@ -1065,6 +1065,21 @@ function QueueTab({ session }: { session: SessionResponse }) {
 // ── The audit log ─────────────────────────────────────────────────────────
 
 /**
+ * The instant a local day begins, as an ISO string, optionally `offsetDays`
+ * later.
+ *
+ * `<input type="date">` gives `YYYY-MM-DD` with no timezone, and Postgres
+ * reads a bare date as UTC midnight. In IST that is 05:30 local, so half a
+ * day lands on the wrong side of every bound. Building the Date from parts
+ * pins it to *this* machine's midnight, which is the day the person clicking
+ * the filter had in mind.
+ */
+export function startOfLocalDay(date: string, offsetDays = 0): string {
+  const [year, month, day] = date.split("-").map(Number);
+  return new Date(year!, month! - 1, day! + offsetDays).toISOString();
+}
+
+/**
  * Who did that — architecture §11.5, and the first screen whose whole job is
  * to answer that question.
  *
@@ -1088,8 +1103,17 @@ function AuditTab() {
     const body = await run(() =>
       admin.audit({
         action: action || undefined,
-        since: since || undefined,
-        until: until || undefined,
+        // Local days, converted to instants here because this is the only
+        // place that knows which day the person meant.
+        //
+        // The table renders `toLocaleString()`, so a row at 18:35 UTC shows
+        // as 00:05 the next morning in IST. Sending the bare date would have
+        // filtered in UTC while displaying in local time: the one row this
+        // screen was built to find displays on the 16th and answered to a
+        // filter for the 15th. A viewer whose dates disagree with its own
+        // rows is worse than one with no filter at all.
+        since: since ? startOfLocalDay(since) : undefined,
+        until: until ? startOfLocalDay(until, 1) : undefined,
       }),
     );
     if (body) {
@@ -1137,6 +1161,10 @@ function AuditTab() {
             </option>
           ))}
         </select>
+        {/* Said once, on screen, because the alternative is a manager
+            comparing a timestamp here with one from somewhere else and
+            drawing a conclusion from a five-and-a-half-hour gap. */}
+        <span className="muted">Times shown in this terminal's timezone</span>
       </div>
 
       <table className="grid">

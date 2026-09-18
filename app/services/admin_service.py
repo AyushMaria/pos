@@ -609,7 +609,11 @@ class AdminService:
         self,
         *,
         store_id: str,
+        #: Inclusive lower bound, as an instant. A bare date is read as UTC
+        #: midnight by Postgres, which is not the same day everywhere — the
+        #: caller converts, because only the caller knows which day it meant.
         since: str | None = None,
+        #: **Exclusive** upper bound, as an instant.
         until: str | None = None,
         action: str | None = None,
         entity_id: str | None = None,
@@ -660,7 +664,15 @@ class AdminService:
         if until:
             # PostgREST takes one value per column, so a range needs the
             # second bound under `and`.
-            params["and"] = f"(occurred_at.lte.{until})"
+            #
+            # **Exclusive**, and that is the whole reason this is `lt`. A
+            # caller naming a day means the day, and `lte` against a date
+            # compares with midnight *at the start* of it — so asking for
+            # "up to the 15th" returned nothing that happened on the 15th.
+            # The caller passes the first instant it does *not* want, which
+            # for a screen showing local days is local midnight of the day
+            # after.
+            params["and"] = f"(occurred_at.lt.{until})"
         if action:
             params["action"] = f"eq.{action}"
         if entity_id:
