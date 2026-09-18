@@ -1398,3 +1398,24 @@ demands one lets it straight through. `check-revocations` claimed to differ
 from "its two neighbours" on that flag; the claim was wrong and the distinction
 was never the flag. What actually separates it is in its code: the anon key
 refused by name, and `auth.getUser()` under the caller's own token.
+
+### The acceptance steps that need a person
+
+`docs/phase-7-acceptance.md` — 34 checkboxes in four parts. Part A (the audit
+viewer) needs nothing deployed; B deploys `authorize-override` and
+`check-revocations`; C is slice 3's exit criterion offline; D is revocation and
+the snapshot.
+
+**It corrects this document's own proof for the snapshot TTL.** The plan says
+"set a snapshot back 15 days and confirm the offline login refuses". Since the
+MAC landed, editing `snapshot_expires_at` breaks the seal rather than expiring
+the snapshot, so the login is refused for the wrong reason and the TTL is never
+consulted. It looks like a pass. The guide seeds a backdated-but-sealed row
+instead, and the two failures are distinguishable by message and status:
+
+| What you did | Message | Status |
+|---|---|---|
+| Broke the seal | "has not signed in on this terminal before" | 503 |
+| Genuinely expired | "This terminal has been offline too long" | 401 |
+
+Both verified against a throwaway database before the guide was written.
