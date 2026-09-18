@@ -1012,3 +1012,116 @@ fails at the server — leaving a record that a supervisor approved something
 that never happened, which is the exact row `AuditRepository` exists not to
 produce. The server still refuses the same amount and has to; the client check
 is about who gets asked, not about what is allowed.
+
+---
+
+## Slice 4 — what the audit found before any of it was written
+
+The plan describes four items. Two of them cannot be done the way it says, one
+is already done, and the ordering of the remaining two is backwards. Read the
+section above as history; this is what is actually there.
+
+### 1. `require()` cannot re-check the TTL — the session has no expiry on it
+
+The plan says *"`require()` is the natural place, and it already takes `now`."*
+It does take `now`, and that is misleading rather than helpful: `now` is there
+for override expiry. `Session` (`identity.py:52`) carries `user_id`,
+`employee_code`, `full_name`, `store_id`, `roles`, `permissions`,
+`authenticated_at`, `offline` and `overrides` — and **no
+`snapshot_expires_at`**. There is nothing in the session for `now` to be
+compared against.
+
+So the re-check needs one of two things first, and they are different
+decisions:
+
+* carry `snapshot_expires_at` on `Session`, copied at login; or
+* read `cached_users` on every gated request, which puts a database hit on the
+  hot path of a screen whose whole design is "one hand on a keyboard and a
+  queue waiting".
+
+The first is right. It also means the TTL travels with the thing it bounds.
+
+The hole itself is real, and the description of it is right: a till signed in
+offline holds that session until logout or restart, and nothing re-examines
+it.
+
+### 2. The expiry is now checked in two places, not one
+
+The plan says *"the expiry is tested once, at `_login_offline`"*. Slice 3 added
+the second: `_authorize_offline` calls `identity.is_usable(now=now)` before
+letting somebody authorise an override. Both are entry checks — neither
+re-examines a session already open — so the hole stands, but a reader looking
+for "the one place" will find two and wonder which is stale.
+
+### 3. Revocation on sync cannot work under the cashier's token
+
+This is the one that changes the design rather than the wording.
+
+The plan says: *"Add the pull, call the `revoke()` that already exists."* The
+puller runs under the signed-in user's own access token
+(`server.py`, `token_provider=lambda: sessions.access_token`), which is
+deliberate — §11.2, a pull carries the cashier's rights and nothing more. And
+`0003_rls.sql:119`:
+
+```sql
+create policy employees_select_self_or_manager on public.employees
+    for select to authenticated
+    using (
+        user_id = auth.uid()
+        or exists (... and pos.has_perm('user.manage'))
+    );
+```
+
+**A cashier can read exactly one row: their own.** So adding `employees` to
+`ENTITIES` would pull one row and revoke, at most, the person already signed
+in — whose deactivation is the one case already handled, at the next login,
+through `AccountDisabled`.
+
+Every *other* cached identity would be untouched. That is the population that
+matters: `cached_users` holds supervisors precisely so their PINs can
+authorise overrides offline, and a dismissed supervisor's cached row is the
+thing slice 4 exists to purge. The plan's fix protects the person it does not
+need to and misses everyone it does.
+
+It would also fail quietly. A keyset pull that returns one row looks exactly
+like a keyset pull that worked, so this would ship green — the same
+"found nothing needs a positive control" shape as slice 2, pointed this time
+at an RLS policy.
+
+**Three ways out, and they are not equivalent.**
+
+* **An Edge Function**, as `authenticate-pin` and `authorize-override` already
+  are. The till sends the user ids it has cached and gets back the ones that
+  are no longer active. Minimal disclosure — it answers only about ids the
+  terminal already holds — and it reuses the one pattern in this architecture
+  entitled to privileged reads. Costs a network call the puller does not
+  currently make.
+* **A narrow in-store view**, `(user_id, revoked_at)` and nothing else,
+  readable by anyone in the store. Cheapest to build and it rides the existing
+  pull. It does disclose that *some* id in this store was revoked, to any
+  signed-in cashier — no name, no code, no reason.
+* **Widening `employees_select`** so colleagues can see each other's status.
+  Rejected: that hands every cashier the staff roster, which is the exact
+  thing `authenticate-pin`'s single rejection shape exists to withhold.
+
+### 4. The parity test already exists
+
+Plan item 4 — *"add the parity test the two `14`s have never had"* — was
+written in slice 3. `SNAPSHOT_TTL_DAYS` is in `DUPLICATED`, the scan covers
+every function directory rather than a named file, and
+`test_the_snapshot_ttl_is_actually_duplicated_somewhere` is its positive
+control against a rename silencing it.
+
+### The ordering is backwards
+
+The plan says re-check the TTL first and sign the snapshot second. A re-check
+reads `snapshot_expires_at` out of an unencrypted SQLite file with no MAC, so
+until signing lands, the check consults a number its attacker can edit. That
+does not make the re-check worthless — it closes the "till left running for a
+fortnight" case, which is carelessness rather than attack — but it is not a
+control until item 2 is done, and shipping it first invites it being described
+as one.
+
+The same coupling runs the other way: if `Session` gains
+`snapshot_expires_at`, the value is copied at login from a row the MAC covers,
+so the two fixes land as one property rather than two features.
