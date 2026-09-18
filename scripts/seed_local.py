@@ -25,6 +25,7 @@ from app.data.db import Database  # noqa: E402
 from app.data.migrations import migrate  # noqa: E402
 from app.data.repositories.users import CachedUserRepository  # noqa: E402
 from app.domain import permissions as perms  # noqa: E402
+from app.security import snapshot_mac  # noqa: E402
 from app.services.auth_service import AuthService, SessionStore  # noqa: E402
 
 # Matches the store id in supabase/seed/seed.sql, so a terminal seeded locally
@@ -76,7 +77,12 @@ def main() -> int:
     print(f"database at {settings.db_path} (schema v{version})")
 
     auth = AuthService(
-        users=CachedUserRepository(db),
+        users=CachedUserRepository(
+            db,
+            sealer=snapshot_mac.SnapshotSealer(
+                snapshot_mac.mac_key(settings.store_code, settings.terminal_code)
+            ),
+        ),
         sessions=SessionStore(),
         cloud=None,
         store_code=settings.store_code,

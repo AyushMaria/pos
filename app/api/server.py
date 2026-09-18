@@ -9,6 +9,7 @@ against a temp SQLite file with no window and no network.
 from __future__ import annotations
 
 import logging
+import secrets
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -42,6 +43,8 @@ from app.data.repositories.sales import SalesRepository
 from app.data.repositories.terminal import TerminalRepository
 from app.data.repositories.unknown_scans import UnknownScanRepository
 from app.data.repositories.users import CachedUserRepository
+from app.security import keychain
+from app.security import snapshot_mac as keychain_mac
 from app.security.local_auth import HostGuardMiddleware, SessionTokenMiddleware
 from app.services.admin_service import AdminService
 from app.services.auth_service import AuthService, SessionStore
@@ -67,13 +70,47 @@ SENSITIVE_FIELDS = frozenset({"pin", "password", "secret", "token", "refresh_tok
 UI_DIR = Path(__file__).resolve().parent.parent / "ui"
 
 
+def _snapshot_key(settings: Settings) -> bytes:
+    """The terminal's sealing key, or a throwaway one.
+
+    A till with no usable credential store must still open — the alternative
+    is a shop that cannot trade because a Windows profile moved. What it loses
+    is the offline cache: a random key seals nothing anybody can read back, so
+    every cached identity fails verification and the terminal asks for an
+    online sign-in.
+
+    That is the safe direction and a bad surprise, so it is an error in the
+    log rather than a warning. It is also the one failure here that a person
+    can fix.
+    """
+    try:
+        return keychain_mac.mac_key(settings.store_code, settings.terminal_code)
+    except keychain.KeychainUnavailable as exc:
+        log.error(
+            "no OS credential store, so the offline identity cache cannot be "
+            "sealed or read: %s. The till will work online and will refuse "
+            "offline sign-in until this is fixed.",
+            exc,
+        )
+        return secrets.token_bytes(32)
+
+
 def build_app(
     *,
     token: str,
     settings: Settings | None = None,
     db: Database | None = None,
     run_migrations: bool = True,
+    mac_key: bytes | None = None,
 ) -> FastAPI:
+    """Assemble the application.
+
+    `mac_key` seals the offline identity cache and is injected for the same
+    reason `db` and `token` are: a test that let the real OS credential store
+    decide would seal with one key and read with another, and every cached
+    identity would fail verification for reasons that have nothing to do with
+    what was being tested.
+    """
     settings = settings or get_settings()
     if db is None:
         settings.ensure_directories()
@@ -81,7 +118,9 @@ def build_app(
     if run_migrations:
         migrate(db)
 
-    users = CachedUserRepository(db)
+    users = CachedUserRepository(
+        db, sealer=keychain_mac.SnapshotSealer(mac_key or _snapshot_key(settings))
+    )
     audit = AuditRepository(db)
     catalog = CatalogRepository(db)
     inventory = InventoryRepository(db)

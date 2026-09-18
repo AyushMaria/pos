@@ -60,12 +60,47 @@ class Session:
     roles: frozenset[str]
     permissions: frozenset[str]
     authenticated_at: datetime
+    #: When the permission snapshot behind this session stops being trusted.
+    #:
+    #: Carried rather than looked up, because the alternative is a database
+    #: read on every gated request — on the hot path of a screen whose whole
+    #: design is one hand on a keyboard and a queue waiting.
+    #:
+    #: Required, with no default. An optional expiry would be `None` on every
+    #: session a future caller forgot to fill in, and `None` would have to
+    #: mean "never expires" for the tests to pass — which is the one value an
+    #: attacker would choose.
+    #:
+    #: Copied at sign-in from a row whose MAC has just been verified
+    #: (`app/security/snapshot_mac.py`). That is what makes comparing it
+    #: worth anything: before the seal existed, this number could be edited
+    #: in an unencrypted file on the counter.
+    snapshot_expires_at: datetime
     #: True when the identity came from the local cache rather than Supabase.
     offline: bool = False
     #: Short-lived supervisor grants, permission key -> expiry.
     overrides: dict[str, datetime] = field(default_factory=dict)
 
+    def snapshot_is_fresh(self, *, now: datetime) -> bool:
+        return now < self.snapshot_expires_at
+
     def allows(self, permission: str, *, now: datetime) -> bool:
+        """Whether this session may do this, right now.
+
+        The TTL is checked **here**, not only at sign-in. A till signed in
+        offline holds its session until somebody logs out or the machine
+        restarts, and neither happens on a fortnightly schedule: before this,
+        a terminal signed in on day 13 traded indefinitely on a snapshot that
+        expired the next morning.
+
+        It bounds every permission, including a supervisor's live override. A
+        grant is ninety seconds and a snapshot is fourteen days, so in
+        practice the grant expires first — but a grant minted seconds before
+        the snapshot lapsed must not outlive it, because the authority it was
+        borrowed from is gone.
+        """
+        if not self.snapshot_is_fresh(now=now):
+            return False
         if has(self.permissions, permission):
             return True
         granted_until = self.overrides.get(permission)
@@ -152,6 +187,7 @@ class CachedIdentity:
             roles=self.roles,
             permissions=self.permissions,
             authenticated_at=now,
+            snapshot_expires_at=self.snapshot_expires_at,
             offline=True,
         )
 

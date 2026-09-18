@@ -332,6 +332,10 @@ class AuthService:
             roles=cloud.roles,
             permissions=cloud.permissions,
             authenticated_at=now,
+            # The same bound as an offline sign-in. An online session is not
+            # exempt: it is the one that stays open longest, because a till
+            # that reaches the cloud has no reason to sign anybody out.
+            snapshot_expires_at=cloud.snapshot_expires_at,
             offline=False,
         )
         self.sessions.set(session, cloud.access_token)

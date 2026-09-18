@@ -26,8 +26,9 @@ import pytest
 
 from app.domain import lockout
 from app.domain import permissions as perms
+from app.security.snapshot_mac import SnapshotSealer
 from app.services.auth_service import LoginFailed, PinLocked
-from tests.conftest import TEST_STORE_ID
+from tests.conftest import TEST_MAC_KEY, TEST_STORE_ID
 
 NOW = datetime(2026, 9, 17, 10, 0, 0, tzinfo=timezone.utc)
 
@@ -175,7 +176,8 @@ def test_the_counter_survives_a_restart(auth_service, users, db) -> None:
     # A new repository over the same file is what a restart looks like here.
     from app.data.repositories.users import CachedUserRepository
 
-    identity = CachedUserRepository(db).get_by_employee_code("S001")
+    restarted = CachedUserRepository(db, sealer=SnapshotSealer(TEST_MAC_KEY))
+    identity = restarted.get_by_employee_code("S001")
     assert identity.consecutive_pin_failures == 3
 
 

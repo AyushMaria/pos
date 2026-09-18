@@ -28,7 +28,7 @@ from app.sync.engine import SyncEngine
 from app.sync.payloads import PayloadBuilder
 from app.sync.puller import Puller
 from app.sync.pusher import Pusher
-from tests.conftest import FAST_ARGON2, TEST_TOKEN, add_barcode, open_cart
+from tests.conftest import FAST_ARGON2, TEST_MAC_KEY, TEST_TOKEN, add_barcode, open_cart
 from tests.test_sync_push import TERMINAL_ID, FakeCloud, sell
 
 
@@ -291,7 +291,11 @@ def cloud_till(
     cloud_settings: Settings, db: Database, seeded_cashier: dict
 ) -> Iterator[TestClient]:
     app = build_app(
-        token=TEST_TOKEN, settings=cloud_settings, db=db, run_migrations=False
+        token=TEST_TOKEN,
+        settings=cloud_settings,
+        db=db,
+        run_migrations=False,
+        mac_key=TEST_MAC_KEY,
     )
     with TestClient(app, base_url="http://127.0.0.1") as client:
         client.headers.update({"Authorization": f"Bearer {TEST_TOKEN}"})
@@ -361,7 +365,11 @@ def test_a_manager_can_retry_and_is_told_how_many_moved(
 
 def test_status_needs_a_signed_in_session(cloud_settings: Settings, db: Database) -> None:
     app = build_app(
-        token=TEST_TOKEN, settings=cloud_settings, db=db, run_migrations=False
+        token=TEST_TOKEN,
+        settings=cloud_settings,
+        db=db,
+        run_migrations=False,
+        mac_key=TEST_MAC_KEY,
     )
     with TestClient(app, base_url="http://127.0.0.1") as client:
         client.headers.update({"Authorization": f"Bearer {TEST_TOKEN}"})

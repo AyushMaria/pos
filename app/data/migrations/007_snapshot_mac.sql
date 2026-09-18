@@ -1,0 +1,17 @@
+-- 007_snapshot_mac - the offline snapshot was trusted because nothing could
+-- check it.
+--
+-- `snapshot_expires_at` bounds how long a dismissed employee can keep opening
+-- this till. It arrived verbatim in a response body, was written here, and was
+-- read back by every check downstream as fact. Extending it was a text edit on
+-- an unencrypted file sitting on a shop counter.
+--
+-- The MAC is keyed from the OS credential store, never from this file: the
+-- terminal database is copied on every shift-close backup, and a key stored
+-- beside the thing it authenticates is decoration.
+--
+-- NULL means a row written before sealing existed. Those are not trusted
+-- either, so upgrading a terminal costs one online sign-in. Trusting unsealed
+-- rows "just this once" would leave the door open permanently, since an
+-- attacker would simply blank the column.
+ALTER TABLE cached_users ADD COLUMN row_mac TEXT;

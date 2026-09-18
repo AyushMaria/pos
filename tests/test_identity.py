@@ -85,6 +85,7 @@ def session_for(role: str) -> Session:
         roles=frozenset({role}),
         permissions=perms.permissions_for(frozenset({role})),
         authenticated_at=NOW,
+        snapshot_expires_at=NOW + timedelta(days=14),
     )
 
 

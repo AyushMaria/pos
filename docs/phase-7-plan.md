@@ -1125,3 +1125,55 @@ as one.
 The same coupling runs the other way: if `Session` gains
 `snapshot_expires_at`, the value is copied at login from a row the MAC covers,
 so the two fixes land as one property rather than two features.
+
+### Slice 4, built: the seal and the re-check, in that order
+
+**The seal.** `app/security/snapshot_mac.py` — HMAC-SHA256 over the fields
+that decide access, keyed from the OS credential store, one key per terminal.
+Migration `007` adds `row_mac`; the repository seals on every write and
+verifies on every read.
+
+What it does *not* do is in the module docstring and in the test file, because
+a defence described as more than it is gets relied on for more than it does:
+anyone who can edit this file can also read `pin_hash` and grind it elsewhere
+with no lockout. Argon2id costs real time per guess; editing a column costs
+none. The seal closes the free path, which is worth doing on its own terms.
+
+Three decisions worth keeping:
+
+* **The lockout counters are inside the seal.** Leaving them out was cheaper —
+  no re-seal on a wrong PIN — and would have left `pin_locked_until = NULL` as
+  a free edit, which is the single edit most useful to whoever is guessing a
+  supervisor's PIN at that terminal. An HMAC is microseconds in a path that
+  has just spent 22.8ms on argon2.
+* **A failed verification reads as no cached identity**, not an exception. The
+  remedy is the same as for an employee this till has never seen, and the
+  likely cause is a moved Windows profile rather than an attack. Logged at
+  ERROR because the two causes are very different.
+* **The sealer is required, not optional.** An optional key is a bypass that
+  ships: every test would take the unsealed path and production would be the
+  one nobody exercised. It is injected into `build_app` for the same reason
+  `db` is — a test that let the real credential store decide would seal with
+  one key and read with another.
+
+The import contract caught the first attempt: `app/data` may not import
+`app/security`. It was right, so the dependency is inverted — the repository
+takes a `Sealer` protocol and never learns where the key came from.
+
+**The re-check.** `Session` now carries `snapshot_expires_at`, required with
+no default, and `allows()` checks it before anything else. The plan proposed
+doing this in `require()`, which could not work: `require()` receives a
+`Session`, and the session had no expiry on it to compare against.
+
+It bounds a live override too. Ninety seconds against fourteen days means the
+grant nearly always expires first, and nearly always is not a control: a grant
+minted seconds before the snapshot lapsed must not outlive the authority it
+was borrowed from.
+
+**A mutation survived the first pass**, and it was the one that mattered:
+widening the expiry inside `to_session` — the single line deciding how long an
+offline session lasts — changed nothing any test could see. Every test set the
+expiry by hand, so they proved the comparison worked and nothing proved the
+value came from the verified row. Two tests now assert the provenance, one per
+transport. Same shape as everything else this phase: a control that reads a
+number, and nothing checking where the number came from.

@@ -21,6 +21,8 @@ from app.data.db import Database
 from app.data.migrations import latest_version, migrate
 from app.main import _serve, wait_for_health
 from app.security.local_auth import new_session_token, pick_free_port
+from app.security.snapshot_mac import SnapshotSealer
+from tests.conftest import TEST_MAC_KEY
 
 
 @pytest.fixture
@@ -38,7 +40,13 @@ def live_server(tmp_path: Path) -> Iterator[tuple[int, str, Settings]]:
 
     port = pick_free_port()
     token = new_session_token()
-    app = build_app(token=token, settings=settings, db=db, run_migrations=False)
+    app = build_app(
+        token=token,
+        settings=settings,
+        db=db,
+        run_migrations=False,
+        mac_key=TEST_MAC_KEY,
+    )
 
     threading.Thread(target=_serve, args=(app, port), daemon=True).start()
     yield port, token, settings
@@ -95,7 +103,7 @@ def test_a_full_login_over_real_http(live_server: tuple[int, str, Settings]) -> 
 
     db = Database(settings.db_path)
     AuthService(
-        users=CachedUserRepository(db),
+        users=CachedUserRepository(db, sealer=SnapshotSealer(TEST_MAC_KEY)),
         sessions=SessionStore(),
         cloud=None,
         store_code=settings.store_code,

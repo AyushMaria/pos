@@ -52,6 +52,7 @@ def cashier(**overrides: object) -> Session:
         roles=frozenset({perms.CASHIER}),
         permissions=perms.permissions_for(frozenset({perms.CASHIER})),
         authenticated_at=NOW,
+        snapshot_expires_at=NOW + timedelta(days=14),
         **overrides,  # type: ignore[arg-type]
     )
 
@@ -424,6 +425,7 @@ def test_authorising_what_the_session_already_holds_is_refused(till) -> None:
             roles=frozenset({perms.SUPERVISOR}),
             permissions=perms.permissions_for(frozenset({perms.SUPERVISOR})),
             authenticated_at=utcnow(),
+            snapshot_expires_at=utcnow() + timedelta(days=14),
         ),
         access_token=None,
     )

@@ -25,6 +25,7 @@ from app.data.repositories.audit import AuditRepository
 from app.data.repositories.users import CachedUserRepository
 from app.domain import permissions as perms
 from app.domain.ids import new_id
+from app.security.snapshot_mac import SnapshotSealer
 from app.services.auth_service import AuthService, SessionStore
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -103,9 +104,17 @@ def db(settings: Settings) -> Iterator[Database]:
     database.close()
 
 
+#: A fixed sealing key for the suite.
+#:
+#: Real rather than absent: the repository requires one, so there is no
+#: unsealed path for tests to drift onto, and the sealing is exercised by
+#: every test that touches an identity rather than only by the ones about it.
+TEST_MAC_KEY = b"" * 32
+
+
 @pytest.fixture
 def users(db: Database) -> CachedUserRepository:
-    return CachedUserRepository(db)
+    return CachedUserRepository(db, sealer=SnapshotSealer(TEST_MAC_KEY))
 
 
 @pytest.fixture
@@ -210,7 +219,13 @@ def sign_in_as(auth_service: AuthService, client: TestClient):
 @pytest.fixture
 def client(settings: Settings, db: Database) -> Iterator[TestClient]:
     """A client that already carries the session token and a loopback Host."""
-    app = build_app(token=TEST_TOKEN, settings=settings, db=db, run_migrations=False)
+    app = build_app(
+        token=TEST_TOKEN,
+        settings=settings,
+        db=db,
+        run_migrations=False,
+        mac_key=TEST_MAC_KEY,
+    )
     with TestClient(app, base_url="http://127.0.0.1") as test_client:
         test_client.headers.update({"Authorization": f"Bearer {TEST_TOKEN}"})
         yield test_client
@@ -219,7 +234,13 @@ def client(settings: Settings, db: Database) -> Iterator[TestClient]:
 @pytest.fixture
 def raw_client(settings: Settings, db: Database) -> Iterator[TestClient]:
     """No credentials attached — for testing the guards themselves."""
-    app = build_app(token=TEST_TOKEN, settings=settings, db=db, run_migrations=False)
+    app = build_app(
+        token=TEST_TOKEN,
+        settings=settings,
+        db=db,
+        run_migrations=False,
+        mac_key=TEST_MAC_KEY,
+    )
     with TestClient(app, base_url="http://127.0.0.1") as test_client:
         yield test_client
 
