@@ -155,7 +155,7 @@ def build_app(
             is_rejection=lambda exc: isinstance(exc, InvalidCredentials),
         )
         engine.tokens = refresher
-        engine.pusher.refresh = refresher.refresh
+        engine.pusher.renew = refresher.renew
     if engine is not None:
         # Built here rather than inside `_build_sync_engine` because it needs
         # the user repository and the session store, and the engine is

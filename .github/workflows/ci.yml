@@ -53,6 +53,12 @@ jobs:
       # different question: does anything call it?
       - name: every API client function has a caller
         run: python scripts/check_dead_client.py
+      
+      # The same question, asked of the Python side. Phase 7 shipped a refresh
+      # token that was saved and never read — two functions with no caller —
+      # and the check above could not see it because it walks only TypeScript.
+      - name: every service, security, sync and repository function has a caller
+        run: python scripts/check_dead_python.py
 
   # ── The Python suite, on both target and CI platforms ─────────────────────
   test:

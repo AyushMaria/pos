@@ -50,7 +50,7 @@ STORE, TERMINAL = "ST01", "T1"
 def token_expiring_in(delta: timedelta) -> str:
     """An unsigned JWT whose only claim that matters is `exp`."""
     exp = datetime.now(timezone.utc) + delta
-    return jwt.encode({"exp": int(exp.timestamp()), "sub": "x"}, "k", algorithm="HS256")
+    return jwt.encode({"exp": int(exp.timestamp()), "sub": "x"}, "x" * 32, algorithm="HS256")
 
 
 class Rejected(Exception):
@@ -128,7 +128,7 @@ async def test_a_refresh_replaces_both_tokens(in_memory_keychain: dict[str, str]
     keychain.save_refresh_token(STORE, TERMINAL, "refresh-0")
     holder, exchange = Holder("access-0"), Exchange()
 
-    outcome = await refresher(holder, exchange).refresh()
+    outcome = await refresher(holder, exchange).renew()
 
     assert outcome == "refreshed"
     assert exchange.calls == ["refresh-0"], "must exchange the token login saved"
@@ -142,7 +142,7 @@ async def test_a_refresh_replaces_both_tokens(in_memory_keychain: dict[str, str]
 async def test_no_stored_refresh_token_is_dead(in_memory_keychain: dict[str, str]) -> None:
     holder, exchange = Holder("access-0"), Exchange()
 
-    assert await refresher(holder, exchange).refresh() == "dead"
+    assert await refresher(holder, exchange).renew() == "dead"
     assert exchange.calls == []
     assert holder.replaced == []
 
@@ -152,7 +152,7 @@ async def test_a_rejected_refresh_token_is_dead(in_memory_keychain: dict[str, st
     keychain.save_refresh_token(STORE, TERMINAL, "refresh-0")
     holder, exchange = Holder("access-0"), Exchange(raises=Rejected())
 
-    assert await refresher(holder, exchange).refresh() == "dead"
+    assert await refresher(holder, exchange).renew() == "dead"
     assert holder.replaced == []
 
 
@@ -165,7 +165,7 @@ async def test_a_network_failure_is_unreachable_not_dead(
     keychain.save_refresh_token(STORE, TERMINAL, "refresh-0")
     holder, exchange = Holder("access-0"), Exchange(raises=httpx.ConnectError("down"))
 
-    assert await refresher(holder, exchange).refresh() == "unreachable"
+    assert await refresher(holder, exchange).renew() == "unreachable"
     assert holder.replaced == []
     assert keychain.load_refresh_token(STORE, TERMINAL) == "refresh-0"
 
@@ -175,7 +175,7 @@ async def test_signed_out_is_nothing_to_do(in_memory_keychain: dict[str, str]) -
     keychain.save_refresh_token(STORE, TERMINAL, "refresh-0")
     exchange = Exchange()
 
-    assert await refresher(Holder(None), exchange).refresh() == "nothing"
+    assert await refresher(Holder(None), exchange).renew() == "nothing"
     assert exchange.calls == []
 
 
@@ -243,7 +243,7 @@ async def test_a_401_refreshes_once_and_resends_the_same_batch_under_the_new_tok
     cloud.fail_with = httpx.Response(401, json={"message": "JWT expired"})
     holder, exchange = Holder("access-0"), Exchange()
     pusher = pusher_for(db, outbox, cloud, holder)
-    pusher.refresh = refresher(holder, exchange).refresh
+    pusher.renew = refresher(holder, exchange).renew
 
     result = await pusher.drain()
 
@@ -269,7 +269,7 @@ async def test_a_dead_refresh_token_stops_the_drain_and_says_sign_in(
     cloud.fail_with = httpx.Response(401, json={"message": "JWT expired"})
     holder, exchange = Holder("access-0"), Exchange(raises=Rejected())
     pusher = pusher_for(db, outbox, cloud, holder)
-    pusher.refresh = refresher(holder, exchange).refresh
+    pusher.renew = refresher(holder, exchange).renew
 
     result = await pusher.drain()
 
@@ -296,7 +296,7 @@ async def test_only_one_refresh_per_drain(
     cloud.fail_with = httpx.Response(401, json={"message": "permission denied"})
     holder, exchange = Holder("access-0"), Exchange()
     pusher = pusher_for(db, outbox, cloud, holder)
-    pusher.refresh = refresher(holder, exchange).refresh
+    pusher.renew = refresher(holder, exchange).renew
 
     result = await pusher.drain()
 
@@ -318,7 +318,7 @@ async def test_without_a_refresher_a_401_is_still_transient(
     cloud.fail_times = 1
     cloud.fail_with = httpx.Response(401, json={"message": "JWT expired"})
     pusher = pusher_for(db, outbox, cloud, Holder("access-0"))
-    assert pusher.refresh is None
+    assert pusher.renew is None
 
     result = await pusher.drain()
 
@@ -382,7 +382,7 @@ async def test_a_dead_session_is_reported_and_cleared_by_the_next_good_push(
     engine.pusher.token_provider = holder.current
     # No refresh token in the keychain at all: proactive path says dead.
     engine.tokens = refresher(holder, Exchange())
-    engine.pusher.refresh = engine.tokens.refresh
+    engine.pusher.renew = engine.tokens.renew
 
     await engine.cycle()
     status = engine.snapshot()
@@ -430,7 +430,7 @@ def test_build_app_wires_the_refresher_into_the_engine(
     engine = app.state.sync
     assert engine is not None
     assert isinstance(engine.tokens, TokenRefresher)
-    assert engine.pusher.refresh == engine.tokens.refresh
+    assert engine.pusher.renew == engine.tokens.renew
     assert engine.tokens.store_code == STORE and engine.tokens.terminal_code == TERMINAL
     # And the seam it reads through is the live session store: sign somebody
     # in and the refresher sees their token without being told.
@@ -488,7 +488,7 @@ async def test_signing_in_again_clears_the_badge_with_nothing_to_push(
     engine.pusher.token_provider = holder.current
     engine.puller = _expiry_aware_puller(db, holder)
     engine.tokens = refresher(holder, Exchange())
-    engine.pusher.refresh = engine.tokens.refresh
+    engine.pusher.renew = engine.tokens.renew
 
     # Nothing in the outbox, and the session is past saving: no refresh token
     # in the keychain, so the proactive path says dead.

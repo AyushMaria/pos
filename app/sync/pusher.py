@@ -93,7 +93,7 @@ class Pusher:
         token_provider: Any,
         backoff: Backoff | None = None,
         client: httpx.AsyncClient | None = None,
-        refresh: Callable[[], Awaitable[str]] | None = None,
+        renew: Callable[[], Awaitable[str]] | None = None,
     ) -> None:
         self.outbox = outbox
         self.payloads = payloads
@@ -108,7 +108,7 @@ class Pusher:
         #: Tries to renew the access token; returns one of the outcomes in
         #: `app.sync.tokens`. Optional, so a terminal with no cloud and every
         #: test that builds a pusher to watch the outbox keeps working.
-        self.refresh = refresh
+        self.renew = renew
 
     # ── The loop ────────────────────────────────────────────────────────────
 
@@ -147,9 +147,9 @@ class Pusher:
                 # is lost by looping. If the refresh token is dead as well,
                 # say so in a sentence a person can act on, and stop: a
                 # credential that cannot be renewed is not a network blip.
-                if self.refresh is not None and not refreshed_this_drain:
+                if self.renew is not None and not refreshed_this_drain:
                     refreshed_this_drain = True
-                    outcome = await self.refresh()
+                    outcome = await self.renew()
                     if outcome == "refreshed":
                         log.info("access token refreshed after a 401; retrying the batch")
                         continue

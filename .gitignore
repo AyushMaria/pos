@@ -37,3 +37,6 @@ backup-*
 # diff.
 *.log
 Claude outputs/
+
+# Commit message drafts, written by Claude and consumed by `git commit -F`.
+commit-message.txt

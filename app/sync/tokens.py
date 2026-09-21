@@ -104,8 +104,15 @@ class TokenRefresher:
             return False
         return exp - now <= self.margin
 
-    async def refresh(self) -> Outcome:
-        """Try once. Never raises: the caller decides what each outcome means."""
+    async def renew(self) -> Outcome:
+        """Try once. Never raises: the caller decides what each outcome means.
+
+        Called `renew`, not `refresh`, on purpose. `SupabaseAuthClient.refresh`
+        is the function this module exists to call, and the dead-code guard
+        matches by name: a second `refresh` in scope would let that one lose
+        its caller again without the guard noticing. `test_dead_python`
+        asserts the name stays unique.
+        """
         if self.current_token() is None:
             return "nothing"
 
@@ -140,4 +147,4 @@ class TokenRefresher:
         """The proactive path: refresh only if the token is near its end."""
         if not self.expiring(now):
             return "nothing"
-        return await self.refresh()
+        return await self.renew()
