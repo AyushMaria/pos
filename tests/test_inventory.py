@@ -221,6 +221,85 @@ def test_an_adjustment_without_a_reason_is_refused(
     assert response.status_code == 422
 
 
+# ── A product that does not exist ───────────────────────────────────────────
+#
+# Found by the phase 7 permission matrix, which probes these two routes with
+# `"no-such-product"` and used to get a 200. The ledger row was written, rode
+# the outbox, and was refused by the cloud's foreign key hours later — with a
+# constraint name for an error and nobody watching. Local `stock_ledger` has
+# no FK of its own, so the service is where the refusal has to live.
+
+
+def test_an_adjustment_to_a_product_that_does_not_exist_is_refused(
+    stockroom: TestClient, db: Database, catalog: dict
+) -> None:
+    response = stockroom.post(
+        "/inventory/adjustments",
+        json={"product_id": "no-such-product", "delta_milli": -1_000, "note": "probe"},
+    )
+
+    assert response.status_code == 404, response.text
+    assert "no product with id no-such-product" in response.json()["detail"]
+    # The whole point: nothing was written, so nothing will be refused later.
+    assert db.query("SELECT 1 FROM stock_ledger WHERE product_id = 'no-such-product'") == []
+    assert db.query("SELECT 1 FROM outbox WHERE entity = 'stock_movement'") == []
+
+
+def test_a_count_with_one_bad_line_is_refused_whole(
+    stockroom: TestClient, db: Database, catalog: dict
+) -> None:
+    """One typo must not half-commit a section count. The good line here
+    would have written a row; the bad one stops it."""
+    good = catalog["SKU-SOAP"]
+    response = stockroom.post(
+        "/inventory/counts",
+        json={
+            "lines": [
+                {"product_id": good, "counted_milli": 5_000},
+                {"product_id": "no-such-product", "counted_milli": 1_000},
+            ]
+        },
+    )
+
+    assert response.status_code == 404, response.text
+    assert db.query("SELECT 1 FROM stock_ledger WHERE product_id = ?", (good,)) == []
+
+
+def test_a_withdrawn_product_is_refused_with_its_own_sentence(
+    stockroom: TestClient, db: Database, catalog: dict
+) -> None:
+    """The cloud's FK would accept this row — the product exists, it is only
+    soft-deleted. Stock moving on something nobody can sell is exactly the
+    shrinkage the reason column exists to catch, so it is refused here, and
+    the sentence says why rather than calling it a typo."""
+    product_id = catalog["SKU-SOAP"]
+    with db.write() as conn:
+        conn.execute(
+            "UPDATE products SET deleted_at = ? WHERE id = ?",
+            (datetime.now(timezone.utc).isoformat(), product_id),
+        )
+
+    response = stockroom.post(
+        "/inventory/adjustments",
+        json={"product_id": product_id, "delta_milli": -1_000, "note": "late breakage"},
+    )
+
+    assert response.status_code == 404, response.text
+    assert "withdrawn from the catalogue" in response.json()["detail"]
+    assert db.query("SELECT 1 FROM stock_ledger WHERE product_id = ?", (product_id,)) == []
+
+
+def test_a_real_product_still_adjusts(stockroom: TestClient, catalog: dict) -> None:
+    """The positive control for the three refusals above. A check whose
+    passing state is 'refused' is indistinguishable from a route that refuses
+    everything."""
+    response = stockroom.post(
+        "/inventory/adjustments",
+        json={"product_id": catalog["SKU-SOAP"], "delta_milli": -1_000, "note": "breakage"},
+    )
+    assert response.status_code == 200, response.text
+
+
 # ── The exit criterion ──────────────────────────────────────────────────────
 
 

@@ -120,6 +120,18 @@ class CatalogRepository(Repository):
         )
         return None if row is None else _to_product(row)
 
+    def exists_even_if_deleted(self, product_id: str) -> bool:
+        """Is there a row at all, withdrawn or not?
+
+        `by_id` answers "can this be sold?"; this answers "did it ever
+        exist?". The inventory service needs both to refuse a movement with
+        the right sentence — a typo and a withdrawn product are different
+        mistakes.
+        """
+        return self._row(
+            "SELECT 1 FROM products WHERE id = ? LIMIT 1", (product_id,)
+        ) is not None
+
     def by_lookup_key(self, key: str) -> CatalogProduct | None:
         """Resolve a parsed scan.
 

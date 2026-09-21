@@ -31,11 +31,22 @@ from app.domain import permissions
 from app.domain.identity import Session
 from app.domain.receiving import ReceivingError
 from app.services.cart_service import UnknownBarcode, UnreadableBarcode
-from app.services.inventory_service import InventoryService
+from app.services.inventory_service import InventoryService, UnknownProduct
 
 router = APIRouter(prefix="/inventory", tags=["inventory"])
 
 Inventory = Annotated[InventoryService, Depends(get_inventory_service)]
+
+
+def _no_such_product(exc: UnknownProduct) -> HTTPException:
+    """404, with the sentence the service wrote.
+
+    Until phase 7's matrix probed these routes with `"no-such-product"`, this
+    was a 200: the row went to the ledger and the outbox, and the cloud's
+    foreign key refused it hours later into the failures queue. The refusal
+    now happens while the person who typed the id is still looking.
+    """
+    return HTTPException(status.HTTP_404_NOT_FOUND, str(exc))
 
 
 def _refused(exc: ReceivingError) -> HTTPException:
@@ -135,6 +146,8 @@ def count(
         written = inventory.count(
             session, {line.product_id: line.counted_milli for line in body.lines}
         )
+    except UnknownProduct as exc:
+        raise _no_such_product(exc) from exc
     except ReceivingError as exc:
         raise _refused(exc) from exc
 
@@ -157,6 +170,8 @@ def adjust(
         written = inventory.adjust(
             session, body.product_id, body.delta_milli, body.note
         )
+    except UnknownProduct as exc:
+        raise _no_such_product(exc) from exc
     except ReceivingError as exc:
         raise _refused(exc) from exc
 

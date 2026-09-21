@@ -23,6 +23,32 @@ from app.domain.receiving import Movement, ReceivingError
 from app.services.cart_service import UnknownBarcode, UnreadableBarcode
 
 
+class UnknownProduct(LookupError):
+    """A movement named a product the catalogue does not have.
+
+    Found by the phase 7 permission matrix, which probed the count and
+    adjustment routes with `"no-such-product"` and got a 200. The row was
+    written locally, rode the outbox, and was refused by the cloud's foreign
+    key hours later — quarantined with a constraint name for an error, long
+    after whoever typed it had gone. Refusing here, with a sentence, is the
+    same refusal at the moment it can still be acted on.
+
+    `withdrawn` is the deleted-product case. The cloud's FK would *accept*
+    that row, and stock moving on a product nobody can sell is exactly the
+    shrinkage the reason column exists to catch.
+    """
+
+    def __init__(self, product_id: str, *, withdrawn: bool = False) -> None:
+        super().__init__(product_id)
+        self.product_id = product_id
+        self.withdrawn = withdrawn
+
+    def __str__(self) -> str:
+        if self.withdrawn:
+            return f"product {self.product_id} has been withdrawn from the catalogue"
+        return f"no product with id {self.product_id}"
+
+
 @dataclass(frozen=True, slots=True)
 class ReceiptLine:
     """One line of a delivery, as the person entering it sees it."""
@@ -89,6 +115,8 @@ class InventoryService:
         row: nothing changed, and a ledger of no-ops is a ledger nobody reads.
         """
         movements: list[Movement] = []
+        for product_id in counts:
+            self._require_product(product_id)
         for product_id, counted_milli in counts.items():
             try:
                 movements.append(
@@ -116,6 +144,7 @@ class InventoryService:
         self, session: Session, product_id: str, delta_milli: int, note: str
     ) -> list[str]:
         """A manual correction, which always needs a reason."""
+        self._require_product(product_id)
         movement = receiving.adjustment(
             product_id, delta_milli=delta_milli, note=note
         )
@@ -129,6 +158,26 @@ class InventoryService:
         )
 
     # ── Resolution ──────────────────────────────────────────────────────────
+
+    def _require_product(self, product_id: str) -> None:
+        """Refuse a movement the cloud would refuse, before it is written.
+
+        Receiving never needs this: `_resolve` goes from a scanned code to a
+        product, so a receipt line cannot name one that does not exist. Counts
+        and adjustments take the id straight from the request body, and until
+        this check they took it on trust. Local `stock_ledger.product_id`
+        carries no foreign key, so nothing else was going to say no.
+
+        Checked before any row is written rather than per row inside the
+        transaction, so a count with one bad line is refused whole and the
+        good lines are not half-committed.
+        """
+        if self.catalog.by_id(product_id) is not None:
+            return
+        # `by_id` hides soft-deleted rows; tell the two cases apart so the
+        # sentence says which.
+        withdrawn = self.catalog.exists_even_if_deleted(product_id)
+        raise UnknownProduct(product_id, withdrawn=withdrawn)
 
     def _resolve(self, raw: str) -> CatalogProduct:
         """A code to a product, honouring pack size.
