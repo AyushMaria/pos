@@ -1844,6 +1844,11 @@
             ],
             "title": "Last Push At"
           },
+          "needs_signin": {
+            "default": false,
+            "title": "Needs Signin",
+            "type": "boolean"
+          },
           "needs_update": {
             "default": false,
             "title": "Needs Update",

@@ -47,7 +47,7 @@ export function SyncIndicator({ session }: { session?: SessionResponse | null })
   // green and the two halves of that tooltip contradicted each other:
   // "Everything has been sent. 1 could not be sent and need a manager."
   const failures = status.failures ?? 0;
-  const tone = status.needs_update || failures > 0
+  const tone = status.needs_update || status.needs_signin || failures > 0
     ? "bad"
     : !status.online
       ? "warn"
@@ -126,6 +126,7 @@ export function SyncIndicator({ session }: { session?: SessionResponse | null })
 
 function summary(status: SyncStatusResponse): string {
   if (status.needs_update) return "Update needed";
+  if (status.needs_signin) return "Sign in needed";
   // Before the backlog, because a refused sale outranks a sent one: the day's
   // takings differ between this till and the cloud until somebody looks at it.
   // Claim 5 of the M2 test is that a refusal is *visible*, and a green badge
@@ -145,6 +146,12 @@ function summary(status: SyncStatusResponse): string {
 function detail(status: SyncStatusResponse): string {
   if (status.needs_update) {
     return "The server no longer accepts this version. Sales are safe on this machine, but they cannot be sent until the till is updated.";
+  }
+  if (status.needs_signin) {
+    // The other status waiting does not fix. Until phase 7 this read as
+    // "Offline" for the rest of the day, because an expired token and a
+    // dead network produce the same 401 and nothing told them apart.
+    return "This till's cloud session has expired. Sales are safe on this machine; sign in again to resume sending them.";
   }
   // Optional in the schema because it has a server-side default; the UI
   // still has to say what it means when it is absent, which is "none".

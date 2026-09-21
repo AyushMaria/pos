@@ -41,6 +41,7 @@ function status(overrides: Partial<SyncStatusResponse> = {}): SyncStatusResponse
     last_pull_at: null,
     last_error: null,
     needs_update: false,
+    needs_signin: false,
     ...overrides,
   };
 }
@@ -86,6 +87,19 @@ describe("what the counter is told", () => {
     render(<SyncIndicator />);
 
     expect(await screen.findByText("Update needed")).toBeDefined();
+  });
+
+  it("asks for a person when the cloud session has run out", async () => {
+    // The other state waiting will not fix. Before the refresh-token fix this
+    // read "Offline" for the rest of the day, and the cashier checked the
+    // cable instead of signing in.
+    api.status.mockResolvedValue(
+      status({ needs_signin: true, backlog: 3, online: false, last_error: "x" }),
+    );
+    render(<SyncIndicator />);
+
+    expect(await screen.findByText("Sign in needed")).toBeDefined();
+    expect(screen.getByTitle(/sign in again to resume sending them/)).toBeDefined();
   });
 
   it("reassures that nothing is lost", async () => {

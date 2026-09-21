@@ -376,6 +376,7 @@ export interface SyncStatusResponse {
   last_pull_at?: string | null;
   last_error?: string | null;
   needs_update?: boolean;
+  needs_signin?: boolean;
 }
 /** A rate the quick-create form may offer. */
 export interface TaxCodeOut {

@@ -180,6 +180,20 @@ class SessionStore:
         with self._lock:
             return self._access_token
 
+    def replace_token(self, access_token: str) -> None:
+        """A renewed credential for the same person. Not a sign-in.
+
+        The refresher calls this from the sync loop. The session object is
+        untouched — same cashier, same permissions, same grants — because a
+        refresh changes what the cloud will accept, not who is at the till.
+        Refused while signed out, so a refresh that lands after a sign-out
+        cannot resurrect a token nobody is using.
+        """
+        with self._lock:
+            if self._session is None:
+                return
+            self._access_token = access_token
+
     def grant(
         self,
         permission: str,

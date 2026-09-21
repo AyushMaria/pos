@@ -385,6 +385,10 @@ class SyncStatusResponse(ApiModel):
     #: The server rejected this build's payload version (§17). Waiting will
     #: not fix it; updating the terminal will.
     needs_update: bool = False
+    #: The cloud session could not be renewed: the access token expired and
+    #: the refresh token was rejected or is gone. Waiting will not fix this
+    #: either; a sign-in will. Selling continues throughout.
+    needs_signin: bool = False
 
 
 class SyncFailureOut(ApiModel):

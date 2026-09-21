@@ -29,6 +29,7 @@ from app.domain.identity import utcnow
 from app.sync.puller import Puller
 from app.sync.pusher import DrainResult, Pusher
 from app.sync.revocations import RevocationSweep
+from app.sync.tokens import SIGN_IN_NEEDED, TokenRefresher
 
 log = logging.getLogger(__name__)
 
@@ -55,6 +56,10 @@ class SyncStatus:
     #: Set when the server refuses this build's payloads (§17). The only
     #: status the cashier cannot resolve by waiting.
     needs_update: bool = False
+    #: Set when the cloud session cannot be renewed — the access token has
+    #: expired and the refresh token is rejected or gone. The other status
+    #: waiting will not fix: a person has to sign in. Sales keep working.
+    needs_signin: bool = False
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -66,6 +71,7 @@ class SyncStatus:
             "last_pull_at": self.last_pull_at.isoformat() if self.last_pull_at else None,
             "last_error": self.last_error,
             "needs_update": self.needs_update,
+            "needs_signin": self.needs_signin,
         }
 
 
@@ -79,6 +85,9 @@ class SyncEngine:
     #: Optional so a terminal with no cloud, and every test that builds an
     #: engine to watch the outbox, keeps working unchanged.
     revocations: RevocationSweep | None = None
+    #: Renews the access token before it expires. Optional for the same
+    #: reason as `revocations`.
+    tokens: TokenRefresher | None = None
     publish: Any = None
     status: SyncStatus = field(default_factory=SyncStatus)
     _task: asyncio.Task[None] | None = field(default=None, init=False)
@@ -124,12 +133,30 @@ class SyncEngine:
     # ── One pass ────────────────────────────────────────────────────────────
 
     async def cycle(self) -> DrainResult:
+        await self._keep_session_alive()
         result = await self._push()
         if not result.stopped_early:
             await self._pull()
             await self._sweep_revocations()
         await self._refresh()
         return result
+
+    async def _keep_session_alive(self) -> None:
+        """Refresh the access token before it runs out, not after.
+
+        The pusher can recover from a 401 by refreshing on the spot, but that
+        is the backstop. This is the path that runs in practice: a cycle
+        every ninety seconds, and a token that gets renewed inside its last
+        ten minutes rather than found dead at the counter.
+        """
+        if self.tokens is None:
+            return
+        outcome = await self.tokens.ensure_fresh(utcnow())
+        if outcome == "refreshed":
+            self.status.needs_signin = False
+        elif outcome == "dead":
+            self.status.needs_signin = True
+            self.status.last_error = SIGN_IN_NEEDED
 
     async def _sweep_revocations(self) -> None:
         """Drop cached identities the cloud no longer recognises.
@@ -168,6 +195,12 @@ class SyncEngine:
         self.status.needs_update = bool(
             result.error and "needs updating" in result.error
         )
+        if result.error == SIGN_IN_NEEDED:
+            self.status.needs_signin = True
+        elif result.pushed:
+            # Something got through under the current token, so whatever the
+            # last cycle said about the session no longer applies.
+            self.status.needs_signin = False
         return result
 
     async def _pull(self) -> None:
@@ -180,6 +213,17 @@ class SyncEngine:
             return
         self.status.last_pull_at = utcnow()
         self.status.online = True
+        # A pull that returned is proof the cloud accepted this token —
+        # `raise_for_status` means a 401 would have landed above. That is
+        # what clears the badge, and it has to be proof rather than a clock:
+        # a token can be inside its hour and still be refused.
+        #
+        # Without this the only thing that cleared `needs_signin` was a
+        # successful *push*, so a till signed in again on a quiet morning
+        # went on saying "Sign in needed" until somebody made a sale. The
+        # one instruction on screen was the one thing that would not help,
+        # which is worse than no badge at all.
+        self.status.needs_signin = False
 
     async def _refresh(self) -> None:
         self.status.backlog = await run_in_threadpool(self.outbox.backlog)

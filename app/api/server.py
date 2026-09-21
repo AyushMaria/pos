@@ -52,12 +52,13 @@ from app.services.cart_service import CartService
 from app.services.inventory_service import InventoryService
 from app.services.payment_providers import default_registry
 from app.services.sale_service import SaleService
-from app.services.supabase_auth import SupabaseAuthClient
+from app.services.supabase_auth import InvalidCredentials, SupabaseAuthClient
 from app.sync.engine import SyncEngine
 from app.sync.payloads import PayloadBuilder
 from app.sync.puller import Puller
 from app.sync.pusher import Pusher
 from app.sync.revocations import RevocationChecker, RevocationSweep
+from app.sync.tokens import TokenRefresher
 
 log = logging.getLogger(__name__)
 
@@ -141,6 +142,20 @@ def build_app(
 
     outbox = OutboxRepository(db)
     engine = _build_sync_engine(db, outbox, sessions, settings)
+    if engine is not None and cloud is not None:
+        # The refresher, wired here for the same reason the revocation sweep
+        # is: it needs the auth client and the session store, and `app.sync`
+        # may import neither. Everything crosses as a callable.
+        refresher = TokenRefresher(
+            exchange=cloud.refresh,
+            current_token=lambda: sessions.access_token,
+            replace_token=sessions.replace_token,
+            store_code=settings.store_code,
+            terminal_code=settings.terminal_code,
+            is_rejection=lambda exc: isinstance(exc, InvalidCredentials),
+        )
+        engine.tokens = refresher
+        engine.pusher.refresh = refresher.refresh
     if engine is not None:
         # Built here rather than inside `_build_sync_engine` because it needs
         # the user repository and the session store, and the engine is

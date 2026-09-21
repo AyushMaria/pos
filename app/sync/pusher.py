@@ -21,6 +21,7 @@ the response rather than optimistically before it.
 from __future__ import annotations
 
 import logging
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
@@ -32,6 +33,7 @@ from app.domain.identity import utcnow
 from app.sync.backoff import Backoff
 from app.sync.envelope import SCHEMA_VERSION, Envelope
 from app.sync.payloads import PayloadBuilder, PayloadError
+from app.sync.tokens import SIGN_IN_NEEDED
 
 log = logging.getLogger(__name__)
 
@@ -44,6 +46,15 @@ TIMEOUT = httpx.Timeout(connect=5.0, read=30.0, write=30.0, pool=5.0)
 
 class TransientError(RuntimeError):
     """The network, or the server, was briefly unavailable. Retry."""
+
+
+class AuthRefused(TransientError):
+    """401 or 403 from the server.
+
+    An expired JWT looks like this and a genuine RLS denial looks like this.
+    Transient by inheritance — the safe direction — but distinguishable, so
+    the drain loop can try one refresh before giving up for the cycle.
+    """
 
 
 class PermanentError(RuntimeError):
@@ -82,6 +93,7 @@ class Pusher:
         token_provider: Any,
         backoff: Backoff | None = None,
         client: httpx.AsyncClient | None = None,
+        refresh: Callable[[], Awaitable[str]] | None = None,
     ) -> None:
         self.outbox = outbox
         self.payloads = payloads
@@ -93,12 +105,17 @@ class Pusher:
         self.token_provider = token_provider
         self.backoff = backoff or Backoff()
         self._client = client
+        #: Tries to renew the access token; returns one of the outcomes in
+        #: `app.sync.tokens`. Optional, so a terminal with no cloud and every
+        #: test that builds a pusher to watch the outbox keeps working.
+        self.refresh = refresh
 
     # ── The loop ────────────────────────────────────────────────────────────
 
     async def drain(self) -> DrainResult:
         """Push everything pending, or stop at the first transient failure."""
         pushed = quarantined = batches = 0
+        refreshed_this_drain = False
 
         while True:
             batch = self.outbox.next_pending(BATCH_SIZE)
@@ -124,6 +141,32 @@ class Pusher:
             rows = [row for row, _ in envelopes]
             try:
                 await self._post([envelope for _, envelope in envelopes])
+            except AuthRefused as exc:
+                # One refresh per drain. If it works, the same batch goes
+                # again with the new token — nothing was marked, so nothing
+                # is lost by looping. If the refresh token is dead as well,
+                # say so in a sentence a person can act on, and stop: a
+                # credential that cannot be renewed is not a network blip.
+                if self.refresh is not None and not refreshed_this_drain:
+                    refreshed_this_drain = True
+                    outcome = await self.refresh()
+                    if outcome == "refreshed":
+                        log.info("access token refreshed after a 401; retrying the batch")
+                        continue
+                    if outcome == "dead":
+                        self.outbox.record_attempt([row.id for row in rows], SIGN_IN_NEEDED)
+                        log.warning(SIGN_IN_NEEDED)
+                        return DrainResult(
+                            pushed=pushed, quarantined=quarantined, batches=batches,
+                            stopped_early=True, error=SIGN_IN_NEEDED,
+                        )
+                self.outbox.record_attempt([row.id for row in rows], str(exc))
+                wait = self.backoff.fail()
+                log.info("sync push deferred (%s); next attempt in %.0fs", exc, wait)
+                return DrainResult(
+                    pushed=pushed, quarantined=quarantined, batches=batches,
+                    stopped_early=True, error=str(exc),
+                )
             except TransientError as exc:
                 self.outbox.record_attempt([row.id for row in rows], str(exc))
                 wait = self.backoff.fail()
@@ -296,8 +339,9 @@ class Pusher:
             # transient is the safe way round — a real denial keeps failing
             # and stays visible in `attempts` and `last_error`, whereas
             # quarantining a whole batch on an expired token would set aside
-            # sales that were never actually refused.
-            raise TransientError(f"HTTP {response.status_code}: {detail}")
+            # sales that were never actually refused. `AuthRefused` is the
+            # same verdict with a name, so the drain loop can try a refresh.
+            raise AuthRefused(f"HTTP {response.status_code}: {detail}")
 
         raise PermanentError(f"HTTP {response.status_code}: {detail}")
 
