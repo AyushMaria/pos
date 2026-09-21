@@ -104,6 +104,12 @@ cd ui-src; npm run build; cd ..
 - [x] Tests green.
 - [x] The build writes into `app\ui`.
 
+**If the RLS suite errors with `could not open file "base/…"`** (dozens of
+errors at once, none of them about your code): the ephemeral Postgres under
+`%TEMP%\pos_rls_pgdata` has been half-swept by a temp clean. Delete that
+folder and re-run; it rebuilds. Seen on 21 Sept (99 errors → 103 passed,
+1 xfailed after the delete). It will recur after any temp clean.
+
 ## S2. Stale-bundle check
 
 **Do**

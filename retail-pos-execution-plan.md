@@ -189,6 +189,14 @@ Three things surfaced during the build:
 
 **Exit criteria:** a full trading day opens and closes with a variance figure the owner can actually explain — which means rounding gain/loss is reported separately and not mistaken for cashier error. Z-report totals tie to the sum of `payments` by method. Reports export to a file the owner can open without the app.
 
+**Extensions — added 21 September 2026, not part of the gate.** Sequenced here because their dependencies land here; the phase closes on the exit criteria above whether or not these are done:
+
+- **Decision first: the owner channel** — WhatsApp, SMS, email or a link. Both notifications below block on it. Record it in §2 beside the other week-1 decisions once made.
+- Daily report to the owner — the exported report, sent from the day-close function rather than fetched
+- Notify the owner when stock runs low — the phase 6 reorder list, evaluated once a day and sent
+- Fast daily repricing of loose goods — one list, a price box per row, for the 6am vegetable run
+- Control barcodes at the till — scanner-only confirm and cancel, on Dev B's track
+
 ### Phase 9 — Fleet operations (weeks 21–23)
 
 - PyInstaller one-folder build, Inno Setup installer
@@ -202,6 +210,19 @@ Three things surfaced during the build:
 ### Phase 10 — Pilot hardening (weeks 24–26)
 
 Reserved deliberately. Every deployment surfaces work you cannot predict from a desk: a product name that breaks the receipt layout, a cashier workflow nobody anticipated, a supplier whose barcodes are all duplicates. Do not fill this time in advance.
+
+### Phase 11 — Owner intelligence (added 21 September 2026)
+
+*Not in the original plan.* Added after phase 7 to hold the reporting-and-AI features that are additions to the architecture rather than part of it. Placed after the pilot on purpose: every item consumes phase 8's reports and day close, reaches the owner through the channel phase 8 decides, and needs a trading history that only the pilot produces.
+
+- Weekly stock analysis — best and worst sellers, what to stock more of, what to drop
+- Suggest products the shop should start stocking — `unknown_scans` and its outcomes are the demand signal
+- AI analysis of shop data, current when the owner looks
+- Automated stock order — reopens the supplier line of §8; that is a decision to take, not a line to build around
+
+**Needs nothing earlier provides:** a cloud-side scheduled job runner; a decision on what shop data may leave Supabase for a model call; a supplier concept if ordering goes ahead.
+
+**Exit criteria:** to be written with the partner before the phase opens. Starting point: the owner receives one weekly message they act on without opening the app, and can say afterwards whether it was right.
 
 ---
 
@@ -290,6 +311,8 @@ Explicitly **not** building, to protect the schedule. Each is a genuine feature 
 **Features** — card payments · loyalty and customer accounts · multi-store consolidated reporting · e-invoicing/e-way bill integration · supplier portal · purchase order approval workflows · promotions beyond simple percentage and fixed-amount · gift cards · layaway · employee time clock · mobile companion app · Tally/accounting export · returns without a receipt · serial-number tracking · expiry-batch FEFO enforcement
 
 Write this list somewhere the owner can see it, and revisit it only after the pilot. Of everything on it, peripherals are the most likely to come back first — see §9.
+
+Phase 11's automated stock ordering needs a supplier to order from, which touches the supplier-portal and PO-workflow lines above. That is the one item already known to want the fence reopened, and it waits for the pilot like everything else on this list.
 
 ---
 

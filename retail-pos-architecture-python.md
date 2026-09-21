@@ -733,6 +733,10 @@ Slightly looser than the Rust variant on start-up and scan latency. Both remain 
 7. **RBAC completion** — override flow, offline snapshots with TTL, audit log viewer.
 8. **Shifts and reporting** — sessions, cash movements, cash-vs-UPI reconciliation, X/Z reports.
 9. **Fleet operations** — signed installer, updater with staged rollout, crash supervision, remote diagnostics.
+10. **Pilot hardening** — reserved; filled only by what the shadow week finds.
+11. **Owner intelligence** — *scope added 21 September 2026, after phase 7.* Weekly stock analysis, stocking suggestions read from `unknown_scans`, AI analysis of shop data, automated stock ordering. Consumes phase 8's reports and day close, reaches the owner through the channel phase 8 decides, and runs against a history the pilot has to produce first — which is why it follows phase 10 rather than joining phase 8.
+
+Phase 8 also carries four **extensions** that are not part of its gate: the daily report delivered to the owner, the low-stock notification, fast repricing of loose goods, and control barcodes at the till. They ride alongside the documented scope because their dependencies land there; the phase closes on its exit criteria whether or not they are done.
 
 *Later:* PSP-verified UPI, then card (§13.6).
 
