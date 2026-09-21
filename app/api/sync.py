@@ -108,6 +108,7 @@ def sync_failures(
                 error=row["error"],
                 failed_at=row["failed_at"],
                 entity=_entity_of(row["payload_json"]),
+                reference=_reference_of(row["payload_json"]),
             )
             for row in engine.outbox.failures()
         ]
@@ -151,3 +152,39 @@ def _entity_of(payload_json: str) -> str | None:
     except ValueError:
         return None
     return payload.get("entity") if isinstance(payload, dict) else None
+
+
+def _reference_of(payload_json: str) -> str | None:
+    """What a manager would call this row, read off the envelope it carries.
+
+    An `outbox_id` and an entity name are what the system calls it; a
+    receipt number is what the person who took the money calls it. The
+    failures screen exists for the second person.
+    """
+    try:
+        payload = json.loads(payload_json)
+    except ValueError:
+        return None
+    if not isinstance(payload, dict):
+        return None
+    data = payload.get("data")
+    if not isinstance(data, dict):
+        return None
+    entity = payload.get("entity")
+    if entity == "sale":
+        return data.get("receipt_no")
+    if entity == "stock_movement":
+        return data.get("reason")
+    if entity == "unknown_scan":
+        return data.get("barcode")
+    if entity in ("override", "audit"):
+        after = data.get("after_json")
+        if isinstance(after, str):
+            try:
+                after = json.loads(after)
+            except ValueError:
+                after = None
+        if isinstance(after, dict) and after.get("actor_code"):
+            return f"{after['actor_code']} ← {after.get('approver_code', '?')}"
+        return data.get("action")
+    return None

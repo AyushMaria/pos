@@ -47,6 +47,9 @@ class FakeCloud:
         self.fail_with: httpx.Response | Exception | None = None
         #: Fail this many times, then behave. For testing recovery.
         self.fail_times = 0
+        #: Entities this server has never heard of. A batch carrying one is
+        #: refused whole, with that entity's name in the error.
+        self.refuses: set[str] = set()
 
     async def handle(self, request: httpx.Request) -> httpx.Response:
         self.calls += 1
@@ -58,6 +61,15 @@ class FakeCloud:
             return self.fail_with or httpx.Response(503, json={"message": "down"})
 
         body = json.loads(request.content)
+
+        # `sync_push` is one transaction: the first item it cannot accept
+        # raises, names itself, and rolls the whole call back.
+        for item in body["items"]:
+            if item["entity"] in self.refuses:
+                return httpx.Response(
+                    400, json={"message": f"unknown entity {item['entity']}"}
+                )
+
         for item in body["items"]:
             if item["entity"] == "sale":
                 # do-nothing-on-conflict, the whole point.
@@ -329,6 +341,44 @@ async def test_a_rejected_payload_is_permanent(
     assert result.quarantined == 1
     assert outbox.backlog() == 0
     assert "invalid input syntax" in outbox.failures()[0]["error"]
+
+
+@pytest.mark.asyncio
+async def test_one_bad_row_does_not_take_its_batch_down_with_it(
+    till: Any, db: Database, outbox: OutboxRepository, cloud: FakeCloud
+) -> None:
+    """Found by the phase 7 acceptance run.
+
+    `sync_push` refuses a batch on its first unacceptable item and names it.
+    The pusher used to quarantine every row in that batch with that one
+    sentence — so sale ST01-T1-000008 was recorded as failing for "unknown
+    entity override", an entity it did not contain, and left the queue
+    beside the row that actually had.
+
+    Two claims, and both must hold: the innocent row is sent, and the guilty
+    row's error names the guilty row.
+    """
+    from app.data.repositories.unknown_scans import UnknownScanRepository
+
+    sale_id = sell(till)
+    # A real, buildable row the *server* refuses — the refusal has to happen
+    # at the wire, where the bug lives, not in the builder.
+    UnknownScanRepository(db).record(
+        "0000000000000",
+        store_id="018f0000-0000-7000-8000-000000000100",
+        terminal_id="T1",
+        at=utcnow(),
+    )
+    cloud.refuses = {"unknown_scan"}
+
+    result = await pusher(db, outbox, cloud).drain()
+
+    assert sale_id in cloud.sales, "the sale did nothing wrong and must arrive"
+    assert outbox.backlog() == 0
+    failures = outbox.failures()
+    assert len(failures) == 1
+    assert "unknown_scan" in failures[0]["error"]
+    assert result.pushed == 1 and result.quarantined == 1
 
 
 @pytest.mark.asyncio

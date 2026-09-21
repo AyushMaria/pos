@@ -132,19 +132,51 @@ class Pusher:
                     pushed=pushed, quarantined=quarantined, batches=batches,
                     stopped_early=True, error=str(exc),
                 )
-            except PermanentError as exc:
-                self.outbox.quarantine(
-                    rows,
-                    str(exc),
-                    at=utcnow(),
-                    envelopes={
-                        row.id: envelope.to_dict() for row, envelope in envelopes
-                    },
-                )
+            except SchemaTooOld as exc:
+                # Every item in the batch fails for the same reason, and so
+                # would every item sent alone. Nothing to isolate.
+                self._quarantine(envelopes, str(exc))
                 quarantined += len(rows)
                 batches += 1
                 log.error("sync push quarantined %d rows: %s", len(rows), exc)
-                # Deliberately keep going. One bad batch must not stop the
+                continue
+            except PermanentError as exc:
+                if len(envelopes) == 1:
+                    self._quarantine(envelopes, str(exc))
+                    quarantined += 1
+                    batches += 1
+                    log.error("sync push quarantined 1 row: %s", exc)
+                    continue
+
+                # `sync_push` is one transaction: it raises on the first item
+                # it cannot accept and rolls back the lot. The batch was
+                # refused, but the *batch* is not what was wrong — one item
+                # was, and its error came back naming it. Quarantining all
+                # two hundred rows with that one sentence records a sale as
+                # having failed for an entity it does not contain, and takes
+                # every innocent row out of the queue with the guilty one.
+                # Resend them one at a time so each row gets its own verdict.
+                try:
+                    sent, bad = await self._isolate(envelopes)
+                except TransientError as inner:
+                    self.outbox.record_attempt([row.id for row in rows], str(inner))
+                    wait = self.backoff.fail()
+                    log.info(
+                        "sync push deferred mid-isolation (%s); next attempt in %.0fs",
+                        inner, wait,
+                    )
+                    return DrainResult(
+                        pushed=pushed, quarantined=quarantined, batches=batches,
+                        stopped_early=True, error=str(inner),
+                    )
+                pushed += sent
+                quarantined += bad
+                batches += 1
+                log.error(
+                    "sync push refused a batch of %d: %d sent alone, %d quarantined "
+                    "(first refusal: %s)", len(rows), sent, bad, exc,
+                )
+                # Deliberately keep going. One bad row must not stop the
                 # queue behind it, which is the failure this whole split
                 # between permanent and transient exists to prevent.
                 continue
@@ -154,6 +186,42 @@ class Pusher:
             pushed += len(rows)
             batches += 1
             log.info("pushed %d rows", len(rows))
+
+    async def _isolate(
+        self, envelopes: list[tuple[OutboxRow, Envelope]]
+    ) -> tuple[int, int]:
+        """Resend a refused batch one row at a time. Returns (sent, quarantined).
+
+        Idempotency at the far end is what makes this safe: any item the
+        server *had* accepted before rolling back is a no-op on resend. The
+        cost is one round trip per row for the rare batch that carries a bad
+        one — a refused batch is already the slow path, and a wrong answer
+        recorded against a good sale is the expensive one.
+
+        A transient failure mid-way propagates: the rows already handled are
+        marked, the rest stay pending, and the next drain resumes them.
+        """
+        sent = quarantined = 0
+        for row, envelope in envelopes:
+            try:
+                await self._post([envelope])
+            except PermanentError as exc:
+                self._quarantine([(row, envelope)], str(exc))
+                quarantined += 1
+                continue
+            self.outbox.mark_synced([row.id], at=utcnow())
+            sent += 1
+        return sent, quarantined
+
+    def _quarantine(
+        self, envelopes: list[tuple[OutboxRow, Envelope]], error: str
+    ) -> None:
+        self.outbox.quarantine(
+            [row for row, _ in envelopes],
+            error,
+            at=utcnow(),
+            envelopes={row.id: envelope.to_dict() for row, envelope in envelopes},
+        )
 
     # ── Building ────────────────────────────────────────────────────────────
 

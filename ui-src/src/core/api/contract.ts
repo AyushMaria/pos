@@ -353,6 +353,7 @@ export interface SyncFailureOut {
   id: number;
   outbox_id?: number | null;
   entity?: string | null;
+  reference?: string | null;
   error: string;
   failed_at: string;
 }

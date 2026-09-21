@@ -391,6 +391,11 @@ class SyncFailureOut(ApiModel):
     id: int
     outbox_id: int | None = None
     entity: str | None = None
+    #: The thing a person would recognise the row by: a receipt number for a
+    #: sale, the barcode for an unknown scan, the two codes for an override,
+    #: the reason for a stock movement. Null when the payload carries none —
+    #: a corrupt envelope, say — and the screen says so rather than blanking.
+    reference: str | None = None
     error: str
     failed_at: str
 

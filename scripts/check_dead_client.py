@@ -56,7 +56,6 @@ KNOWN_UNCALLED = frozenset(
         "register.readCart",
         "register.setQuantity",
         "register.abandon",
-        "sync.failures",
     }
 )
 

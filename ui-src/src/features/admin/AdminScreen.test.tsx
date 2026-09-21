@@ -36,6 +36,8 @@ const api = {
   stockLevel: vi.fn(),
   setReorderPoint: vi.fn(),
   taxCodes: vi.fn(),
+  syncFailures: vi.fn(),
+  retryFailures: vi.fn(),
 };
 
 vi.mock("../../core/api/admin", () => ({
@@ -60,6 +62,10 @@ vi.mock("../../core/api/admin", () => ({
 
 vi.mock("../../core/api/register", () => ({
   catalog: { taxCodes: (...a: unknown[]) => api.taxCodes(...a) },
+  sync: {
+    failures: (...a: unknown[]) => api.syncFailures(...a),
+    retryFailures: (...a: unknown[]) => api.retryFailures(...a),
+  },
 }));
 
 const { AdminScreen } = await import("./AdminScreen");
@@ -98,6 +104,7 @@ beforeEach(() => {
   api.prices.mockResolvedValue({ prices: [] });
   api.unknownScans.mockResolvedValue({ scans: [] });
   api.lowStock.mockResolvedValue({ rows: [] });
+  api.syncFailures.mockResolvedValue({ items: [] });
   api.stockLevel.mockResolvedValue({
     product_id: "p1", store_id: "st1", on_hand: 24_000, reorder_point: 0,
   });
@@ -525,5 +532,71 @@ describe("giving up on an entry is a different act from finishing it", () => {
     // false for every entry closed with the button this one replaced.
     expect(await screen.findByText(/Nothing waiting/)).toBeInTheDocument();
     expect(screen.queryByText(/found a product/)).not.toBeInTheDocument();
+  });
+});
+
+describe("the failures list the sync indicator has always named", () => {
+  const REFUSED = {
+    items: [
+      {
+        id: 9,
+        outbox_id: 31,
+        entity: "sale",
+        reference: "ST01-T1-000008",
+        error: "HTTP 400: unknown entity override",
+        failed_at: "2026-09-19T12:55:49+00:00",
+      },
+      {
+        id: 10,
+        outbox_id: 32,
+        entity: "stock_movement",
+        reference: null,
+        error: "HTTP 400: nope",
+        failed_at: "2026-09-19T12:56:00+00:00",
+      },
+    ],
+  };
+
+  it("is absent for someone who may not read refused sales", () => {
+    render(<AdminScreen session={person(["product.read"])} onClose={() => {}} />);
+    expect(screen.queryByRole("button", { name: "Sync failures" })).toBeNull();
+  });
+
+  it("shows a refused sale by its receipt number, and says when a row has none", async () => {
+    const user = userEvent.setup();
+    api.syncFailures.mockResolvedValue(REFUSED);
+
+    render(
+      <AdminScreen
+        session={person(["product.read", "report.sales.store"])}
+        onClose={() => {}}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "Sync failures" }));
+
+    expect(await screen.findByText("ST01-T1-000008")).toBeInTheDocument();
+    expect(screen.getByText(/unknown entity override/)).toBeInTheDocument();
+    // The movement carries no receipt number. A sentence, not a blank cell.
+    expect(screen.getByText("no reference on this row")).toBeInTheDocument();
+  });
+
+  it("requeues everything on Try again and reports how many", async () => {
+    const user = userEvent.setup();
+    api.syncFailures.mockResolvedValueOnce(REFUSED);
+    api.retryFailures.mockResolvedValue({ requeued: 2, status: {} });
+    api.syncFailures.mockResolvedValueOnce({ items: [] });
+
+    render(
+      <AdminScreen
+        session={person(["product.read", "report.sales.store"])}
+        onClose={() => {}}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "Sync failures" }));
+    await user.click(await screen.findByRole("button", { name: "Try again" }));
+
+    await waitFor(() => expect(api.retryFailures).toHaveBeenCalled());
+    expect(await screen.findByText("2 put back in the queue.")).toBeInTheDocument();
+    expect(await screen.findByText(/Nothing refused/)).toBeInTheDocument();
   });
 });

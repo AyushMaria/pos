@@ -12,6 +12,7 @@ offline-first, it is just online with extra steps.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Iterator
 from typing import Any
 
@@ -374,3 +375,30 @@ def test_status_needs_a_signed_in_session(cloud_settings: Settings, db: Database
     with TestClient(app, base_url="http://127.0.0.1") as client:
         client.headers.update({"Authorization": f"Bearer {TEST_TOKEN}"})
         assert client.get("/sync/status").status_code == 401
+
+
+def test_a_refused_row_is_named_the_way_a_person_would_name_it() -> None:
+    """`reference` on `/sync/failures`, added when the failures screen was
+    finally built (phase 7 acceptance). A manager recognises a sale by its
+    receipt number, an unknown scan by its barcode, an override by who lent
+    what to whom — never by an outbox id. And a payload with nothing to
+    offer says so with a null rather than an empty string that the screen
+    would render as a blank."""
+    from app.api.sync import _reference_of
+
+    sale = json.dumps({"entity": "sale", "data": {"receipt_no": "ST01-T1-000008"}})
+    scan = json.dumps({"entity": "unknown_scan", "data": {"barcode": "8901999000014"}})
+    grant = json.dumps(
+        {
+            "entity": "override",
+            "data": {"after_json": json.dumps({"actor_code": "C001", "approver_code": "S001"})},
+        }
+    )
+    movement = json.dumps({"entity": "stock_movement", "data": {"reason": "adjustment"}})
+
+    assert _reference_of(sale) == "ST01-T1-000008"
+    assert _reference_of(scan) == "8901999000014"
+    assert _reference_of(grant) == "C001 ← S001"
+    assert _reference_of(movement) == "adjustment"
+    assert _reference_of("{}") is None
+    assert _reference_of("not json") is None

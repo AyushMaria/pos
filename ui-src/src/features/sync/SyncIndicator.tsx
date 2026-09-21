@@ -165,7 +165,7 @@ function detail(status: SyncStatusResponse): string {
   if (failures > 0) {
     lines.push(
       `${failures} sale(s) refused by the cloud, still on this terminal. ` +
-        "A manager can see why in the failures list.",
+        "A manager can see why under Admin → Sync failures.",
     );
   }
   if (status.last_push_at) lines.push(`Last sent ${status.last_push_at}.`);

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { admin } from "../../core/api/admin";
 import { ApiError } from "../../core/api/client";
-import { catalog } from "../../core/api/register";
+import { catalog, sync } from "../../core/api/register";
 import type {
   AuditEntryOut,
   AdminBarcodeOut,
@@ -11,6 +11,7 @@ import type {
   ProductCreateRequest,
   SessionResponse,
   StockLevelOut,
+  SyncFailureOut,
   TaxCodeOut,
   UnknownScanOut,
 } from "../../core/api/contract";
@@ -38,9 +39,13 @@ const TABS: { id: Tab; label: string; permission: Permission }[] = [
   // only read-only one here. A cashier never sees the tab; the router
   // refuses the request; RLS refuses the read (§11.1).
   { id: "audit", label: "Audit log", permission: "user.manage" },
+  // The sync indicator has said "a manager can see why in the failures list"
+  // since phase 5. This is the first time that sentence has pointed at a
+  // screen. Same key as the route and as the indicator's Try again.
+  { id: "failures", label: "Sync failures", permission: "report.sales.store" },
 ];
 
-type Tab = "catalogue" | "queue" | "low" | "audit";
+type Tab = "catalogue" | "queue" | "low" | "audit" | "failures";
 
 const rupees = (paise: number) => (paise / 100).toFixed(2);
 const paise = (typed: string) => Math.round(Number(typed) * 100);
@@ -194,6 +199,7 @@ export function AdminScreen({
       {tab === "queue" && <QueueTab session={session} />}
       {tab === "low" && <LowStockTab />}
       {tab === "audit" && <AuditTab />}
+      {tab === "failures" && <SyncFailuresTab />}
     </div>
   );
 }
@@ -1319,6 +1325,107 @@ function LowStockTab() {
         <p className="muted">
           Nothing at its reorder point. Only products with a reorder point set
           appear here.
+        </p>
+      )}
+    </section>
+  );
+}
+
+// ── Sync failures ─────────────────────────────────────────────────────────
+
+/**
+ * What the cloud refused, and why.
+ *
+ * A quarantined row is in this terminal's database and not in the cloud, so
+ * the day's totals disagree between the two until somebody looks. The sync
+ * indicator has pointed here in words since phase 5 — "a manager can see why
+ * in the failures list" — and until phase 7's acceptance run nobody noticed
+ * that the list it named did not exist. The route did; the client function
+ * did; `check_dead_client.py` had `sync.failures` on its known-uncalled list,
+ * which is where a missing screen hides.
+ *
+ * Read-only apart from Try again, which requeues everything. Retrying is a
+ * judgement that the cause is fixed, so it is one deliberate button and not
+ * an automatic loop that would bury the reason every ninety seconds.
+ */
+function SyncFailuresTab() {
+  const [items, setItems] = useState<SyncFailureOut[]>([]);
+  const [requeued, setRequeued] = useState<number | null>(null);
+  const { busy, error, offline, run } = useCloudCall();
+
+  const load = useCallback(async () => {
+    const body = await run(() => sync.failures());
+    if (body) setItems(body.items);
+  }, [run]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const retry = async () => {
+    const result = await run(() => sync.retryFailures());
+    if (result) setRequeued(result.requeued);
+    void load();
+  };
+
+  return (
+    <section className="pane">
+      <p className="note muted">
+        Rows the cloud refused. They are still on this terminal and not in the
+        cloud, so reports there are short by exactly these until the cause is
+        fixed and they are sent again.
+      </p>
+
+      <CloudNotice offline={offline} error={error} />
+
+      {items.length > 0 && (
+        <p className="row">
+          <button type="button" disabled={busy} onClick={() => void retry()}>
+            Try again
+          </button>
+        </p>
+      )}
+      {requeued !== null && (
+        <p className="muted">
+          {requeued === 0
+            ? "Nothing was waiting to be retried."
+            : `${requeued} put back in the queue.`}
+        </p>
+      )}
+
+      <table className="grid">
+        <thead>
+          <tr>
+            <th>When</th>
+            <th>What</th>
+            <th>Reference</th>
+            <th>Why</th>
+          </tr>
+        </thead>
+        <tbody>
+          {items.map((item) => (
+            <tr key={item.id}>
+              <td>{new Date(item.failed_at).toLocaleString()}</td>
+              <td>{item.entity ?? <span className="muted">unreadable envelope</span>}</td>
+              <td>
+                {item.reference ?? (
+                  // A movement has no receipt number and a corrupt payload
+                  // has nothing at all. Say which, rather than a blank cell
+                  // that reads as a rendering bug — the audit screen's rule.
+                  <span className="muted">
+                    {item.entity ? "no reference on this row" : "—"}
+                  </span>
+                )}
+              </td>
+              <td className="what">{item.error}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+
+      {items.length === 0 && !busy && !offline && (
+        <p className="muted">
+          Nothing refused. Everything this terminal has sent, the cloud kept.
         </p>
       )}
     </section>

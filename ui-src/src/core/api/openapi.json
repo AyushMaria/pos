@@ -1722,6 +1722,17 @@
               }
             ],
             "title": "Outbox Id"
+          },
+          "reference": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reference"
           }
         },
         "required": [
