@@ -1525,18 +1525,31 @@ that are destructive by omission — turned out to have a testing-shaped twin.
 
 ### Debt carried forward, recorded not hidden
 
-- **Sync stops an hour after sign-in.** `SupabaseAuthClient.refresh` has no
-  caller; the token expires and the pusher retries a dead credential for
-  ever. Card.
-- **The dead-code guard watches one language.** `check_dead_client.py` walks
-  TypeScript; the refresh bug is the same shape in Python. Card.
+- ~~**Sync stops an hour after sign-in.**~~ Paid in `3dd3d19`, and
+  **proven live on 21 September** with the margin set to 59 minutes so a
+  fresh token counted as expiring: refresh round trips at 18:12:40 and
+  18:14:15, a sale pushed under the renewed token at 18:15:58, the refresh
+  token removed from Credential Manager at 18:24, the badge red with
+  "Sign in needed" once the last access token ran out at 19:24, and green
+  again ninety seconds after a sign-in with nothing to push. One thing the
+  run taught: while the access token is still live, the pull-clears-it rule
+  keeps the badge green even with the refresh token gone. That is the badge
+  reporting the present rather than forecasting — sync *does* work until
+  the hour is up — and it is why the dead state appears exactly when
+  sending stops, not before.
+- ~~**The dead-code guard watches one language.**~~ Paid in `1562071`.
+  Its first mutation check found a blind spot on its own subject —
+  `TokenRefresher.refresh` shadowed the name it was watching — which is
+  now a rename, a `shadowed()` report and a pinned test.
 - **`stock.receive` alone admits an adjustment** — the one `xfail` still
   standing from slice 1. `0012`'s comment describes the policy that was
   intended; the SQL is a flat OR of three.
 - **`auth.revoked` is broadcast and nothing listens.** A cashier deactivated
   mid-shift learns from the 401 at the next sale, not from the screen.
-- **Stock movements accept a product that does not exist.** Local
-  `stock_ledger.product_id` has no FK; the cloud's does. Card from slice 1.
+- ~~**Stock movements accept a product that does not exist.**~~ Paid in
+  `2840b27`: the service refuses before writing, with a sentence, and
+  refuses a withdrawn product too. The local FK was deliberately not added
+  — a table rebuild on every live till to guard nothing the service does not.
 - **The audit screen cannot search `after_json`.** See above.
 - **The cloud PIN throttle is per-instance and in-memory.** Said in the
   function; the terminal's persisted counter is the binding one.
