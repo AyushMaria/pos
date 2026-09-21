@@ -35,12 +35,12 @@ Part A can be done right now. C and D need B first.
 
 ## Progress
 
-- [ ] S — Setup
-- [ ] A — Audit log viewer
-- [ ] B — Deploy the Edge Functions
-- [ ] C — Override, offline
+- [x] S — Setup
+- [x] A — Audit log viewer
+- [x] B — Deploy the Edge Functions
+- [x] C — Override, offline
 - [x] D — Revocation and the snapshot
-- [ ] Results written into the plan, including what this run *cannot* prove
+- [x] Results written into the plan, including what this run *cannot* prove
 
 ---
 
@@ -275,7 +275,7 @@ supabase functions list
 
 **Expect**
 
-- [ ] `migration list` shows **0022** and **0023** applied remotely.
+- [x] `migration list` shows **0022** and **0023** applied remotely.
 
 **Expect**
 

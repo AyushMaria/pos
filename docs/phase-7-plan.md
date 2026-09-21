@@ -14,6 +14,9 @@ Four deliverables:
 - `<PermissionGate>` audit across every privileged control
 - Audit log viewer
 
+> **Closed 21 September 2026.** Exit criteria met, all six definition-of-done
+> boxes ticked. See [Closed](#closed) at the end of this document.
+
 ---
 
 ## What already exists
@@ -1419,3 +1422,123 @@ instead, and the two failures are distinguishable by message and status:
 | Genuinely expired | "This terminal has been offline too long" | 401 |
 
 Both verified against a throwaway database before the guide was written.
+
+---
+
+## Closed
+
+**21 September 2026.** Weeks 16–17 of the plan.
+
+**Exit criteria met.** The permission matrix exists as one parametrised test
+at all three layers — 100 Python cases, 55 FastAPI, 9 RLS tables discovered
+from `pg_policies`, 100 UI — and passes. With the network cable out, a cashier
+was refused a discount, a supervisor lent the key from the override dialog,
+the line discounted, the cashier stayed signed in, and the audit row named
+both people. Ninety seconds later it asked again. A snapshot signed sixteen
+days ago was refused at offline login with the TTL's own sentence, as a 401;
+the same row with its expiry edited was refused by the seal, as a 503, and
+`pos.log` said why.
+
+**Definition of done (plan §5), all six:**
+
+- [x] **Tests pass in CI, including the permission matrix.** 1065 Python,
+      103 RLS, 217 UI; seven gates. The matrix is the phase's first commit,
+      not its last, and the two `xfail(strict=True)` markers it planted both
+      came off with their fixes.
+- [x] **It runs from the packaged build.** `packaging/pos.spec` from phase 6,
+      rebuilt for this phase's UI.
+- [x] **It works with the network disconnected, or fails with a message a
+      cashier can act on.** The override's exit criterion is the offline
+      path; every one of its eight refusals is a different sentence.
+- [x] **No new `float` in money paths.** `check_no_float` caught one this
+      phase — a measured argon2 cost in a docstring — and it moved to the
+      test that argues with it.
+- [x] **Audit rows exist for anything a manager would need to investigate
+      later.** `override.granted` is the first row ever to carry
+      `approver_id`, written where the grant is minted rather than where it
+      is spent, and it now leaves the building (0022, 0023).
+- [x] **A non-developer has used it for 15 minutes.** The acceptance run in
+      `docs/phase-7-acceptance.md` — 42 boxes, four parts, run by a person
+      against the real project.
+
+**Migrations 0022–0023, Edge Functions `authorize-override` and
+`check-revocations`, local migrations 005–007.** All deployed; all three
+functions ACTIVE.
+
+### What the acceptance run found that the suite did not
+
+The runbook was itself wrong in four places, and every one was a claim the
+document could make without checking:
+
+- **Part B deployed the functions and not the migrations.** C3 passed and C4
+  quarantined the override — and the sale travelling beside it — as
+  "unknown entity override". A runbook that lists two of three deploy steps
+  looks complete.
+- **`status = 'disabled'`** is a value `employees_status_check` has never
+  accepted. The schema has `active`, `suspended`, `terminated`.
+- **Three SQL snippets against `cached_users`** were indistinguishable from
+  the Supabase ones beside them, and the table only exists on the terminal.
+- **A `python -c` one-liner** that PowerShell could never have passed to
+  Python intact.
+
+And three defects in the product:
+
+- **A refused batch quarantines innocent rows with the wrong error.** Sale
+  `ST01-T1-000008` was recorded as failing for an entity it does not
+  contain. Card on the board.
+- **"A manager can see why in the failures list" — there is no failures
+  list.** The route and the client function exist; no screen renders them.
+  The sentence shown at the moment a manager most needs a next step points
+  at a place that was never built. Card on the board.
+- **The audit screen cannot show a barcode.** `after_json` is not rendered,
+  so "what happened to this code?" takes three filters and a memory for
+  timestamps.
+
+### One thing to check before trusting the cache
+
+`pos.log` line 3803: at 17:36 on 19 September, **M001's** cached identity
+failed its seal — before Part D began and with nobody editing her row. The
+message offers two causes, tampering or a lost keychain entry, and it was the
+second: something between her last cache write and that read changed the
+per-terminal key. The D2 rehearsal against a throwaway `POS_DATA_DIR` is the
+likely suspect. She is believed to have signed in online since, which
+re-seals the row and is the designed recovery — but *believed* is the word,
+and the check is one grep for a later `M001` login in the log. If a rehearsal
+in a scratch directory can rotate the real terminal's key, that is a bug and
+wants a card; if it cannot, the log should say what did.
+
+### The rule this phase added to the house
+
+**A check whose passing state is "found nothing" needs a positive control**,
+because the check and its own failure are indistinguishable from outside.
+Five instances by the end: the route walker that checked 1 of 46 operations,
+audit tests counting rows they never created, the UTF-16 ignore rule, the
+stale bundle serving a deleted screen, and a keyset pull returning one row
+under RLS that omits rather than refuses. And its sharper sibling, found when
+a fake PostgREST answered a column the query never asked for: **a test that
+constructs its own input cannot tell you where production gets one.**
+
+Slice 1's three discovery guards, slice 2's pattern sample, slice 3's
+`SESSION_MINTING` set and the `checked=False` guard in `check-revocations`
+are the same defence in six places. The phase 6 lesson — look for actions
+that are destructive by omission — turned out to have a testing-shaped twin.
+
+### Debt carried forward, recorded not hidden
+
+- **Sync stops an hour after sign-in.** `SupabaseAuthClient.refresh` has no
+  caller; the token expires and the pusher retries a dead credential for
+  ever. Card.
+- **The dead-code guard watches one language.** `check_dead_client.py` walks
+  TypeScript; the refresh bug is the same shape in Python. Card.
+- **`stock.receive` alone admits an adjustment** — the one `xfail` still
+  standing from slice 1. `0012`'s comment describes the policy that was
+  intended; the SQL is a flat OR of three.
+- **`auth.revoked` is broadcast and nothing listens.** A cashier deactivated
+  mid-shift learns from the 401 at the next sale, not from the screen.
+- **Stock movements accept a product that does not exist.** Local
+  `stock_ledger.product_id` has no FK; the cloud's does. Card from slice 1.
+- **The audit screen cannot search `after_json`.** See above.
+- **The cloud PIN throttle is per-instance and in-memory.** Said in the
+  function; the terminal's persisted counter is the binding one.
+
+**Next: phase 8 — Shifts and reporting (weeks 18–20).**
