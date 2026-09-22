@@ -29,8 +29,22 @@ from app.sync.engine import SyncEngine
 from app.sync.payloads import PayloadBuilder
 from app.sync.puller import Puller
 from app.sync.pusher import Pusher
-from tests.conftest import FAST_ARGON2, TEST_MAC_KEY, TEST_TOKEN, add_barcode, open_cart
+from tests.conftest import (
+    FAST_ARGON2,
+    TEST_MAC_KEY,
+    TEST_TOKEN,
+    add_barcode,
+    open_cart,
+    settle_opening,
+)
 from tests.test_sync_push import TERMINAL_ID, FakeCloud, sell
+
+
+@pytest.fixture
+def till(till: TestClient, db: Database) -> TestClient:
+    """See `settle_opening`: the queue starts empty of the fixture shift."""
+    settle_opening(db)
+    return till
 
 
 @pytest.fixture
@@ -301,6 +315,8 @@ def cloud_till(
     with TestClient(app, base_url="http://127.0.0.1") as client:
         client.headers.update({"Authorization": f"Bearer {TEST_TOKEN}"})
         client.post("/auth/login", json=seeded_cashier)
+        client.post("/shifts/open", json={"opening_float_paise": 50_000})
+        settle_opening(db)
         yield client
 
 

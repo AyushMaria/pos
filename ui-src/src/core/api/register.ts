@@ -6,6 +6,7 @@ import type {
   PostSaleResponse,
   ReceiptLineOut,
   SearchResponse,
+  ShiftOut,
   SyncFailuresResponse,
   SyncRetryResponse,
   SyncStatusResponse,
@@ -172,6 +173,23 @@ export const sync = {
  * the API; the screens hide what a signed-in person may not do, which is UX
  * rather than the control (11.1).
  */
+/**
+ * Shifts (phase 8).
+ *
+ * A sale belongs to a shift, so the register asks for one before it opens
+ * a basket. Only what the register calls today lives here; the close screen
+ * brings `x`, `close` and `cash` with it, so that nothing is exported that
+ * no screen reaches (`scripts/check_dead_client.py`).
+ */
+export const shifts = {
+  /** Open the day with what is in the drawer. 409 if one is already open. */
+  open: (openingFloatPaise: number) =>
+    request<ShiftOut>("/shifts/open", {
+      method: "POST",
+      body: JSON.stringify({ opening_float_paise: openingFloatPaise }),
+    }),
+};
+
 export const inventory = {
   /** What scanning this code that many times would receive. Writes nothing. */
   previewLine: (barcode: string, packs: number) =>

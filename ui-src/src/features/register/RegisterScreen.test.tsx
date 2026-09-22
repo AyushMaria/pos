@@ -101,7 +101,10 @@ const api = {
   writePdf: vi.fn(),
 };
 
+const shiftsApi = { open: vi.fn() };
+
 vi.mock("../../core/api/register", () => ({
+  shifts: { open: (...args: unknown[]) => shiftsApi.open(...args) },
   register: new Proxy(
     {},
     { get: (_target, name: string) => (...args: unknown[]) => api[name as keyof typeof api](...args) },
@@ -134,6 +137,7 @@ async function openRegister() {
 beforeEach(() => {
   for (const fn of Object.values(api)) fn.mockReset();
   for (const fn of Object.values(catalogApi)) fn.mockReset();
+  shiftsApi.open.mockReset();
   api.openCart.mockResolvedValue(cart());
   api.post.mockResolvedValue(posted());
   catalogApi.taxCodes.mockResolvedValue({ tax_codes: RATES });
@@ -486,5 +490,64 @@ describe("an unlisted item", () => {
       "GST0",
       "GST12",
     ]);
+  });
+});
+
+
+describe("opening the day", () => {
+  it("asks for the float when no shift is open, then starts the basket", async () => {
+    // Phase 8 decision 2: the register refuses a cart until a shift is open.
+    // First attempt 409s; after the dialog opens one, the second succeeds.
+    api.openCart
+      .mockRejectedValueOnce(new ApiError(409, "open a shift before selling"))
+      .mockResolvedValue(cart());
+    shiftsApi.open.mockResolvedValue({ id: "s1" });
+    // A person, not a scanner: the float field wears the scan shield, and a
+    // zero-delay userEvent types faster than any human.
+    const user = userEvent.setup({ delay: 50 });
+    render(<RegisterScreen session={session} />);
+
+    const field = await screen.findByLabelText(/cash in the drawer/i);
+    expect(screen.queryByPlaceholderText(/scan, type a barcode/i)).toBeNull();
+
+    await user.type(field, "500");
+    await user.click(screen.getByRole("button", { name: /open shift/i }));
+
+    expect(shiftsApi.open).toHaveBeenCalledWith(50000);
+    expect(await screen.findByPlaceholderText(/scan, type a barcode/i)).toBeDefined();
+  });
+
+  it("carries on if somebody else opened one in the meantime", async () => {
+    api.openCart
+      .mockRejectedValueOnce(new ApiError(409, "open a shift before selling"))
+      .mockResolvedValue(cart());
+    shiftsApi.open.mockRejectedValue(new ApiError(409, "a shift is already open"));
+    const user = userEvent.setup({ delay: 50 });
+    render(<RegisterScreen session={session} />);
+
+    await user.type(await screen.findByLabelText(/cash in the drawer/i), "0");
+    await user.click(screen.getByRole("button", { name: /open shift/i }));
+
+    expect(await screen.findByPlaceholderText(/scan, type a barcode/i)).toBeDefined();
+  });
+
+  it("drops a barcode scanned into the float field", async () => {
+    // Thirteen digits at machine speed is a scan, not a drawer count.
+    api.openCart.mockRejectedValueOnce(new ApiError(409, "open a shift before selling"));
+    const user = userEvent.setup();
+    render(<RegisterScreen session={session} />);
+
+    const field = await screen.findByLabelText(/cash in the drawer/i);
+    await user.type(field, "8901030608278{Enter}");
+
+    expect(shiftsApi.open).not.toHaveBeenCalled();
+    expect(await screen.findByText(/that was a scan/i)).toBeDefined();
+    expect((field as HTMLInputElement).value).toBe("");
+  });
+
+  it("does not ask when a shift is already open", async () => {
+    await openRegister();
+    expect(screen.queryByLabelText(/cash in the drawer/i)).toBeNull();
+    expect(shiftsApi.open).not.toHaveBeenCalled();
   });
 });

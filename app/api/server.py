@@ -30,6 +30,7 @@ from app.api import inventory as inventory_router
 from app.api import overrides as overrides_router
 from app.api import register as register_router
 from app.api import reports as reports_router
+from app.api import shifts as shifts_router
 from app.api import sync as sync_router
 from app.api.dev_ui import DEV_LOGIN_PAGE
 from app.config import Settings, get_settings
@@ -40,6 +41,7 @@ from app.data.repositories.catalog import CatalogRepository
 from app.data.repositories.inventory import InventoryRepository
 from app.data.repositories.outbox import OutboxRepository
 from app.data.repositories.sales import SalesRepository
+from app.data.repositories.shifts import ShiftRepository
 from app.data.repositories.terminal import TerminalRepository
 from app.data.repositories.unknown_scans import UnknownScanRepository
 from app.data.repositories.users import CachedUserRepository
@@ -52,6 +54,7 @@ from app.services.cart_service import CartService
 from app.services.inventory_service import InventoryService
 from app.services.payment_providers import default_registry
 from app.services.sale_service import SaleService
+from app.services.shift_service import ShiftService
 from app.services.supabase_auth import InvalidCredentials, SupabaseAuthClient
 from app.sync.engine import SyncEngine
 from app.sync.payloads import PayloadBuilder
@@ -216,12 +219,15 @@ def build_app(
         catalog, unknown_scans, terminal_code=settings.terminal_code
     )
     app.state.cart_service = cart_service
+    shift_service = ShiftService(ShiftRepository(db), terminal_code=settings.terminal_code)
+    app.state.shift_service = shift_service
     app.state.sale_service = SaleService(
         carts=cart_service,
         sales=sales,
         terminal=terminal,
         providers=default_registry(),
         settings=settings,
+        open_shift=shift_service.require_open,
     )
     app.state.inventory_service = InventoryService(
         catalog, inventory, terminal_code=settings.terminal_code
@@ -295,6 +301,7 @@ def build_app(
     app.include_router(overrides_router.router)
     app.include_router(register_router.router)
     app.include_router(reports_router.router)
+    app.include_router(shifts_router.router)
     app.include_router(sync_router.router)
 
     _mount_ui(app)

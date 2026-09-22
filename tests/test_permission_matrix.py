@@ -56,7 +56,15 @@ def _routes(routes: list[Any]) -> Iterator[Any]:
     says nothing about which permission a route requires.
     """
     for route in routes:
-        if hasattr(route, "dependant") and getattr(route, "path", None):
+        # `GET /` is the development login page, registered only when there
+        # is no UI build and marked `include_in_schema=False` for that reason.
+        # It is not part of the API, and the matrix must not depend on
+        # whether Vite has run on this machine.
+        if (
+            hasattr(route, "dependant")
+            and getattr(route, "path", None)
+            and getattr(route, "include_in_schema", True)
+        ):
             yield route
         for child in getattr(route, "routes", None) or ():
             yield from _routes([child])
@@ -165,6 +173,13 @@ PROBES: dict[str, Probe] = {
     perms.SALE_REVIEW_RESOLVE: Probe("GET", "/register/reviews"),
     perms.REPORT_MARGIN: Probe("GET", "/reports/margin"),
     perms.REPORT_SALES_STORE: Probe("GET", "/sync/failures"),
+    # Phase 8. Both act on the open shift, and the fixture app has none, so a
+    # role that holds the key gets a 409 — admitted, then refused by the
+    # part that had an opinion.
+    perms.CASH_PAYOUT: Probe(
+        "POST", "/shifts/cash", {"direction": "out", "amount_paise": 5_000, "reason": "probe"}
+    ),
+    perms.SHIFT_CLOSE: Probe("POST", "/shifts/close", {"counted_cash_paise": 0}),
     # Cloud-direct, so a role that holds the key reaches Supabase and gets a
     # 503 on a terminal with no project configured. That counts as admitted:
     # the guard let it through to the part that had an opinion.
@@ -183,8 +198,8 @@ PROBES: dict[str, Probe] = {
 #: something to authorise. It is the first act in the application a cashier
 #: can only perform by being lent the key, which is what made the rest of the
 #: flow testable end to end rather than in pieces. `cash.payout` and
-#: `shift.close` wait on a cash-drawer screen; `settings.manage` has no
-#: screen at all.
+#: `shift.close` left in phase 8 slice 1, behind `/shifts/cash` and
+#: `/shifts/close`; `settings.manage` has no screen at all.
 #:
 #: `user.manage` left in slice 5, gating `GET /admin/audit` — the first
 #: screen whose whole job is to answer "who did that?", and the first use
@@ -198,8 +213,6 @@ NO_API_SURFACE: frozenset[str] = frozenset(
         perms.SALE_VOID,
         perms.SALE_REFUND,
         perms.PRICE_OVERRIDE,
-        perms.CASH_PAYOUT,
-        perms.SHIFT_CLOSE,
         perms.SETTINGS_MANAGE,
     }
 )

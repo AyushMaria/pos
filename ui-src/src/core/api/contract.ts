@@ -122,8 +122,26 @@ export interface CartOut {
   /** True once a payment is approved; the basket cannot change */
   locked?: boolean;
 }
+export interface CashMovementRequest {
+  /** in or out */
+  direction: string;
+  amount_paise: number;
+  reason: string;
+}
+export interface CashMovementResponse {
+  movement_id: string;
+}
 export interface ChangeQuantityRequest {
   qty_milli: number;
+}
+export interface CloseShiftRequest {
+  counted_cash_paise: number;
+  note?: string | null;
+}
+export interface CloseShiftResponse {
+  close_id: string;
+  shift: ShiftOut;
+  figures: ShiftFiguresOut;
 }
 /** The startup gate the splash polls. Unauthenticated by design. */
 export interface HealthResponse {
@@ -190,6 +208,10 @@ export interface MoneyOut {
 /** The ledger rows written. Empty when a count matched everywhere. */
 export interface MovementsResponse {
   movement_ids: string[];
+}
+export interface OpenShiftRequest {
+  /** What is in the drawer before the first sale */
+  opening_float_paise: number;
 }
 /** Who is authorising, with what, and for which permission.
 
@@ -335,6 +357,31 @@ export interface SessionResponse {
   /** True when authenticated against the local cache */
   offline: boolean;
 }
+/** The Z-report's numbers. Every line the close screen shows.
+
+`expected_cash` is absent on an X-report by design: a supervisor who sees
+the expected figure before counting types the expected figure. */
+export interface ShiftFiguresOut {
+  cash_sales: MoneyOut;
+  upi_attested: MoneyOut;
+  upi_verified: MoneyOut;
+  cash_in: MoneyOut;
+  cash_out: MoneyOut;
+  rounding: MoneyOut;
+  takings: MoneyOut;
+  under_review_count: number;
+  under_review_total: MoneyOut;
+  sales_count: number;
+  expected_cash?: MoneyOut | null;
+  counted_cash?: MoneyOut | null;
+  variance?: MoneyOut | null;
+}
+export interface ShiftOut {
+  id: string;
+  opened_at: string;
+  opened_by: string;
+  opening_float: MoneyOut;
+}
 export interface StockCountLine {
   product_id: string;
   counted_milli: number;
@@ -447,6 +494,10 @@ export interface UnlistedLineRequest {
   barcode?: string | null;
   /** Integer thousandths; 1.250 kg is 1250 */
   qty_milli?: number | null;
+}
+export interface XReportResponse {
+  shift: ShiftOut;
+  figures: ShiftFiguresOut;
 }
 
 /**

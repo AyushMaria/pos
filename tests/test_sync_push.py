@@ -17,6 +17,7 @@ from typing import Any
 
 import httpx
 import pytest
+from fastapi.testclient import TestClient
 
 from app.data.db import Database
 from app.data.repositories.outbox import OutboxRepository
@@ -24,7 +25,7 @@ from app.domain.identity import utcnow
 from app.sync.backoff import Backoff
 from app.sync.payloads import PayloadBuilder
 from app.sync.pusher import Pusher
-from tests.conftest import add_barcode, open_cart
+from tests.conftest import add_barcode, open_cart, settle_opening
 
 TERMINAL_ID = "018f0000-0000-7000-8000-000000000200"
 
@@ -86,6 +87,19 @@ class FakeCloud:
 @pytest.fixture
 def cloud() -> FakeCloud:
     return FakeCloud()
+
+
+@pytest.fixture
+def till(till: TestClient, db: Database) -> TestClient:
+    """The conftest till, with the fixture shift's opening already in the cloud.
+
+    Every test here counts outbox rows to say something about sales. See
+    `settle_opening`. The one test that is *about* the session row —
+    `test_a_shift_opening_reaches_the_cloud_before_its_sales` — uses `client`
+    and opens its own.
+    """
+    settle_opening(db)
+    return till
 
 
 @pytest.fixture

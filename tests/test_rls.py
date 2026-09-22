@@ -2164,15 +2164,27 @@ def test_a_void_pushes_under_the_cashiers_own_claim(pg: Any) -> None:
         assert cur.rowcount == 1
 
 
-def test_a_payout_is_refused_under_the_cashiers_own_claim(pg: Any) -> None:
-    """`cash.payout` is the counter-example, and the reason this is a rule.
+def test_a_payout_pushes_under_a_colleagues_claim_since_0024(pg: Any) -> None:
+    """The counter-example that stopped being one, and why.
 
-    `cash_movements_insert` asks for `cash.payout` by name. A cashier holding
-    a 90-second grant carries a JWT that does not, so the row is refused —
-    minutes or hours after the customer left, into the failures queue, with
-    nobody watching. That is why `cash.payout` is not in `OVERRIDABLE`, and
-    why a list of overridable keys maintained by hand would be a liability:
-    this is not a fact about the permission, it is a fact about its policy.
+    Until 0024, `cash_movements_insert` asked the *pusher* for `cash.payout`
+    by name. That was the reason `cash.payout` could not be lent at the
+    counter — a cashier's JWT does not carry it, so the row would have been
+    refused hours later into the failures queue. It was also a deadlock
+    waiting to happen: a supervisor's payout at six, pushed by the morning
+    cashier at eight, refused for ever. 0009 found and fixed the identical
+    shape on `sales`.
+
+    0024 makes the same trade for the same reason: the actor columns are
+    provenance, authorisation happened on the terminal under `require()`,
+    and the cloud asks the pusher only to belong to the store and hold
+    `sale.create`. So a cashier can now push a payout — attributed, as the
+    row says, to whoever made it.
+
+    `cash.payout` stays out of `OVERRIDABLE` for now, but for a different
+    reason than before: lending it needs `approved_by` carried into the row
+    and the modal wired to the cash screen, which is phase 8 slice 3. The
+    policy no longer stands in the way, and this test is what says so.
     """
     assert perms.CASH_PAYOUT not in perms.OVERRIDABLE
 
@@ -2185,8 +2197,6 @@ def test_a_payout_is_refused_under_the_cashiers_own_claim(pg: Any) -> None:
     def attempt(jwt_claims: str, actor: str) -> int:
         with pg.transaction(force_rollback=True):
             cur = pg.cursor()
-            # The till session the movement hangs off, created before the role
-            # drops: the FK is not what is under test, the policy is.
             session_id = "019500aa-0000-7000-8000-00000000f900"
             cur.execute(
                 "insert into public.register_sessions (id, store_id, terminal_id, "
@@ -2200,15 +2210,50 @@ def test_a_payout_is_refused_under_the_cashiers_own_claim(pg: Any) -> None:
             cur.execute(payout, (session_id, actor))
             return cur.rowcount
 
-    # The positive control, and the reason it is here: `pytest.raises` on a
-    # refusal passes just as well when the row is malformed, the FK is wrong
-    # or the column list has drifted. Running the identical statement under a
-    # supervisor — who holds `cash.payout` — proves the only variable that
-    # moved is the key.
+    # The supervisor's own payout, as before.
     assert attempt(claims(SUPERVISOR_ID, perms.SUPERVISOR), SUPERVISOR_ID) == 1
+    # A cashier pushing a supervisor's payout — the 0009 deadlock shape.
+    assert attempt(_cashier_claims(), SUPERVISOR_ID) == 1
+    # And, since provenance is not authorisation, their own.
+    assert attempt(_cashier_claims(), CASHIER_ID) == 1
 
-    with pytest.raises(psycopg.errors.InsufficientPrivilege):
-        attempt(_cashier_claims(), CASHIER_ID)
+
+def test_a_shift_close_pushes_under_a_colleagues_claim(pg: Any) -> None:
+    """The close is a row (phase 8 decision 1) and the morning cashier pushes
+    last night's. `shift_closes_insert` asks for the store and `sale.create`;
+    reading it back asks for `report.sales.store`, which a cashier lacks —
+    so the read is asserted both ways."""
+    session_id = "019500aa-0000-7000-8000-00000000f901"
+    close = (
+        "insert into public.shift_closes (id, session_id, closed_at, closed_by, "
+        "counted_cash, expected_cash, variance, cash_sales, upi_attested, "
+        "upi_verified, cash_in, cash_out, rounding, under_review_count, "
+        "under_review_total, sales_count) values "
+        "(gen_random_uuid(), %s, now(), %s, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)"
+    )
+    with pg.transaction(force_rollback=True):
+        cur = pg.cursor()
+        cur.execute(
+            "insert into public.register_sessions (id, store_id, terminal_id, "
+            "user_id, opened_at) values (%s, %s, %s, %s, now())",
+            (session_id, STORE_ID, TERMINAL_UUID, SUPERVISOR_ID),
+        )
+        cur.execute("set local role authenticated")
+        cur.execute(
+            "select set_config('request.jwt.claims', %s, true)", (_cashier_claims(),)
+        )
+        cur.execute(close, (session_id, SUPERVISOR_ID))
+        assert cur.rowcount == 1
+
+        cur.execute("select count(*) from public.shift_closes where session_id = %s", (session_id,))
+        assert cur.fetchone()[0] == 0, "a cashier read a close back"
+
+        cur.execute(
+            "select set_config('request.jwt.claims', %s, true)",
+            (claims(MANAGER_ID, perms.MANAGER),),
+        )
+        cur.execute("select count(*) from public.shift_closes where session_id = %s", (session_id,))
+        assert cur.fetchone()[0] == 1
 
 
 def test_every_overridable_key_is_a_real_permission() -> None:

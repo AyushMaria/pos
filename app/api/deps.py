@@ -22,6 +22,7 @@ from app.services.auth_service import AuthService, SessionStore
 from app.services.cart_service import CartService
 from app.services.inventory_service import InventoryService
 from app.services.sale_service import SaleService
+from app.services.shift_service import ShiftService
 
 
 def get_settings_dep(request: Request) -> Settings:
@@ -66,6 +67,11 @@ def get_admin_service(request: Request) -> AdminService:
 
 def get_inventory_service(request: Request) -> InventoryService:
     service: InventoryService = request.app.state.inventory_service
+    return service
+
+
+def get_shift_service(request: Request) -> ShiftService:
+    service: ShiftService = request.app.state.shift_service
     return service
 
 

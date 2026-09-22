@@ -52,7 +52,10 @@ class PayloadBuilder:
     #: derived from the table below so that a test can name it without
     #: building anything, and cross-checked against the table on every call.
     SUPPORTED_ENTITIES: frozenset[str] = frozenset(
-        {"sale", "sale_review", "stock_movement", "unknown_scan", "override", "audit"}
+        {
+            "sale", "sale_review", "stock_movement", "unknown_scan", "override",
+            "audit", "register_session", "cash_movement", "shift_close",
+        }
     )
 
     def __init__(self, db: Database, *, terminal_id: str) -> None:
@@ -68,6 +71,9 @@ class PayloadBuilder:
             "unknown_scan": self._unknown_scan,
             "override": self._audit_row,
             "audit": self._audit_row,
+            "register_session": self._register_session,
+            "cash_movement": self._cash_movement,
+            "shift_close": self._shift_close,
         }
         assert set(builders) == self.SUPPORTED_ENTITIES, (
             "SUPPORTED_ENTITIES and the builder table have drifted: "
@@ -225,6 +231,37 @@ class PayloadBuilder:
         # `before_json` is always null for a grant: nothing existed before it.
         record.pop("before_json", None)
         return record
+
+    def _register_session(self, session_id: str) -> dict[str, Any]:
+        """A shift, opened. The parent of every sale that follows it.
+
+        Same terminal-code-to-UUID translation as a sale, for the same
+        reason. `status` is local bookkeeping and is not sent: the cloud's
+        row says `open` for ever, and the close is its own entity.
+        """
+        row = self.db.query_one(
+            "SELECT * FROM register_sessions WHERE id = ?", (session_id,)
+        )
+        if row is None:
+            raise PayloadError(f"session {session_id} is queued but no longer exists")
+        record = _dict(row)
+        record["terminal_id"] = self._terminal()
+        for local_only in ("status", "closed_at", "counted_cash", "expected_cash", "variance"):
+            record.pop(local_only, None)
+        return record
+
+    def _cash_movement(self, movement_id: str) -> dict[str, Any]:
+        row = self.db.query_one("SELECT * FROM cash_movements WHERE id = ?", (movement_id,))
+        if row is None:
+            raise PayloadError(f"cash movement {movement_id} is queued but no longer exists")
+        return _dict(row)
+
+    def _shift_close(self, close_id: str) -> dict[str, Any]:
+        """The close as it was signed. Nothing is recomputed on the way out."""
+        row = self.db.query_one("SELECT * FROM shift_closes WHERE id = ?", (close_id,))
+        if row is None:
+            raise PayloadError(f"shift close {close_id} is queued but no longer exists")
+        return _dict(row)
 
     def _sale_review(self, review_id: str) -> dict[str, Any]:
         review = self.db.query_one(

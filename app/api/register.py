@@ -20,6 +20,7 @@ from app.api.deps import (
     StartOfSale,
     get_cart_service,
     get_sale_service,
+    get_shift_service,
     require,
 )
 from app.api.schemas import (
@@ -64,6 +65,7 @@ from app.services.cart_service import (
 )
 from app.services.receipt_render import receipt_path, render_html, render_pdf, render_text
 from app.services.sale_service import SaleNotSettled, SaleService
+from app.services.shift_service import NoOpenShift, ShiftService
 
 router = APIRouter(prefix="/register", tags=["register"])
 
@@ -169,7 +171,15 @@ def open_cart(
     # standing there.
     _start: StartOfSale,
     carts: CartSvc,
+    shifts: Annotated[ShiftService, Depends(get_shift_service)],
 ) -> CartOut:
+    # A basket belongs to a shift (phase 8 decision 2). Refused here, at the
+    # first scan, rather than at payment, so the cashier finds out before the
+    # customer has unpacked the trolley. `SaleService.post` checks again.
+    try:
+        shifts.require_open()
+    except NoOpenShift as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
     return _to_cart_out(carts.open(session))
 
 
@@ -536,7 +546,7 @@ def post_sale(
 
     try:
         posted = sales.post(cart_id)
-    except SaleNotSettled as exc:
+    except (SaleNotSettled, NoOpenShift) as exc:
         raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
 
     # The sale is committed and queued. Wake the sync loop rather than making

@@ -177,6 +177,12 @@ def _reference_of(payload_json: str) -> str | None:
         return data.get("reason")
     if entity == "unknown_scan":
         return data.get("barcode")
+    if entity == "register_session":
+        return f"shift opened {data.get('opened_at', '?')[:16]}"
+    if entity == "shift_close":
+        return f"shift closed {data.get('closed_at', '?')[:16]}"
+    if entity == "cash_movement":
+        return data.get("reason")
     if entity in ("override", "audit"):
         after = data.get("after_json")
         if isinstance(after, str):

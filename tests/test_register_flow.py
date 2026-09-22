@@ -415,7 +415,8 @@ def test_a_crash_mid_post_leaves_no_partial_sale(
     assert db.query("SELECT id FROM sale_lines") == []
     assert db.query("SELECT id FROM payments") == []
     assert db.query("SELECT id FROM stock_ledger") == []
-    assert db.query("SELECT id FROM outbox") == []
+    # The fixture's shift opening is in the outbox; nothing of the sale is.
+    assert db.query("SELECT id FROM outbox WHERE entity != 'register_session'") == []
 
 
 def test_the_cart_survives_a_failed_post(

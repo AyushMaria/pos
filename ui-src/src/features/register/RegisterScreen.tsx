@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ApiError } from "../../core/api/client";
 import { overrides } from "../../core/api/overrides";
-import { catalog, register } from "../../core/api/register";
+import { catalog, register, shifts } from "../../core/api/register";
 import type {
   CartLineOut,
   CartOut,
@@ -62,13 +62,27 @@ export function RegisterScreen({
 
   const focusEntry = useCallback(() => entryRef.current?.focus(), []);
 
+  const [needsShift, setNeedsShift] = useState(false);
+
   const startCart = useCallback(async () => {
     setSale(null);
     setResults([]);
     setQuote(null);
     setUpi(null);
     setMessage(null);
-    setCart(await register.openCart());
+    try {
+      setCart(await register.openCart());
+      setNeedsShift(false);
+    } catch (error) {
+      // No shift is open (phase 8 decision 2). The register cannot sell
+      // until someone says what is in the drawer, so the basket waits and
+      // the dialog asks. Any other failure is still a failure.
+      if (error instanceof ApiError && error.status === 409) {
+        setNeedsShift(true);
+        return;
+      }
+      throw error;
+    }
     focusEntry();
   }, [focusEntry]);
 
@@ -304,6 +318,17 @@ export function RegisterScreen({
   }
 
   if (sale) return <CompletedSale sale={sale} onNext={startCart} />;
+  if (needsShift) {
+    return (
+      <OpenShiftDialog
+        who={session.full_name}
+        onOpened={() => {
+          setNeedsShift(false);
+          void startCart();
+        }}
+      />
+    );
+  }
 
   return (
     <div className="register">
@@ -456,6 +481,74 @@ export function RegisterScreen({
         />
       )}
     </div>
+  );
+}
+
+function OpenShiftDialog({ who, onOpened }: { who: string; onOpened: () => void }) {
+  const [rupees, setRupees] = useState("");
+  const [problem, setProblem] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  // A barcode scanned into the float field is a thirteen-digit rupee amount.
+  // The same shield the PIN field wears: a machine-speed burst is dropped
+  // and said so, rather than opening the day with ₹89,012,620,100.16.
+  const shield = useScanShield({
+    onScanBlocked: () => {
+      setRupees("");
+      setProblem("That was a scan. Type the cash in the drawer.");
+    },
+  });
+
+  const paise = Math.round(Number(rupees) * 100);
+  const ready = rupees.trim().length > 0 && Number.isFinite(paise) && paise >= 0;
+
+  async function open(event: React.FormEvent) {
+    event.preventDefault();
+    if (!ready || busy) return;
+    setBusy(true);
+    try {
+      await shifts.open(paise);
+      onOpened();
+    } catch (error) {
+      // 409 here means somebody else opened one between the register's
+      // question and this answer — the fix is to carry on, not to retype.
+      if (error instanceof ApiError && error.status === 409) {
+        onOpened();
+        return;
+      }
+      setProblem(error instanceof ApiError ? error.message : "Could not open the shift");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <form className="dialog" role="dialog" aria-label="Open a shift" onSubmit={open}>
+      <h3>Open the day</h3>
+      <p className="rounding">
+        Count the drawer before the first sale. {who}, this number is what
+        tonight&apos;s variance is measured against — a float typed from
+        memory at closing time is a guess.
+      </p>
+
+      <label htmlFor="opening-float">Cash in the drawer</label>
+      <input
+        id="opening-float"
+        inputMode="decimal"
+        value={rupees}
+        onChange={(event) => setRupees(event.target.value)}
+        onKeyDown={shield.onKeyDown}
+        placeholder="in rupees"
+        autoFocus
+        autoComplete="off"
+      />
+      {problem && <p className="hint warn">{problem}</p>}
+
+      <div className="actions">
+        <button type="submit" disabled={!ready || busy}>
+          {busy ? "Opening…" : "Open shift"}
+        </button>
+      </div>
+    </form>
   );
 }
 

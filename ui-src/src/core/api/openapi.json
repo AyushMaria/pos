@@ -654,6 +654,48 @@
         "title": "CartOut",
         "type": "object"
       },
+      "CashMovementRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "amount_paise": {
+            "exclusiveMinimum": 0.0,
+            "title": "Amount Paise",
+            "type": "integer"
+          },
+          "direction": {
+            "description": "in or out",
+            "title": "Direction",
+            "type": "string"
+          },
+          "reason": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "direction",
+          "amount_paise",
+          "reason"
+        ],
+        "title": "CashMovementRequest",
+        "type": "object"
+      },
+      "CashMovementResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "movement_id": {
+            "title": "Movement Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "movement_id"
+        ],
+        "title": "CashMovementResponse",
+        "type": "object"
+      },
       "ChangeQuantityRequest": {
         "additionalProperties": false,
         "properties": {
@@ -666,6 +708,55 @@
           "qty_milli"
         ],
         "title": "ChangeQuantityRequest",
+        "type": "object"
+      },
+      "CloseShiftRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "counted_cash_paise": {
+            "minimum": 0.0,
+            "title": "Counted Cash Paise",
+            "type": "integer"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          }
+        },
+        "required": [
+          "counted_cash_paise"
+        ],
+        "title": "CloseShiftRequest",
+        "type": "object"
+      },
+      "CloseShiftResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "close_id": {
+            "title": "Close Id",
+            "type": "string"
+          },
+          "figures": {
+            "$ref": "#/components/schemas/ShiftFiguresOut"
+          },
+          "shift": {
+            "$ref": "#/components/schemas/ShiftOut"
+          }
+        },
+        "required": [
+          "close_id",
+          "shift",
+          "figures"
+        ],
+        "title": "CloseShiftResponse",
         "type": "object"
       },
       "HTTPValidationError": {
@@ -937,6 +1028,22 @@
           "movement_ids"
         ],
         "title": "MovementsResponse",
+        "type": "object"
+      },
+      "OpenShiftRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "opening_float_paise": {
+            "description": "What is in the drawer before the first sale",
+            "minimum": 0.0,
+            "title": "Opening Float Paise",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "opening_float_paise"
+        ],
+        "title": "OpenShiftRequest",
         "type": "object"
       },
       "OverrideRequest": {
@@ -1618,6 +1725,116 @@
         "title": "SessionResponse",
         "type": "object"
       },
+      "ShiftFiguresOut": {
+        "additionalProperties": false,
+        "description": "The Z-report's numbers. Every line the close screen shows.\n\n`expected_cash` is absent on an X-report by design: a supervisor who sees\nthe expected figure before counting types the expected figure.",
+        "properties": {
+          "cash_in": {
+            "$ref": "#/components/schemas/MoneyOut"
+          },
+          "cash_out": {
+            "$ref": "#/components/schemas/MoneyOut"
+          },
+          "cash_sales": {
+            "$ref": "#/components/schemas/MoneyOut"
+          },
+          "counted_cash": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MoneyOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "expected_cash": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MoneyOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "rounding": {
+            "$ref": "#/components/schemas/MoneyOut"
+          },
+          "sales_count": {
+            "title": "Sales Count",
+            "type": "integer"
+          },
+          "takings": {
+            "$ref": "#/components/schemas/MoneyOut"
+          },
+          "under_review_count": {
+            "title": "Under Review Count",
+            "type": "integer"
+          },
+          "under_review_total": {
+            "$ref": "#/components/schemas/MoneyOut"
+          },
+          "upi_attested": {
+            "$ref": "#/components/schemas/MoneyOut"
+          },
+          "upi_verified": {
+            "$ref": "#/components/schemas/MoneyOut"
+          },
+          "variance": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MoneyOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "cash_sales",
+          "upi_attested",
+          "upi_verified",
+          "cash_in",
+          "cash_out",
+          "rounding",
+          "takings",
+          "under_review_count",
+          "under_review_total",
+          "sales_count"
+        ],
+        "title": "ShiftFiguresOut",
+        "type": "object"
+      },
+      "ShiftOut": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "opened_at": {
+            "title": "Opened At",
+            "type": "string"
+          },
+          "opened_by": {
+            "title": "Opened By",
+            "type": "string"
+          },
+          "opening_float": {
+            "$ref": "#/components/schemas/MoneyOut"
+          }
+        },
+        "required": [
+          "id",
+          "opened_at",
+          "opened_by",
+          "opening_float"
+        ],
+        "title": "ShiftOut",
+        "type": "object"
+      },
       "StockCountLine": {
         "additionalProperties": false,
         "properties": {
@@ -2233,6 +2450,23 @@
           "type"
         ],
         "title": "ValidationError",
+        "type": "object"
+      },
+      "XReportResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "figures": {
+            "$ref": "#/components/schemas/ShiftFiguresOut"
+          },
+          "shift": {
+            "$ref": "#/components/schemas/ShiftOut"
+          }
+        },
+        "required": [
+          "shift",
+          "figures"
+        ],
+        "title": "XReportResponse",
         "type": "object"
       }
     }
@@ -4337,6 +4571,176 @@
         "summary": "Margin Report",
         "tags": [
           "reports"
+        ]
+      }
+    },
+    "/shifts/cash": {
+      "post": {
+        "description": "Cash in or out of the drawer, with a reason, on the open shift.\n\n`cash.payout` is **not** overridable yet, on purpose. `cash_movements_insert`\n(0003) accepts a row only from a caller who holds the key, so a cashier\nlent it at the counter would have their payout refused by RLS hours later,\ninto the failures queue \u2014 the silent-and-late shape the phase 7 decision\nexists to prevent. Widening the policy to accept a row that names an\napprover is slice 3's cloud change; until then a payout is a supervisor's\nact, `approved_by` stays null, and the column waits for its first writer.",
+        "operationId": "move_cash_shifts_cash_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CashMovementRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CashMovementResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Move Cash",
+        "tags": [
+          "shifts"
+        ]
+      }
+    },
+    "/shifts/close": {
+      "post": {
+        "description": "Count the drawer and close the day.\n\nThe figures come back with the expected cash and the variance \u2014 after\nthe count has been committed, never before. The close is queued for the\ncloud and the sync loop is nudged after the commit, the same order as a\nsale: a failure to nudge can never be a failure to close.",
+        "operationId": "close_shift_shifts_close_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CloseShiftRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CloseShiftResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Close Shift",
+        "tags": [
+          "shifts"
+        ]
+      }
+    },
+    "/shifts/current": {
+      "get": {
+        "description": "The open shift, or 404 \u2014 which is what the register screen asks on load.",
+        "operationId": "current_shift_shifts_current_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ShiftOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Current Shift",
+        "tags": [
+          "shifts"
+        ]
+      }
+    },
+    "/shifts/current/x": {
+      "get": {
+        "description": "The day so far. Sales, not the drawer: `expected_cash` is not here.",
+        "operationId": "x_report_shifts_current_x_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/XReportResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "X Report",
+        "tags": [
+          "shifts"
+        ]
+      }
+    },
+    "/shifts/open": {
+      "post": {
+        "description": "Open the day with what is in the drawer.\n\nRefused with 409 if a shift is already open on this terminal. The person\nwho opened it is named, because the fix is to find them, not to force it.",
+        "operationId": "open_shift_shifts_open_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OpenShiftRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ShiftOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Open Shift",
+        "tags": [
+          "shifts"
         ]
       }
     },

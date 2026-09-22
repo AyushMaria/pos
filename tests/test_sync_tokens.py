@@ -40,7 +40,7 @@ from app.sync.payloads import PayloadBuilder
 from app.sync.puller import Puller
 from app.sync.pusher import Pusher
 from app.sync.tokens import REFRESH_MARGIN, SIGN_IN_NEEDED, TokenRefresher, expires_at
-from tests.conftest import FAST_ARGON2, TEST_MAC_KEY, TEST_TOKEN
+from tests.conftest import FAST_ARGON2, TEST_MAC_KEY, TEST_TOKEN, settle_opening
 from tests.test_sync_engine import an_engine
 from tests.test_sync_push import TERMINAL_ID, FakeCloud, sell
 
@@ -220,6 +220,13 @@ def pusher_for(db: Database, outbox: OutboxRepository, cloud: FakeCloud, holder:
         backoff=Backoff(first_seconds=0.0, cap_seconds=0.0),
         client=cloud.client,
     )
+
+
+@pytest.fixture
+def till(till: TestClient, db: Database) -> TestClient:
+    """See `settle_opening`: the queue starts empty of the fixture shift."""
+    settle_opening(db)
+    return till
 
 
 @pytest.fixture

@@ -472,6 +472,73 @@ class AdjustmentRequest(ApiModel):
     note: str = Field(min_length=1, max_length=500)
 
 
+# ── Shifts (phase 8) ────────────────────────────────────────────────────────
+
+
+class OpenShiftRequest(ApiModel):
+    opening_float_paise: int = Field(
+        ge=0, description="What is in the drawer before the first sale"
+    )
+
+
+class ShiftOut(ApiModel):
+    id: str
+    opened_at: str
+    opened_by: str
+    opening_float: MoneyOut
+
+
+class CashMovementRequest(ApiModel):
+    direction: str = Field(description="in or out")
+    amount_paise: int = Field(gt=0)
+    reason: str = Field(min_length=1, max_length=200)
+
+
+class CashMovementResponse(ApiModel):
+    movement_id: str
+
+
+class ShiftFiguresOut(ApiModel):
+    """The Z-report's numbers. Every line the close screen shows.
+
+    `expected_cash` is absent on an X-report by design: a supervisor who sees
+    the expected figure before counting types the expected figure.
+    """
+
+    cash_sales: MoneyOut
+    upi_attested: MoneyOut
+    upi_verified: MoneyOut
+    cash_in: MoneyOut
+    cash_out: MoneyOut
+    #: Reported beside the total, never inside it — it is already in
+    #: `cash_sales`. Negative is the shop's loss.
+    rounding: MoneyOut
+    takings: MoneyOut
+    under_review_count: int
+    under_review_total: MoneyOut
+    sales_count: int
+    #: Only on a close. See the class docstring.
+    expected_cash: MoneyOut | None = None
+    counted_cash: MoneyOut | None = None
+    variance: MoneyOut | None = None
+
+
+class XReportResponse(ApiModel):
+    shift: ShiftOut
+    figures: ShiftFiguresOut
+
+
+class CloseShiftRequest(ApiModel):
+    counted_cash_paise: int = Field(ge=0)
+    note: str | None = Field(default=None, max_length=500)
+
+
+class CloseShiftResponse(ApiModel):
+    close_id: str
+    shift: ShiftOut
+    figures: ShiftFiguresOut
+
+
 class MovementsResponse(ApiModel):
     """The ledger rows written. Empty when a count matched everywhere."""
 

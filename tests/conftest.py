@@ -316,11 +316,42 @@ def catalog(db: Database) -> dict[str, str]:
     return ids
 
 
+#: The float every test shift opens with. ₹500, like a real drawer.
+TEST_OPENING_FLOAT = 50_000
+
+
 @pytest.fixture
 def till(client: TestClient, seeded_cashier: dict, catalog: dict) -> TestClient:
-    """A signed-in till with a catalogue behind it."""
+    """A signed-in till with a catalogue behind it — and a shift open.
+
+    Since phase 8 a sale belongs to a shift, so the register refuses to open
+    a cart without one. Every test that sells goes through here, which is
+    why the shift is opened once, in the fixture, rather than in a hundred
+    tests. A test about the *absence* of a shift signs in with `client`
+    directly.
+    """
     assert client.post("/auth/login", json=seeded_cashier).status_code == 200
+    opened = client.post("/shifts/open", json={"opening_float_paise": TEST_OPENING_FLOAT})
+    assert opened.status_code == 201, opened.text
     return client
+
+
+def settle_opening(db: Database) -> None:
+    """Treat the fixture shift's outbox row as already pushed.
+
+    The sync suites count outbox rows to assert on *sales*. The shift the
+    `till` fixture opens adds one `register_session` row ahead of every sale,
+    and rewriting thirty assertions from 1 to 2 would make each of them about
+    two things. This marks the opening synced so the queue starts empty; the
+    session push itself has its own test in `test_sync_push.py`.
+    """
+    now = datetime.now(timezone.utc).isoformat()
+    with db.write() as conn:
+        conn.execute(
+            "UPDATE outbox SET synced_at = ? WHERE entity = 'register_session' "
+            "AND synced_at IS NULL",
+            (now,),
+        )
 
 
 def open_cart(till: TestClient) -> str:

@@ -20,11 +20,13 @@ Two rules the loop exists to keep straight:
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 
 from app.config import Settings
 from app.data.repositories.sales import PostedSale, SalesRepository
+from app.data.repositories.shifts import OpenShift
 from app.data.repositories.terminal import TerminalRepository
 from app.domain.cart import Cart
 from app.domain.identity import utcnow
@@ -65,12 +67,17 @@ class SaleService:
         terminal: TerminalRepository,
         providers: ProviderRegistry,
         settings: Settings,
+        open_shift: Callable[[], OpenShift],
     ) -> None:
         self.carts = carts
         self.sales = sales
         self.terminal = terminal
         self.providers = providers
         self.settings = settings
+        #: Answers "which shift is this?" or raises `NoOpenShift`. A callable
+        #: rather than the shift service itself, so this service does not
+        #: grow a dependency on a sibling for one question (phase 8 decision 2).
+        self.open_shift = open_shift
 
     # ── The balance loop ────────────────────────────────────────────────────
 
@@ -233,6 +240,12 @@ class SaleService:
                 f"{balance.outstanding} still outstanding on cart {cart_id}"
             )
 
+        # Every sale belongs to a shift, so the Z-report is *the sales of this
+        # session* and not a guess by clock. The register refuses to open a
+        # cart without one; this is the backstop, because a cart opened
+        # before a close can still be posted after it.
+        shift = self.open_shift()
+
         receipt_no = self.terminal.next_receipt_no(
             self.settings.store_code, self.settings.terminal_code
         )
@@ -249,6 +262,7 @@ class SaleService:
             change_due=self.change_for(cart_id),
             client_created_at=open_cart.opened_at,
             posted_at=utcnow(),
+            session_id=shift.id,
             requires_review=needs_review(open_cart.attempts),
         )
 
