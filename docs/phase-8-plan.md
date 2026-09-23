@@ -379,6 +379,34 @@ PDF — the document, not the numbers), the close screen, the day-close check
 in the cloud (slice 3's second half), the owner's reports (slice 4), and
 purchase orders (slice 5).
 
+## Slice 2b — the Z-report and the close screen
+
+**The document.** `app/domain/zreport.py` is the stored close with names and
+times around it; nothing is recomputed, so a review resolved or a payment
+edited after the close leaves the Z where it was (asserted). One `rows()`
+list feeds text, HTML and PDF; the PDF writer is now shared with receipts
+(`write_text_pdf`). Variance and rounding are separate lines, and so are UPI
+attested and UPI verified. Sales still under review at the moment of the
+close are listed by receipt number and are in no total. `GET
+/shifts/{id}/z` and `POST /shifts/{id}/z.pdf` need `shift.close` — the Z
+shows the variance. The close response carries the rendered Z.
+
+**The close screen.** Reached from *Close shift* in the register header
+(`shift.close` only). Before the count it shows the sales count and the
+under-review receipts and no cash figure; expected, variance and rounding
+appear only with the committed close. The count field wears the scan
+shield.
+
+**`cash.payout` is overridable.** The session now remembers who lent each
+grant (`Session.approvers`, `approver_for()`); `/shifts/cash` writes that
+supervisor into `cash_movements.approved_by` and the audit row. *Cash out*
+is in the register header for everyone — a cashier's 403 opens the
+supervisor modal, which performs the payout itself. `shift.close` stays
+unlendable: a close is the supervisor's count.
+
+**A crash mid-close** (failure after the row, before the outbox) leaves the
+shift open with no close, no audit and nothing queued; the retry succeeds.
+
 ---
 
 ## Before starting

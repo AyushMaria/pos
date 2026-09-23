@@ -277,3 +277,179 @@ def test_repository_reads_only_approved_payments(till: TestClient, db: Database)
         conn.execute("UPDATE payments SET status = 'voided'")
 
     assert ShiftRepository(db).payments_for(session_id) == []
+
+
+# ── Slice 2b: a payout lent through the override modal ──────────────────────
+
+
+def _lend_payout(till: TestClient, manager: dict) -> None:
+    response = till.post(
+        "/overrides/authorize",
+        json={
+            "approver_code": manager["employee_code"],
+            "pin": manager["pin"],
+            "permission": "cash.payout",
+        },
+    )
+    assert response.status_code == 200, response.text
+
+
+def test_a_lent_payout_names_the_supervisor_who_lent_it(
+    till: TestClient, seeded_manager: dict, db: Database
+) -> None:
+    """The first writer of `cash_movements.approved_by`, and the audit agrees."""
+    _lend_payout(till, seeded_manager)
+
+    response = till.post(
+        "/shifts/cash", json={"direction": "out", "amount_paise": 2_000, "reason": "milk"}
+    )
+
+    assert response.status_code == 200, response.text
+    movement = db.query_one(
+        "SELECT actor_id, approved_by FROM cash_movements WHERE id = ?",
+        (response.json()["movement_id"],),
+    )
+    assert movement["approved_by"] == "018f0000-0000-7000-8000-000000000003"
+    assert movement["actor_id"] == "018f0000-0000-7000-8000-000000000001"
+    audit = db.query_one("SELECT approver_id FROM audit_log WHERE action = 'cash.out'")
+    assert audit["approver_id"] == movement["approved_by"]
+
+
+def test_the_close_is_never_lent(till: TestClient, seeded_manager: dict) -> None:
+    response = till.post(
+        "/overrides/authorize",
+        json={
+            "approver_code": seeded_manager["employee_code"],
+            "pin": seeded_manager["pin"],
+            "permission": "shift.close",
+        },
+    )
+    assert response.status_code == 400
+
+
+# ── Slice 2b: the Z-report ──────────────────────────────────────────────────
+
+
+def _close(till: TestClient, manager: dict, counted: int, note: str | None = None) -> dict:
+    assert till.post("/auth/login", json=manager).status_code == 200
+    response = till.post("/shifts/close", json={"counted_cash_paise": counted, "note": note})
+    assert response.status_code == 200, response.text
+    return response.json()
+
+
+def test_the_close_returns_its_z_report(till: TestClient, seeded_manager: dict) -> None:
+    sell_cash(till)
+    closed = _close(till, seeded_manager, TEST_OPENING_FLOAT + 3_600, note="₹1 short")
+
+    html = closed["zreport_html"]
+    assert "Z-report" in html
+    assert "Variance (short)" in html
+    assert "Rounding (inside cash sales)" in html
+    assert "UPI attested" in html and "UPI verified" in html
+    assert "₹1 short" in html
+    assert closed["figures"]["variance"]["paise"] == -100
+
+
+def test_the_z_report_is_the_stored_close_not_a_recount(
+    till: TestClient, seeded_manager: dict, db: Database
+) -> None:
+    """Change a sale after the close; the Z does not move."""
+    sell_cash(till)
+    session_id = till.get("/shifts/current").json()["id"]
+    _close(till, seeded_manager, TEST_OPENING_FLOAT + 3_700)
+    with db.write() as conn:
+        conn.execute("UPDATE payments SET amount = 99999")
+
+    body = till.get(f"/shifts/{session_id}/z").json()
+
+    assert body["figures"]["cash_sales"]["paise"] == 3_700
+    assert body["figures"]["variance"]["paise"] == 0
+    assert "balanced" in body["zreport_html"]
+
+
+def test_a_sale_under_review_is_listed_by_receipt_number(
+    till: TestClient, seeded_manager: dict, db: Database
+) -> None:
+    posted = sell_cash(till)
+    with db.write() as conn:
+        conn.execute(
+            "UPDATE sales SET status = 'requires_review' WHERE id = ?", (posted["sale_id"],)
+        )
+    receipt_no = db.query_one("SELECT receipt_no FROM sales")["receipt_no"]
+
+    x = till.get("/shifts/current/x").json()
+    assert x["figures"]["under_review_receipts"] == [receipt_no]
+
+    session_id = till.get("/shifts/current").json()["id"]
+    closed = _close(till, seeded_manager, TEST_OPENING_FLOAT)
+    assert closed["figures"]["under_review_receipts"] == [receipt_no]
+    assert receipt_no in closed["zreport_html"]
+    assert closed["figures"]["cash_sales"]["paise"] == 0, "under review is in no total"
+    assert till.get(f"/shifts/{session_id}/z").json()["figures"]["under_review_receipts"] == [
+        receipt_no
+    ]
+
+
+def test_a_cashier_cannot_read_the_z(
+    till: TestClient, seeded_manager: dict, seeded_cashier: dict
+) -> None:
+    session_id = till.get("/shifts/current").json()["id"]
+    _close(till, seeded_manager, TEST_OPENING_FLOAT)
+    assert till.post("/auth/login", json=seeded_cashier).status_code == 200
+
+    assert till.get(f"/shifts/{session_id}/z").status_code == 403
+
+
+def test_an_open_shift_has_no_z(till: TestClient, seeded_manager: dict) -> None:
+    session_id = till.get("/shifts/current").json()["id"]
+    assert till.post("/auth/login", json=seeded_manager).status_code == 200
+    assert till.get(f"/shifts/{session_id}/z").status_code == 404
+
+
+def test_the_z_report_pdf_is_written_under_the_data_dir(
+    till: TestClient, seeded_manager: dict
+) -> None:
+    from pathlib import Path
+
+    sell_cash(till)
+    session_id = till.get("/shifts/current").json()["id"]
+    _close(till, seeded_manager, TEST_OPENING_FLOAT + 3_700)
+
+    response = till.post(f"/shifts/{session_id}/z.pdf")
+
+    assert response.status_code == 200, response.text
+    path = Path(response.json()["path"])
+    assert path.parent.name == "zreports"
+    assert path.read_bytes().startswith(b"%PDF")
+
+
+# ── Slice 2b: a crash mid-close ─────────────────────────────────────────────
+
+
+def test_a_crash_mid_close_leaves_the_shift_open_and_nothing_queued(
+    till: TestClient, seeded_manager: dict, db: Database, monkeypatch
+) -> None:
+    """The row, the status, the audit and the outbox are one transaction. A
+    power cut between any two of them must leave the shift as it was, so the
+    supervisor counts again rather than finding half a close."""
+    sell_cash(till)
+    assert till.post("/auth/login", json=seeded_manager).status_code == 200
+
+    def power_cut(*_args, **_kwargs):
+        raise RuntimeError("power cut")
+
+    monkeypatch.setattr(ShiftRepository, "_queue", power_cut)
+    import pytest
+
+    with pytest.raises(RuntimeError, match="power cut"):
+        till.post("/shifts/close", json={"counted_cash_paise": TEST_OPENING_FLOAT})
+    monkeypatch.undo()
+
+    assert db.query("SELECT id FROM shift_closes") == []
+    assert db.query_one("SELECT status FROM register_sessions")["status"] == "open"
+    assert db.query("SELECT id FROM outbox WHERE entity = 'shift_close'") == []
+    assert db.query("SELECT id FROM audit_log WHERE action = 'shift.closed'") == []
+
+    retried = till.post("/shifts/close", json={"counted_cash_paise": TEST_OPENING_FLOAT + 3_700})
+    assert retried.status_code == 200, retried.text
+    assert retried.json()["figures"]["variance"]["paise"] == 0

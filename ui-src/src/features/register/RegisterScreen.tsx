@@ -31,10 +31,12 @@ export function RegisterScreen({
   session,
   onOpenStockroom,
   onOpenAdmin,
+  onCloseShift,
 }: {
   session: SessionResponse;
   onOpenStockroom?: () => void;
   onOpenAdmin?: () => void;
+  onCloseShift?: () => void;
 }) {
   const [cart, setCart] = useState<CartOut | null>(null);
   const [entry, setEntry] = useState("");
@@ -63,6 +65,35 @@ export function RegisterScreen({
   const focusEntry = useCallback(() => entryRef.current?.focus(), []);
 
   const [needsShift, setNeedsShift] = useState(false);
+  //: The cash-out dialog is open. A cashier may open it: the refusal comes
+  //: from the server and becomes the override modal, like a discount.
+  const [cashingOut, setCashingOut] = useState(false);
+
+  const payOut = useCallback(
+    async (amountPaise: number, reason: string) => {
+      try {
+        await shifts.moveCash("out", amountPaise, reason);
+        setCashingOut(false);
+        setNeedsOverride(null);
+        setMessage({ text: `Paid out ${(amountPaise / 100).toFixed(2)} — ${reason}`, bad: false });
+      } catch (error) {
+        if (error instanceof ApiError && error.status === 403) {
+          setCashingOut(false);
+          setNeedsOverride({
+            permission: "cash.payout",
+            label: `pay out ${(amountPaise / 100).toFixed(2)} for ${reason}`,
+            act: () => payOut(amountPaise, reason),
+          });
+          return;
+        }
+        setMessage({
+          text: error instanceof ApiError ? error.message : "Could not pay that out",
+          bad: true,
+        });
+      }
+    },
+    [],
+  );
 
   const startCart = useCallback(async () => {
     setSale(null);
@@ -354,6 +385,18 @@ export function RegisterScreen({
             </button>
           </PermissionGate>
         )}
+        <button type="button" className="link" onClick={() => setCashingOut(true)}>
+          Cash out
+        </button>
+        {/* Never lent: the count is the supervisor's, not a cashier's with a
+            supervisor nearby. */}
+        {onCloseShift && (
+          <PermissionGate session={session} permission="shift.close">
+            <button type="button" className="link" onClick={onCloseShift}>
+              Close shift
+            </button>
+          </PermissionGate>
+        )}
         <span className="till">{session.employee_code}</span>
       </header>
 
@@ -436,6 +479,16 @@ export function RegisterScreen({
         />
       )}
 
+      {cashingOut && needsOverride === null && (
+        <CashOutDialog
+          onCancel={() => {
+            setCashingOut(false);
+            focusEntry();
+          }}
+          onConfirm={(amountPaise, reason) => void payOut(amountPaise, reason)}
+        />
+      )}
+
       {needsOverride && (
         <OverrideDialog
           permission={needsOverride.permission}
@@ -481,6 +534,69 @@ export function RegisterScreen({
         />
       )}
     </div>
+  );
+}
+
+function CashOutDialog({
+  onCancel,
+  onConfirm,
+}: {
+  onCancel: () => void;
+  onConfirm: (amountPaise: number, reason: string) => void;
+}) {
+  const [rupees, setRupees] = useState("");
+  const [reason, setReason] = useState("");
+  const [problem, setProblem] = useState<string | null>(null);
+  const shield = useScanShield({
+    onScanBlocked: () => {
+      setRupees("");
+      setProblem("That was a scan. Type the amount taken out.");
+    },
+  });
+  const paise = Math.round(Number(rupees) * 100);
+  const ready =
+    rupees.trim().length > 0 && Number.isFinite(paise) && paise > 0 && reason.trim().length > 0;
+
+  return (
+    <form
+      className="dialog"
+      role="dialog"
+      aria-label="Cash out"
+      onSubmit={(event) => {
+        event.preventDefault();
+        if (ready) onConfirm(paise, reason.trim());
+      }}
+    >
+      <h3>Cash out of the drawer</h3>
+      <label htmlFor="cash-out-amount">Amount</label>
+      <input
+        id="cash-out-amount"
+        inputMode="decimal"
+        value={rupees}
+        onChange={(event) => setRupees(event.target.value)}
+        onKeyDown={shield.onKeyDown}
+        placeholder="in rupees"
+        autoFocus
+        autoComplete="off"
+      />
+      <label htmlFor="cash-out-reason">Reason</label>
+      <input
+        id="cash-out-reason"
+        value={reason}
+        onChange={(event) => setReason(event.target.value)}
+        placeholder="tea, milk, change for the bank…"
+        autoComplete="off"
+      />
+      {problem && <p className="hint warn">{problem}</p>}
+      <div className="actions">
+        <button type="button" className="secondary" onClick={onCancel}>
+          Cancel
+        </button>
+        <button type="submit" disabled={!ready}>
+          Pay out
+        </button>
+      </div>
+    </form>
   );
 }
 

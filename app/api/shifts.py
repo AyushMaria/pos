@@ -8,10 +8,11 @@ Permissions, from §11.1 and the RLS that has existed since 0003:
 
 * opening a shift and reading the X-report need `sale.create` — the cashier
   opens their own day, and the insert policy says `user_id = auth.uid()`;
-* a cash movement needs `cash.payout`, which a cashier does not hold. Lending
-  it through the override modal waits for slice 3, when the cloud policy can
-  accept a row that names an approver (see `move_cash`);
-* closing needs `shift.close`.
+* a cash movement needs `cash.payout`, which a cashier can be lent through
+  the override modal; the lending supervisor is recorded (see `move_cash`);
+* closing needs `shift.close`, which is never lent.
+* the Z-report of a closed shift needs `shift.close` too: it shows the
+  variance, and the variance is the supervisor's to see first.
 """
 
 from __future__ import annotations
@@ -31,12 +32,17 @@ from app.api.schemas import (
     ShiftFiguresOut,
     ShiftOut,
     XReportResponse,
+    ZReportPdfResponse,
+    ZReportResponse,
 )
 from app.data.repositories.shifts import OpenShift
 from app.domain import permissions
-from app.domain.identity import Session
+from app.domain.identity import Session, utcnow
 from app.domain.money import Money
 from app.domain.shift import ShiftFigures
+from app.domain.zreport import ZReport
+from app.services import zreport_render
+from app.services.receipt_render import PdfUnavailable
 from app.services.shift_service import (
     NoOpenShift,
     ShiftAlreadyOpen,
@@ -58,7 +64,9 @@ def _shift_out(shift: OpenShift) -> ShiftOut:
     )
 
 
-def _figures_out(f: ShiftFigures, *, counted: Money | None) -> ShiftFiguresOut:
+def _figures_out(
+    f: ShiftFigures, *, counted: Money | None, under_review: list[str] | None = None
+) -> ShiftFiguresOut:
     """The X-report leaves `expected_cash` out. That is a rule, not an omission."""
     return ShiftFiguresOut(
         cash_sales=MoneyOut.of(f.cash_sales),
@@ -74,6 +82,7 @@ def _figures_out(f: ShiftFigures, *, counted: Money | None) -> ShiftFiguresOut:
         expected_cash=None if counted is None else MoneyOut.of(f.expected_cash),
         counted_cash=None if counted is None else MoneyOut.of(counted),
         variance=None if counted is None else MoneyOut.of(f.variance(counted)),
+        under_review_receipts=list(under_review or []),
     )
 
 
@@ -117,13 +126,12 @@ def move_cash(
 ) -> CashMovementResponse:
     """Cash in or out of the drawer, with a reason, on the open shift.
 
-    `cash.payout` is **not** overridable yet, on purpose. `cash_movements_insert`
-    (0003) accepts a row only from a caller who holds the key, so a cashier
-    lent it at the counter would have their payout refused by RLS hours later,
-    into the failures queue — the silent-and-late shape the phase 7 decision
-    exists to prevent. Widening the policy to accept a row that names an
-    approver is slice 3's cloud change; until then a payout is a supervisor's
-    act, `approved_by` stays null, and the column waits for its first writer.
+    A supervisor holding `cash.payout` approves their own movement and
+    `approved_by` stays null. A cashier lent the key through the override
+    modal writes a row naming the supervisor who lent it — the first writer
+    of the column phase 1 put on the table. 0024 widened
+    `cash_movements_insert` to `sale.create`, so the cashier's claim pushes
+    it; `tests/test_rls.py` holds that line.
     """
     try:
         movement_id = shifts.move_cash(
@@ -131,6 +139,7 @@ def move_cash(
             direction=body.direction,
             amount=Money(body.amount_paise),
             reason=body.reason,
+            approved_by=session.approver_for(permissions.CASH_PAYOUT, now=utcnow()),
         )
     except NoOpenShift as exc:
         raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
@@ -149,7 +158,12 @@ def x_report(
         current, figures = shifts.x_report()
     except NoOpenShift as exc:
         raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
-    return XReportResponse(shift=_shift_out(current), figures=_figures_out(figures, counted=None))
+    return XReportResponse(
+        shift=_shift_out(current),
+        figures=_figures_out(
+            figures, counted=None, under_review=shifts.under_review_receipts(current.id)
+        ),
+    )
 
 
 @router.post("/close", response_model=CloseShiftResponse)
@@ -170,7 +184,7 @@ def close_shift(
     if current is None:
         raise HTTPException(status.HTTP_409_CONFLICT, "no shift is open")
     try:
-        close_id, figures = shifts.close(
+        close_id, _ = shifts.close(
             session, counted_cash=Money(body.counted_cash_paise), note=body.note
         )
     except ShiftRefused as exc:
@@ -180,8 +194,64 @@ def close_shift(
     if engine is not None:
         engine.nudge()
 
+    report = _z_or_404(shifts, current.id)
     return CloseShiftResponse(
         close_id=close_id,
         shift=_shift_out(current),
-        figures=_figures_out(figures, counted=Money(body.counted_cash_paise)),
+        figures=_z_figures(report),
+        zreport_html=zreport_render.render_html(report),
     )
+
+
+def _z_or_404(shifts: ShiftService, session_id: str) -> ZReport:
+    report = shifts.z_report(session_id)
+    if report is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "that shift has not closed")
+    return report
+
+
+def _z_figures(report: ZReport) -> ShiftFiguresOut:
+    return _figures_out(
+        report.figures,
+        counted=report.counted_cash,
+        under_review=list(report.under_review_receipts),
+    )
+
+
+@router.get("/{session_id}/z", response_model=ZReportResponse)
+def z_report(
+    session_id: str,
+    shifts: Shifts,
+    session: Annotated[Session, Depends(require(permissions.SHIFT_CLOSE))],
+) -> ZReportResponse:
+    """A closed shift's Z-report, from the figures stored at the close.
+
+    Needs `shift.close`: the variance is on it, and the rule that the
+    supervisor counts before seeing expected holds after the close too — a
+    cashier reading tonight's Z learns what tomorrow's drawer should hold.
+    """
+    report = _z_or_404(shifts, session_id)
+    return ZReportResponse(
+        close_id=report.close_id,
+        session_id=session_id,
+        closed_at=report.closed_at.isoformat(),
+        figures=_z_figures(report),
+        zreport_html=zreport_render.render_html(report),
+    )
+
+
+@router.post("/{session_id}/z.pdf", response_model=ZReportPdfResponse)
+def write_z_pdf(
+    session_id: str,
+    shifts: Shifts,
+    request: Request,
+    session: Annotated[Session, Depends(require(permissions.SHIFT_CLOSE))],
+) -> ZReportPdfResponse:
+    """Write the Z-report PDF under the data directory. On demand, like receipts."""
+    report = _z_or_404(shifts, session_id)
+    destination = zreport_render.zreport_path(request.app.state.settings.data_dir, report)
+    try:
+        zreport_render.render_pdf(report, destination)
+    except PdfUnavailable as exc:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from exc
+    return ZReportPdfResponse(close_id=report.close_id, path=str(destination))

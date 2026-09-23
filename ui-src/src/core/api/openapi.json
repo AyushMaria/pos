@@ -749,12 +749,17 @@
           },
           "shift": {
             "$ref": "#/components/schemas/ShiftOut"
+          },
+          "zreport_html": {
+            "title": "Zreport Html",
+            "type": "string"
           }
         },
         "required": [
           "close_id",
           "shift",
-          "figures"
+          "figures",
+          "zreport_html"
         ],
         "title": "CloseShiftResponse",
         "type": "object"
@@ -1772,6 +1777,13 @@
             "title": "Under Review Count",
             "type": "integer"
           },
+          "under_review_receipts": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Under Review Receipts",
+            "type": "array"
+          },
           "under_review_total": {
             "$ref": "#/components/schemas/MoneyOut"
           },
@@ -2467,6 +2479,58 @@
           "figures"
         ],
         "title": "XReportResponse",
+        "type": "object"
+      },
+      "ZReportPdfResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "close_id": {
+            "title": "Close Id",
+            "type": "string"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          }
+        },
+        "required": [
+          "close_id",
+          "path"
+        ],
+        "title": "ZReportPdfResponse",
+        "type": "object"
+      },
+      "ZReportResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "close_id": {
+            "title": "Close Id",
+            "type": "string"
+          },
+          "closed_at": {
+            "title": "Closed At",
+            "type": "string"
+          },
+          "figures": {
+            "$ref": "#/components/schemas/ShiftFiguresOut"
+          },
+          "session_id": {
+            "title": "Session Id",
+            "type": "string"
+          },
+          "zreport_html": {
+            "title": "Zreport Html",
+            "type": "string"
+          }
+        },
+        "required": [
+          "close_id",
+          "session_id",
+          "closed_at",
+          "figures",
+          "zreport_html"
+        ],
+        "title": "ZReportResponse",
         "type": "object"
       }
     }
@@ -4576,7 +4640,7 @@
     },
     "/shifts/cash": {
       "post": {
-        "description": "Cash in or out of the drawer, with a reason, on the open shift.\n\n`cash.payout` is **not** overridable yet, on purpose. `cash_movements_insert`\n(0003) accepts a row only from a caller who holds the key, so a cashier\nlent it at the counter would have their payout refused by RLS hours later,\ninto the failures queue \u2014 the silent-and-late shape the phase 7 decision\nexists to prevent. Widening the policy to accept a row that names an\napprover is slice 3's cloud change; until then a payout is a supervisor's\nact, `approved_by` stays null, and the column waits for its first writer.",
+        "description": "Cash in or out of the drawer, with a reason, on the open shift.\n\nA supervisor holding `cash.payout` approves their own movement and\n`approved_by` stays null. A cashier lent the key through the override\nmodal writes a row naming the supervisor who lent it \u2014 the first writer\nof the column phase 1 put on the table. 0024 widened\n`cash_movements_insert` to `sale.create`, so the cashier's claim pushes\nit; `tests/test_rls.py` holds that line.",
         "operationId": "move_cash_shifts_cash_post",
         "requestBody": {
           "content": {
@@ -4739,6 +4803,92 @@
           }
         },
         "summary": "Open Shift",
+        "tags": [
+          "shifts"
+        ]
+      }
+    },
+    "/shifts/{session_id}/z": {
+      "get": {
+        "description": "A closed shift's Z-report, from the figures stored at the close.\n\nNeeds `shift.close`: the variance is on it, and the rule that the\nsupervisor counts before seeing expected holds after the close too \u2014 a\ncashier reading tonight's Z learns what tomorrow's drawer should hold.",
+        "operationId": "z_report_shifts__session_id__z_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "title": "Session Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ZReportResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Z Report",
+        "tags": [
+          "shifts"
+        ]
+      }
+    },
+    "/shifts/{session_id}/z.pdf": {
+      "post": {
+        "description": "Write the Z-report PDF under the data directory. On demand, like receipts.",
+        "operationId": "write_z_pdf_shifts__session_id__z_pdf_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "title": "Session Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ZReportPdfResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Write Z Pdf",
         "tags": [
           "shifts"
         ]

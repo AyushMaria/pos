@@ -200,6 +200,7 @@ class SessionStore:
         *,
         until: datetime,
         now: datetime | None = None,
+        approver_id: str | None = None,
     ) -> Session:
         """Lend the signed-in cashier a permission until ``until``.
 
@@ -258,7 +259,13 @@ class SessionStore:
             held = live.get(permission)
             live[permission] = max(until, held) if held else until
 
-            self._session = replace(session, overrides=live)
+            # The approver is whoever granted last: that is the supervisor who
+            # stood at the counter for the write that follows.
+            approvers = {k: v for k, v in session.approvers.items() if k in live}
+            if approver_id is not None:
+                approvers[permission] = approver_id
+
+            self._session = replace(session, overrides=live, approvers=approvers)
             return self._session
 
 
@@ -823,7 +830,9 @@ class AuthService:
             raise CannotAuthoriseSelf(permission)
 
         expires_at = now + OVERRIDE_GRANT_TTL
-        self.sessions.grant(permission, until=expires_at, now=now)
+        self.sessions.grant(
+            permission, until=expires_at, now=now, approver_id=approver.user_id
+        )
 
         grant = OverrideGrant(
             permission=permission,

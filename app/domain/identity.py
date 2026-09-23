@@ -80,6 +80,10 @@ class Session:
     offline: bool = False
     #: Short-lived supervisor grants, permission key -> expiry.
     overrides: dict[str, datetime] = field(default_factory=dict)
+    #: Who lent each of those grants, permission key -> supervisor user id.
+    #: Kept beside the expiry so a write the grant authorises can name its
+    #: approver — `cash_movements.approved_by` is the first column that asks.
+    approvers: dict[str, str] = field(default_factory=dict)
 
     def snapshot_is_fresh(self, *, now: datetime) -> bool:
         return now < self.snapshot_expires_at
@@ -105,6 +109,20 @@ class Session:
             return True
         granted_until = self.overrides.get(permission)
         return granted_until is not None and now < granted_until
+
+    def approver_for(self, permission: str, *, now: datetime) -> str | None:
+        """The supervisor whose live grant is why this session may do this.
+
+        None when the session holds the permission itself — a manager paying
+        out tea approves their own payout by holding the key — or when no
+        live grant covers it.
+        """
+        if permission in self.permissions:
+            return None
+        granted_until = self.overrides.get(permission)
+        if granted_until is None or now >= granted_until:
+            return None
+        return self.approvers.get(permission)
 
     def require(self, permission: str, *, now: datetime) -> None:
         if not self.allows(permission, now=now):

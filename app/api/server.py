@@ -219,7 +219,12 @@ def build_app(
         catalog, unknown_scans, terminal_code=settings.terminal_code
     )
     app.state.cart_service = cart_service
-    shift_service = ShiftService(ShiftRepository(db), terminal_code=settings.terminal_code)
+    shift_service = ShiftService(
+        ShiftRepository(db),
+        terminal_code=settings.terminal_code,
+        store_name=settings.store_name,
+        store_gstin=settings.store_gstin,
+    )
     app.state.shift_service = shift_service
     app.state.sale_service = SaleService(
         carts=cart_service,

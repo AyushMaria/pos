@@ -154,17 +154,22 @@ ALL_PERMISSIONS: Final[frozenset[str]] = frozenset().union(*ROLE_PERMISSIONS.val
 #   price.override           sale_lines   -> sale_lines_insert  (sale.create)
 #   sale.void                sales        -> sales_insert       (sale.create
 #                                             + cashier_id = auth.uid())
+#   cash.payout              cash_movements -> cash_movements_insert
+#                                             (sale.create + store, since 0024)
 #
-# `cash.payout` is the counter-example and the reason this is a rule rather
-# than a list: `cash_movements_insert` asks for `cash.payout` by name, so a
-# granted payout would be refused at push time. `shift.close` and
-# `sale.refund` have no write path yet; when they get one, the test decides.
+# `cash.payout` is also why this is a rule rather than a list: until 0024,
+# `cash_movements_insert` asked for `cash.payout` by name and a lent payout
+# would have been refused at push time. 0024 widened the policy; phase 8
+# slice 2b lent the key, recording the supervisor in `approved_by`.
+# `shift.close` is refused: `shift_closes_insert` would accept the row, but a
+# close is the supervisor's count, not a cashier's with a supervisor nearby.
 OVERRIDABLE: Final[frozenset[str]] = frozenset(
     {
         SALE_DISCOUNT_LINE,
         SALE_DISCOUNT_UNLIMITED,
         PRICE_OVERRIDE,
         SALE_VOID,
+        CASH_PAYOUT,
     }
 )
 

@@ -150,11 +150,12 @@ def test_it_is_a_window_not_a_token() -> None:
 def test_a_permission_outside_the_overridable_set_is_refused(permission: str) -> None:
     """The rule from slice 3's decision, enforced where grants are minted.
 
-    `cash.payout` is the one that matters: RLS names the key, so a granted
-    payout would be accepted here, pass `require()`, complete the movement at
-    the counter, and be refused at push time into the failures queue. Refusing
-    at the modal is the difference between a supervisor saying no and a row
-    nobody finds until the till does not balance.
+    A key whose write RLS would refuse under the cashier's claim would pass
+    `require()`, complete at the counter, and be refused at push time into
+    the failures queue. Refusing at the modal is the difference between a
+    supervisor saying no and a row nobody finds until the till does not
+    balance. (`cash.payout` used to be the example; 0024 widened its policy
+    and slice 2b made it lendable.)
     """
     store = store_with_cashier()
     with pytest.raises(NotOverridable) as refused:
@@ -396,13 +397,13 @@ def test_a_wrong_pin_is_refused(till) -> None:
 
 
 def test_a_permission_outside_the_rule_is_refused_before_any_pin(till) -> None:
-    """`cash.payout` never reaches the PIN prompt.
+    """`shift.close` never reaches the PIN prompt.
 
     Ordering matters here rather than only the outcome: a request that cannot
     succeed must not become a reason for somebody to type a credential.
     """
     with pytest.raises(NotOverridable):
-        authorize(till, permission=perms.CASH_PAYOUT, pin="definitely-wrong")
+        authorize(till, permission=perms.SHIFT_CLOSE, pin="definitely-wrong")
 
     assert till.audit.overrides() == []
 
@@ -677,3 +678,15 @@ def test_a_successful_authorisation_clears_the_count(till, users) -> None:
     authorize(till)
 
     assert users.get_by_employee_code("S001").consecutive_pin_failures == 0
+
+
+def test_a_grant_remembers_who_lent_it(till) -> None:
+    """Phase 8 slice 2b: a lent payout writes `approved_by`, so the session
+    has to know the approver, not only the expiry."""
+    authorize(till, permission=perms.CASH_PAYOUT)
+    now = utcnow()
+    session = till.sessions.current
+
+    assert session.approver_for(perms.CASH_PAYOUT, now=now) == SUPERVISOR["user_id"]  # type: ignore[union-attr]
+    assert session.approver_for(perms.CASH_PAYOUT, now=now + OVERRIDE_GRANT_TTL) is None  # type: ignore[union-attr]
+    assert session.approver_for(perms.SALE_VOID, now=now) is None  # type: ignore[union-attr]

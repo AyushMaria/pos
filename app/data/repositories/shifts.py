@@ -30,6 +30,22 @@ class OpenShift:
     opening_float: Money
 
 
+@dataclass(frozen=True, slots=True)
+class ClosedShift:
+    """A `shift_closes` row as it was written — figures stored, not recomputed."""
+
+    close_id: str
+    session_id: str
+    terminal_id: str
+    opened_by: str
+    opened_at: datetime
+    closed_by: str
+    closed_at: datetime
+    counted_cash: Money
+    note: str | None
+    figures: ShiftFigures
+
+
 class ShiftRepository(Repository):
     # ── Sessions ────────────────────────────────────────────────────────────
 
@@ -178,7 +194,74 @@ class ShiftRepository(Repository):
         )
         return [CashMovementRow(row["direction"], Money(int(row["amount"]))) for row in rows]
 
+    def under_review_receipts(self, session_id: str, *, as_of: datetime) -> list[str]:
+        """Receipt numbers of the sales that were still under review at `as_of`.
+
+        A review resolved after `as_of` does not take a sale off tonight's
+        list, for the same reason the stored figures are not recomputed.
+        """
+        rows = self._rows(
+            """
+            SELECT s.receipt_no
+              FROM sales s
+             WHERE s.session_id = ? AND s.status = 'requires_review'
+               AND NOT EXISTS (
+                   SELECT 1 FROM sale_reviews r
+                    WHERE r.sale_id = s.id AND r.resolved_at <= ?)
+             ORDER BY s.receipt_no
+            """,
+            (session_id, as_of.isoformat()),
+        )
+        return [row["receipt_no"] or "(no receipt number)" for row in rows]
+
+    def name_of(self, user_id: str) -> str:
+        """A person's name for a report, or their id if the cache lacks them."""
+        row = self._row("SELECT full_name FROM cached_users WHERE user_id = ?", (user_id,))
+        return row["full_name"] if row is not None else user_id
+
     # ── The close ───────────────────────────────────────────────────────────
+
+    def close_for(self, session_id: str) -> ClosedShift | None:
+        """The stored close of a session, with the session's opening beside it."""
+        row = self._row(
+            """
+            SELECT c.*, rs.terminal_id, rs.user_id AS opened_by, rs.opened_at,
+                   rs.opening_float
+              FROM shift_closes c JOIN register_sessions rs ON rs.id = c.session_id
+             WHERE c.session_id = ?
+            """,
+            (session_id,),
+        )
+        if row is None:
+            return None
+
+        def m(column: str) -> Money:
+            return Money(int(row[column]))
+
+        return ClosedShift(
+            close_id=row["id"],
+            session_id=session_id,
+            terminal_id=row["terminal_id"],
+            opened_by=row["opened_by"],
+            opened_at=datetime.fromisoformat(row["opened_at"]),
+            closed_by=row["closed_by"],
+            closed_at=datetime.fromisoformat(row["closed_at"]),
+            counted_cash=m("counted_cash"),
+            note=row["note"],
+            figures=ShiftFigures(
+                opening_float=m("opening_float"),
+                cash_sales=m("cash_sales"),
+                upi_attested=m("upi_attested"),
+                upi_verified=m("upi_verified"),
+                cash_in=m("cash_in"),
+                cash_out=m("cash_out"),
+                rounding=m("rounding"),
+                under_review_count=int(row["under_review_count"]),
+                under_review_total=m("under_review_total"),
+                sales_count=int(row["sales_count"]),
+            ),
+        )
+
 
     def close(
         self,

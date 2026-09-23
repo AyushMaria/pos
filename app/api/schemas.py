@@ -521,6 +521,8 @@ class ShiftFiguresOut(ApiModel):
     expected_cash: MoneyOut | None = None
     counted_cash: MoneyOut | None = None
     variance: MoneyOut | None = None
+    #: Receipt numbers still under review — so each one can be chased.
+    under_review_receipts: list[str] = Field(default_factory=list)
 
 
 class XReportResponse(ApiModel):
@@ -537,6 +539,22 @@ class CloseShiftResponse(ApiModel):
     close_id: str
     shift: ShiftOut
     figures: ShiftFiguresOut
+    #: The Z-report, rendered, so the close screen shows the document it
+    #: just made rather than a second, differently worded summary.
+    zreport_html: str
+
+
+class ZReportResponse(ApiModel):
+    close_id: str
+    session_id: str
+    closed_at: str
+    figures: ShiftFiguresOut
+    zreport_html: str
+
+
+class ZReportPdfResponse(ApiModel):
+    close_id: str
+    path: str
 
 
 class MovementsResponse(ApiModel):

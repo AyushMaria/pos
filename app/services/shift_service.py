@@ -22,6 +22,7 @@ from app.domain import shift
 from app.domain.identity import Session, utcnow
 from app.domain.money import Money
 from app.domain.shift import ShiftFigures
+from app.domain.zreport import ZReport
 
 log = logging.getLogger(__name__)
 
@@ -44,9 +45,18 @@ class ShiftRefused(ValueError):
 
 
 class ShiftService:
-    def __init__(self, shifts: ShiftRepository, *, terminal_code: str) -> None:
+    def __init__(
+        self,
+        shifts: ShiftRepository,
+        *,
+        terminal_code: str,
+        store_name: str = "",
+        store_gstin: str | None = None,
+    ) -> None:
         self.shifts = shifts
         self.terminal_code = terminal_code
+        self.store_name = store_name
+        self.store_gstin = store_gstin or None
 
     # ── Opening ─────────────────────────────────────────────────────────────
 
@@ -152,3 +162,33 @@ class ShiftService:
             current.id, figures.expected_cash, counted_cash, figures.variance(counted_cash),
         )
         return close_id, figures
+
+    def under_review_receipts(self, session_id: str) -> list[str]:
+        """What the X-report lists: under review as of now."""
+        return self.shifts.under_review_receipts(session_id, as_of=utcnow())
+
+    # ── The Z-report ────────────────────────────────────────────────────────
+
+    def z_report(self, session_id: str) -> ZReport | None:
+        """The closed shift as a document, from the stored close. None if the
+        session never closed (or does not exist)."""
+        closed = self.shifts.close_for(session_id)
+        if closed is None:
+            return None
+        return ZReport(
+            close_id=closed.close_id,
+            session_id=session_id,
+            store_name=self.store_name,
+            store_gstin=self.store_gstin,
+            terminal_code=closed.terminal_id,
+            opened_at=closed.opened_at,
+            opened_by=self.shifts.name_of(closed.opened_by),
+            closed_at=closed.closed_at,
+            closed_by=self.shifts.name_of(closed.closed_by),
+            figures=closed.figures,
+            counted_cash=closed.counted_cash,
+            under_review_receipts=tuple(
+                self.shifts.under_review_receipts(session_id, as_of=closed.closed_at)
+            ),
+            note=closed.note,
+        )

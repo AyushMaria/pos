@@ -204,26 +204,32 @@ def render_pdf(receipt: Receipt, destination: Path) -> Path:
     converting HTML, so there is no headless browser in the bundle and no
     second layout engine to disagree with the first.
     """
+    return write_text_pdf(
+        render_text(receipt).splitlines(),
+        title=f"Receipt {receipt.receipt_no}",
+        destination=destination,
+    )
+
+
+def write_text_pdf(rows: list[str], *, title: str, destination: Path) -> Path:
+    """Monospace rows on an 80mm page — receipts and Z-reports alike."""
     try:
         from reportlab.lib.pagesizes import mm
         from reportlab.pdfgen import canvas
     except ImportError as exc:  # pragma: no cover - depends on the build
         raise PdfUnavailable(
-            "reportlab is not installed; PDF receipts are unavailable"
+            "reportlab is not installed; PDFs are unavailable"
         ) from exc
 
-    text = render_text(receipt)
-    rows = text.splitlines()
-
     # A tall, narrow page: an 80mm roll, sized to the content so nothing is
-    # cut off and there is no page break mid-receipt.
+    # cut off and there is no page break mid-document.
     width = 80 * mm
     line_height = 3.6 * mm
     height = (len(rows) + 6) * line_height
 
     destination.parent.mkdir(parents=True, exist_ok=True)
     pdf = canvas.Canvas(str(destination), pagesize=(width, height))
-    pdf.setTitle(f"Receipt {receipt.receipt_no}")
+    pdf.setTitle(title)
 
     pdf.setFont("Courier", 8)
     y = height - (3 * line_height)

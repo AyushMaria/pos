@@ -61,6 +61,7 @@ const api = {
 };
 
 const authorize = vi.fn();
+const moveCash = vi.fn();
 
 vi.mock("../../core/api/register", () => ({
   register: new Proxy(
@@ -73,6 +74,7 @@ vi.mock("../../core/api/register", () => ({
     },
   ),
   catalog: { taxCodes: () => Promise.resolve({ tax_codes: [] }) },
+  shifts: { moveCash: (...args: unknown[]) => moveCash(...args) },
 }));
 
 vi.mock("../../core/api/overrides", () => ({
@@ -115,6 +117,7 @@ async function askForADiscount(user: ReturnType<typeof person>) {
 beforeEach(() => {
   for (const fn of Object.values(api)) fn.mockReset();
   authorize.mockReset();
+  moveCash.mockReset();
   api.openCart.mockResolvedValue(cart());
   // A cashier cannot discount. That is the whole premise.
   api.discountLine.mockRejectedValue(new ApiError(403, "permission_denied"));
@@ -302,5 +305,36 @@ describe("a typo must not cost a supervisor's authorisation", () => {
     // it to deleting the line, which needs no supervisor and leaves no row.
     expect(screen.getByRole("button", { name: /apply/i })).toBeEnabled();
     expect(screen.queryByText(/more than the line is worth/i)).toBeNull();
+  });
+});
+
+describe("a payout lent through the modal — phase 8 slice 2b", () => {
+  it("asks a supervisor, then pays out exactly what the cashier asked for", async () => {
+    const user = await openRegister();
+    moveCash.mockRejectedValueOnce(new ApiError(403, "permission_denied"));
+    moveCash.mockResolvedValueOnce({ movement_id: "m1" });
+    authorize.mockResolvedValue({ permission: "cash.payout" });
+
+    await user.click(screen.getByRole("button", { name: /cash out/i }));
+    await user.type(screen.getByLabelText(/amount/i), "20");
+    await user.type(screen.getByLabelText(/reason/i), "milk");
+    await user.click(screen.getByRole("button", { name: /pay out/i }));
+
+    expect(await screen.findByText(/pay out 20.00 for milk/i)).toBeVisible();
+    await user.type(screen.getByLabelText(/supervisor code/i), "S001");
+    await user.type(screen.getByLabelText(/^pin$/i), "7241");
+    await user.click(screen.getByRole("button", { name: /authorise/i }));
+
+    expect(authorize).toHaveBeenCalledWith("S001", "7241", "cash.payout");
+    expect(moveCash).toHaveBeenCalledTimes(2);
+    expect(moveCash).toHaveBeenLastCalledWith("out", 2000, "milk");
+    expect(await screen.findByText(/paid out 20.00/i)).toBeVisible();
+  });
+
+  it("does not offer the close to a cashier", async () => {
+    render(<RegisterScreen session={session} onCloseShift={() => undefined} />);
+    await screen.findByPlaceholderText(/scan, type a barcode/i);
+
+    expect(screen.queryByRole("button", { name: /close shift/i })).toBeNull();
   });
 });

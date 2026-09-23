@@ -5,6 +5,7 @@ import { LoginScreen } from "./features/auth/LoginScreen";
 import { RegisterScreen } from "./features/register/RegisterScreen";
 import { AdminScreen } from "./features/admin/AdminScreen";
 import { StockroomScreen } from "./features/stockroom/StockroomScreen";
+import { CloseShiftScreen } from "./features/shift/CloseShiftScreen";
 
 export function App() {
   const [health, setHealth] = useState<HealthResponse | null>(null);
@@ -14,7 +15,7 @@ export function App() {
   // a pallet arriving and a catalogue to fix — and a string is cheaper than a
   // routing dependency for that. Admin is the only one of the three that
   // needs the internet, and it says so itself rather than being hidden here.
-  const [screen, setScreen] = useState<"register" | "stockroom" | "admin">(
+  const [screen, setScreen] = useState<"register" | "stockroom" | "admin" | "close">(
     "register",
   );
 
@@ -57,6 +58,9 @@ export function App() {
       <StockroomScreen session={session} onClose={() => setScreen("register")} />
     );
   }
+  if (screen === "close") {
+    return <CloseShiftScreen session={session} onClose={() => setScreen("register")} />;
+  }
   if (screen === "admin") {
     return <AdminScreen session={session} onClose={() => setScreen("register")} />;
   }
@@ -65,6 +69,7 @@ export function App() {
       session={session}
       onOpenStockroom={() => setScreen("stockroom")}
       onOpenAdmin={() => setScreen("admin")}
+      onCloseShift={() => setScreen("close")}
     />
   );
 }

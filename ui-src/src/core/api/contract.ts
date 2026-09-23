@@ -142,6 +142,7 @@ export interface CloseShiftResponse {
   close_id: string;
   shift: ShiftOut;
   figures: ShiftFiguresOut;
+  zreport_html: string;
 }
 /** The startup gate the splash polls. Unauthenticated by design. */
 export interface HealthResponse {
@@ -375,6 +376,7 @@ export interface ShiftFiguresOut {
   expected_cash?: MoneyOut | null;
   counted_cash?: MoneyOut | null;
   variance?: MoneyOut | null;
+  under_review_receipts?: string[];
 }
 export interface ShiftOut {
   id: string;
@@ -498,6 +500,17 @@ export interface UnlistedLineRequest {
 export interface XReportResponse {
   shift: ShiftOut;
   figures: ShiftFiguresOut;
+}
+export interface ZReportPdfResponse {
+  close_id: string;
+  path: string;
+}
+export interface ZReportResponse {
+  close_id: string;
+  session_id: string;
+  closed_at: string;
+  figures: ShiftFiguresOut;
+  zreport_html: string;
 }
 
 /**

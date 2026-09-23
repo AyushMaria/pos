@@ -1,6 +1,10 @@
 import { api, request } from "./client";
 import type {
   CartOut,
+  CashMovementResponse,
+  CloseShiftResponse,
+  XReportResponse,
+  ZReportPdfResponse,
   LookupResponse,
   MovementsResponse,
   PostSaleResponse,
@@ -188,6 +192,28 @@ export const shifts = {
       method: "POST",
       body: JSON.stringify({ opening_float_paise: openingFloatPaise }),
     }),
+
+  /** The day so far. Never the drawer: `expected_cash` is null by design. */
+  x: () => request<XReportResponse>("/shifts/current/x"),
+
+  /** Cash in or out with a reason. 403 for a cashier until a supervisor lends
+   *  `cash.payout`; the row then names that supervisor as approver. */
+  moveCash: (direction: "in" | "out", amountPaise: number, reason: string) =>
+    request<CashMovementResponse>("/shifts/cash", {
+      method: "POST",
+      body: JSON.stringify({ direction, amount_paise: amountPaise, reason }),
+    }),
+
+  /** Count, commit, and only then learn what was expected. */
+  close: (countedCashPaise: number, note: string | null) =>
+    request<CloseShiftResponse>("/shifts/close", {
+      method: "POST",
+      body: JSON.stringify({ counted_cash_paise: countedCashPaise, note }),
+    }),
+
+  /** Write the Z-report PDF under the data folder. On demand, like receipts. */
+  writeZPdf: (sessionId: string) =>
+    request<ZReportPdfResponse>(`/shifts/${sessionId}/z.pdf`, { method: "POST" }),
 };
 
 export const inventory = {

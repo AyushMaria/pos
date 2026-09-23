@@ -2181,20 +2181,20 @@ def test_a_payout_pushes_under_a_colleagues_claim_since_0024(pg: Any) -> None:
     `sale.create`. So a cashier can now push a payout — attributed, as the
     row says, to whoever made it.
 
-    `cash.payout` stays out of `OVERRIDABLE` for now, but for a different
-    reason than before: lending it needs `approved_by` carried into the row
-    and the modal wired to the cash screen, which is phase 8 slice 3. The
-    policy no longer stands in the way, and this test is what says so.
+    Which is what let slice 2b put `cash.payout` into `OVERRIDABLE`: the
+    rule is that a lent key's write must be accepted under the cashier's own
+    claim, and the last assertion below is that write — a cashier's payout
+    naming the supervisor who approved it.
     """
-    assert perms.CASH_PAYOUT not in perms.OVERRIDABLE
+    assert perms.CASH_PAYOUT in perms.OVERRIDABLE
 
     payout = (
         "insert into public.cash_movements (id, session_id, direction, "
-        "amount, reason, actor_id, occurred_at) values "
-        "(gen_random_uuid(), %s, 'out', 500, 'probe', %s, now())"
+        "amount, reason, actor_id, approved_by, occurred_at) values "
+        "(gen_random_uuid(), %s, 'out', 500, 'probe', %s, %s, now())"
     )
 
-    def attempt(jwt_claims: str, actor: str) -> int:
+    def attempt(jwt_claims: str, actor: str, approver: str | None = None) -> int:
         with pg.transaction(force_rollback=True):
             cur = pg.cursor()
             session_id = "019500aa-0000-7000-8000-00000000f900"
@@ -2207,7 +2207,7 @@ def test_a_payout_pushes_under_a_colleagues_claim_since_0024(pg: Any) -> None:
             cur.execute(
                 "select set_config('request.jwt.claims', %s, true)", (jwt_claims,)
             )
-            cur.execute(payout, (session_id, actor))
+            cur.execute(payout, (session_id, actor, approver))
             return cur.rowcount
 
     # The supervisor's own payout, as before.
@@ -2216,6 +2216,8 @@ def test_a_payout_pushes_under_a_colleagues_claim_since_0024(pg: Any) -> None:
     assert attempt(_cashier_claims(), SUPERVISOR_ID) == 1
     # And, since provenance is not authorisation, their own.
     assert attempt(_cashier_claims(), CASHIER_ID) == 1
+    # A payout lent through the override modal: the cashier's, approved.
+    assert attempt(_cashier_claims(), CASHIER_ID, SUPERVISOR_ID) == 1
 
 
 def test_a_shift_close_pushes_under_a_colleagues_claim(pg: Any) -> None:
