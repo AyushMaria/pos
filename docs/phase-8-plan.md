@@ -365,6 +365,15 @@ insert policies widened the way 0009 widened them — the pusher holds
   line being written by hand. The push therefore catches `unique_violation`
   rather than checking for a conflict, as the audit branch does.
 
+**Proven live, 22 September, `3d31c10`.** The register showed *Open the day*
+on sign-in; a scanned barcode into the float field was refused; ₹500 opened
+it. One ₹500 sale pushed after its session — in Supabase the session row
+says `open`, float 50000, with receipt ST01-T1-000019 joined to it, the first
+sale in the project with a non-null `session_id`. The X-report carried
+`expected_cash: null`. A close with a deliberately wrong count (₹537 against
+an expected ₹1,000) returned `variance −46300, rounding 0, sales_count 1`,
+and the `shift_closes` row in Supabase reads the same four numbers.
+
 **Still to do in this phase's core:** the rendered Z-report (text, HTML,
 PDF — the document, not the numbers), the close screen, the day-close check
 in the cloud (slice 3's second half), the owner's reports (slice 4), and
