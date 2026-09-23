@@ -27,6 +27,7 @@ from typing import Any
 import httpx
 
 from app.domain.barcode import parse as parse_barcode
+from app.domain.close_check import CheckLine
 from app.services.auth_service import SessionStore
 
 log = logging.getLogger(__name__)
@@ -353,6 +354,21 @@ class AdminService:
             return []
         body = response.json()
         return body if isinstance(body, list) else [body]
+
+    # ── The day-close check (phase 8 slice 3) ─────────────────────────────
+
+    async def day_close_check(self, session_id: str) -> list[CheckLine]:
+        """The cloud's recomputation of a closed shift, beside the till's.
+
+        Empty when the close has not arrived — or when this user may not read
+        it, which RLS makes the same answer (0025).
+        """
+        rows = await self._send(
+            "POST", "rpc/day_close_check", json={"p_session_id": session_id}
+        )
+        return [
+            CheckLine(str(row["figure"]), int(row["till"]), int(row["cloud"])) for row in rows
+        ]
 
     # ── Products ──────────────────────────────────────────────────────────
 

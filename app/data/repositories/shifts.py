@@ -214,6 +214,30 @@ class ShiftRepository(Repository):
         )
         return [row["receipt_no"] or "(no receipt number)" for row in rows]
 
+    def undelivered_sales(self, session_id: str) -> tuple[int, int]:
+        """This shift's sales that have not reached the cloud: (waiting, quarantined).
+
+        Waiting is still in the outbox; quarantined was set aside into the
+        failures queue (marked synced in the same breath, which is why the
+        failures table is what tells them apart). The day-close check uses
+        these to say *why* the cloud's count is short.
+        """
+        row = self._row(
+            """
+            SELECT
+              SUM(CASE WHEN o.synced_at IS NULL THEN 1 ELSE 0 END) AS waiting,
+              SUM(CASE WHEN EXISTS (SELECT 1 FROM sync_failures f
+                                     WHERE f.outbox_id = o.id) THEN 1 ELSE 0 END)
+                AS quarantined
+              FROM outbox o JOIN sales s ON s.id = o.entity_id
+             WHERE o.entity = 'sale' AND s.session_id = ?
+            """,
+            (session_id,),
+        )
+        if row is None:
+            return 0, 0
+        return int(row["waiting"] or 0), int(row["quarantined"] or 0)
+
     def name_of(self, user_id: str) -> str:
         """A person's name for a report, or their id if the cache lacks them."""
         row = self._row("SELECT full_name FROM cached_users WHERE user_id = ?", (user_id,))

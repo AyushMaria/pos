@@ -2,6 +2,7 @@ import { api, request } from "./client";
 import type {
   CartOut,
   CashMovementResponse,
+  CloseCheckResponse,
   CloseShiftResponse,
   XReportResponse,
   ZReportPdfResponse,
@@ -212,6 +213,11 @@ export const shifts = {
     }),
 
   /** Write the Z-report PDF under the data folder. On demand, like receipts. */
+  /** The cloud's figures beside the till's. Needs the internet; 404 until the
+   *  close has pushed. */
+  check: (sessionId: string) =>
+    request<CloseCheckResponse>(`/shifts/${sessionId}/check`),
+
   writeZPdf: (sessionId: string) =>
     request<ZReportPdfResponse>(`/shifts/${sessionId}/z.pdf`, { method: "POST" }),
 };

@@ -407,6 +407,30 @@ unlendable: a close is the supervisor's count.
 **A crash mid-close** (failure after the row, before the outbox) leaves the
 shift open with no close, no audit and nothing queued; the retry succeeds.
 
+## Slice 3 — the day-close check
+
+**Migration 0025, `public.day_close_check(session_id)`.** SQL, security
+invoker, exposed by PostgREST as `rpc/day_close_check`. It recomputes the
+nine figures from the cloud's own `sales`, `payments`, `sale_reviews` and
+`cash_movements`, rule for rule with `app/domain/shift.py` (a review counts
+only if resolved by the close), and returns them beside the stored close.
+A caller without `report.sales.store` gets no rows, the same as a close that
+has not arrived.
+
+**Changed from the sketch above: computed on demand, not by a trigger into
+a `shift_close_checks` table.** A trigger checks at the one moment the
+answer is most likely wrong — a quarantined sale retried tomorrow lands
+after the close, and a stored check would say "one missing" for ever. On
+demand, the check converges as late rows arrive, with no second table.
+
+**On the till.** `GET /shifts/{id}/check` (`shift.close`, cloud-direct:
+503 offline, 404 until the close has pushed) returns both columns and a
+sentence from `app/domain/close_check.py`. When the counts differ it looks
+in this till's outbox and says how many of the shift's sales are waiting to
+push and how many are in the failures queue. UPI verified after the close is
+reported as that, not as a discrepancy. The close screen has *Check against
+the cloud*.
+
 ---
 
 ## Before starting

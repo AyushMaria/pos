@@ -33,12 +33,14 @@ function figures(extra: Partial<ShiftFiguresOut> = {}): ShiftFiguresOut {
 const x = vi.fn();
 const close = vi.fn();
 const writeZPdf = vi.fn();
+const check = vi.fn();
 
 vi.mock("../../core/api/register", () => ({
   shifts: {
     x: () => x(),
     close: (...args: unknown[]) => close(...args),
     writeZPdf: (...args: unknown[]) => writeZPdf(...args),
+    check: (...args: unknown[]) => check(...args),
   },
 }));
 
@@ -58,6 +60,12 @@ beforeEach(() => {
       variance: money(-100),
     }),
     zreport_html: "<div class='zreport'>Z-report body</div>",
+  });
+  check.mockReset().mockResolvedValue({
+    session_id: "s1",
+    agrees: false,
+    lines: [],
+    explanation: "The till closed with 3 sales; the cloud has 2.",
   });
   writeZPdf.mockReset().mockResolvedValue({ close_id: "c1", path: "C:/z/Z-T1.pdf" });
 });
@@ -100,5 +108,18 @@ describe("closing the day", () => {
 
     expect(writeZPdf).toHaveBeenCalledWith("s1");
     expect(await screen.findByText(/C:\/z\/Z-T1.pdf/)).toBeVisible();
+  });
+
+  it("checks the close against the cloud on demand", async () => {
+    const user = person();
+    render(<CloseShiftScreen session={session} onClose={() => undefined} />);
+    await screen.findByText(/3 sales/i);
+    await user.type(screen.getByLabelText(/cash counted/i), "536");
+    await user.click(screen.getByRole("button", { name: /close shift/i }));
+
+    await user.click(await screen.findByRole("button", { name: /check against the cloud/i }));
+
+    expect(check).toHaveBeenCalledWith("s1");
+    expect(await screen.findByText(/the cloud has 2/i)).toBeVisible();
   });
 });

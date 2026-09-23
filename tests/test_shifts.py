@@ -453,3 +453,106 @@ def test_a_crash_mid_close_leaves_the_shift_open_and_nothing_queued(
     retried = till.post("/shifts/close", json={"counted_cash_paise": TEST_OPENING_FLOAT + 3_700})
     assert retried.status_code == 200, retried.text
     assert retried.json()["figures"]["variance"]["paise"] == 0
+
+
+# ── Slice 3: the day-close check ────────────────────────────────────────────
+
+
+class FakeCloud:
+    """Stands in for `AdminService.day_close_check`; the SQL is tested in test_rls."""
+
+    def __init__(self, lines: list | None = None, error: Exception | None = None) -> None:
+        self.lines = lines or []
+        self.error = error
+
+    async def day_close_check(self, session_id: str) -> list:
+        if self.error:
+            raise self.error
+        return self.lines
+
+
+def _closed_with_one_quarantined_sale(
+    till: TestClient, manager: dict, db: Database
+) -> str:
+    sell_cash(till)
+    posted = sell_cash(till)
+    session_id = till.get("/shifts/current").json()["id"]
+    outbox_id = db.query_one(
+        "SELECT id FROM outbox WHERE entity = 'sale' AND entity_id = ?", (posted["sale_id"],)
+    )["id"]
+    with db.write() as conn:
+        conn.execute(
+            "INSERT INTO sync_failures (outbox_id, payload_json, error, failed_at) "
+            "VALUES (?, '{}', 'rls', '2026-09-23T00:00:00+00:00')",
+            (outbox_id,),
+        )
+        conn.execute("UPDATE outbox SET synced_at = 'x' WHERE id = ?", (outbox_id,))
+    _close(till, manager, TEST_OPENING_FLOAT + 7_400)
+    return session_id
+
+
+def test_the_check_names_the_sale_in_the_failures_queue(
+    till: TestClient, seeded_manager: dict, db: Database
+) -> None:
+    from app.domain.close_check import CheckLine
+
+    session_id = _closed_with_one_quarantined_sale(till, seeded_manager, db)
+    till.app.state.admin_service = FakeCloud(
+        [CheckLine("sales_count", 2, 1), CheckLine("cash_sales", 7_400, 3_700)]
+    )
+
+    response = till.get(f"/shifts/{session_id}/check")
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["agrees"] is False
+    assert "the cloud has 1" in body["explanation"]
+    assert "1 in the failures queue" in body["explanation"]
+
+
+def test_the_check_is_a_404_before_the_close_arrives(
+    till: TestClient, seeded_manager: dict, db: Database
+) -> None:
+    session_id = _closed_with_one_quarantined_sale(till, seeded_manager, db)
+    till.app.state.admin_service = FakeCloud([])
+
+    assert till.get(f"/shifts/{session_id}/check").status_code == 404
+
+
+def test_the_check_needs_the_internet_and_says_so(
+    till: TestClient, seeded_manager: dict, db: Database
+) -> None:
+    from app.services.admin_service import AdminUnavailable
+
+    session_id = _closed_with_one_quarantined_sale(till, seeded_manager, db)
+    till.app.state.admin_service = FakeCloud(error=AdminUnavailable("offline"))
+
+    response = till.get(f"/shifts/{session_id}/check")
+
+    assert response.status_code == 503
+    assert "internet" in response.json()["detail"]
+
+
+def test_a_cashier_cannot_run_the_check(till: TestClient) -> None:
+    session_id = till.get("/shifts/current").json()["id"]
+    assert till.get(f"/shifts/{session_id}/check").status_code == 403
+
+
+def test_undelivered_sales_counts_waiting_and_quarantined_apart(
+    till: TestClient, db: Database
+) -> None:
+    sell_cash(till)
+    posted = sell_cash(till)
+    session_id = till.get("/shifts/current").json()["id"]
+    outbox_id = db.query_one(
+        "SELECT id FROM outbox WHERE entity_id = ?", (posted["sale_id"],)
+    )["id"]
+    with db.write() as conn:
+        conn.execute(
+            "INSERT INTO sync_failures (outbox_id, payload_json, error, failed_at) "
+            "VALUES (?, '{}', 'rls', 'now')",
+            (outbox_id,),
+        )
+        conn.execute("UPDATE outbox SET synced_at = 'x' WHERE id = ?", (outbox_id,))
+
+    assert ShiftRepository(db).undelivered_sales(session_id) == (1, 1)

@@ -21,10 +21,12 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 
-from app.api.deps import get_shift_service, require
+from app.api.deps import get_admin_service, get_shift_service, require
 from app.api.schemas import (
     CashMovementRequest,
     CashMovementResponse,
+    CheckLineOut,
+    CloseCheckResponse,
     CloseShiftRequest,
     CloseShiftResponse,
     MoneyOut,
@@ -37,11 +39,13 @@ from app.api.schemas import (
 )
 from app.data.repositories.shifts import OpenShift
 from app.domain import permissions
+from app.domain.close_check import explain
 from app.domain.identity import Session, utcnow
 from app.domain.money import Money
 from app.domain.shift import ShiftFigures
 from app.domain.zreport import ZReport
 from app.services import zreport_render
+from app.services.admin_service import AdminRejected, AdminService, AdminUnavailable
 from app.services.receipt_render import PdfUnavailable
 from app.services.shift_service import (
     NoOpenShift,
@@ -237,6 +241,44 @@ def z_report(
         closed_at=report.closed_at.isoformat(),
         figures=_z_figures(report),
         zreport_html=zreport_render.render_html(report),
+    )
+
+
+@router.get("/{session_id}/check", response_model=CloseCheckResponse)
+async def day_close_check(
+    session_id: str,
+    shifts: Shifts,
+    admin: Annotated[AdminService, Depends(get_admin_service)],
+    session: Annotated[Session, Depends(require(permissions.SHIFT_CLOSE))],
+) -> CloseCheckResponse:
+    """The cloud's figures for a closed shift beside the till's (0025).
+
+    Cloud-direct, like the catalogue: it needs the internet and says so with
+    a 503. A 404 means the cloud has no close for this shift yet — usually
+    because it has not pushed. When the figures differ, the explanation uses
+    this till's own outbox to say which sales have not arrived.
+    """
+    try:
+        lines = await admin.day_close_check(session_id)
+    except AdminUnavailable as exc:
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE, f"the check needs the internet: {exc}"
+        ) from exc
+    except AdminRejected as exc:
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, str(exc)) from exc
+    if not lines:
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND, "the cloud has not received this close yet"
+        )
+    waiting, quarantined = shifts.undelivered_sales(session_id)
+    return CloseCheckResponse(
+        session_id=session_id,
+        agrees=all(line.agrees for line in lines),
+        lines=[
+            CheckLineOut(figure=ln.figure, till=ln.till, cloud=ln.cloud, agrees=ln.agrees)
+            for ln in lines
+        ],
+        explanation=explain(lines, waiting=waiting, quarantined=quarantined),
     )
 
 

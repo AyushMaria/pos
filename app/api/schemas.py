@@ -552,6 +552,22 @@ class ZReportResponse(ApiModel):
     zreport_html: str
 
 
+class CheckLineOut(ApiModel):
+    figure: str
+    till: int
+    cloud: int
+    agrees: bool
+
+
+class CloseCheckResponse(ApiModel):
+    """The till's figures beside the cloud's, and what the difference means."""
+
+    session_id: str
+    agrees: bool
+    lines: list[CheckLineOut]
+    explanation: str
+
+
 class ZReportPdfResponse(ApiModel):
     close_id: str
     path: str

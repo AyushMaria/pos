@@ -710,6 +710,68 @@
         "title": "ChangeQuantityRequest",
         "type": "object"
       },
+      "CheckLineOut": {
+        "additionalProperties": false,
+        "properties": {
+          "agrees": {
+            "title": "Agrees",
+            "type": "boolean"
+          },
+          "cloud": {
+            "title": "Cloud",
+            "type": "integer"
+          },
+          "figure": {
+            "title": "Figure",
+            "type": "string"
+          },
+          "till": {
+            "title": "Till",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "figure",
+          "till",
+          "cloud",
+          "agrees"
+        ],
+        "title": "CheckLineOut",
+        "type": "object"
+      },
+      "CloseCheckResponse": {
+        "additionalProperties": false,
+        "description": "The till's figures beside the cloud's, and what the difference means.",
+        "properties": {
+          "agrees": {
+            "title": "Agrees",
+            "type": "boolean"
+          },
+          "explanation": {
+            "title": "Explanation",
+            "type": "string"
+          },
+          "lines": {
+            "items": {
+              "$ref": "#/components/schemas/CheckLineOut"
+            },
+            "title": "Lines",
+            "type": "array"
+          },
+          "session_id": {
+            "title": "Session Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "session_id",
+          "agrees",
+          "lines",
+          "explanation"
+        ],
+        "title": "CloseCheckResponse",
+        "type": "object"
+      },
       "CloseShiftRequest": {
         "additionalProperties": false,
         "properties": {
@@ -4803,6 +4865,49 @@
           }
         },
         "summary": "Open Shift",
+        "tags": [
+          "shifts"
+        ]
+      }
+    },
+    "/shifts/{session_id}/check": {
+      "get": {
+        "description": "The cloud's figures for a closed shift beside the till's (0025).\n\nCloud-direct, like the catalogue: it needs the internet and says so with\na 503. A 404 means the cloud has no close for this shift yet \u2014 usually\nbecause it has not pushed. When the figures differ, the explanation uses\nthis till's own outbox to say which sales have not arrived.",
+        "operationId": "day_close_check_shifts__session_id__check_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "title": "Session Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CloseCheckResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Day Close Check",
         "tags": [
           "shifts"
         ]

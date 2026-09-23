@@ -33,6 +33,7 @@ export function CloseShiftScreen({
   const [problem, setProblem] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [pdfPath, setPdfPath] = useState<string | null>(null);
+  const [checked, setChecked] = useState<string | null>(null);
 
   const shield = useScanShield({
     onScanBlocked: () => {
@@ -73,6 +74,18 @@ export function CloseShiftScreen({
     }
   }
 
+  async function checkCloud() {
+    if (!closed) return;
+    try {
+      setChecked((await shifts.check(closed.shift.id)).explanation);
+    } catch (error) {
+      // 404 is the ordinary case straight after closing: the close is in the
+      // outbox and has not pushed yet. 503 is no internet. Both are words the
+      // service has already written for a supervisor.
+      setChecked(error instanceof ApiError ? error.message : "Could not reach the cloud");
+    }
+  }
+
   if (closed) {
     const f = closed.figures;
     return (
@@ -101,9 +114,13 @@ export function CloseShiftScreen({
         />
         {problem && <p className="msg error" role="alert">{problem}</p>}
         {pdfPath && <p className="msg">Saved {pdfPath}</p>}
+        {checked && <p className="msg check">{checked}</p>}
         <div className="row">
           <button type="button" className="secondary" onClick={() => void writePdf()}>
             Save PDF
+          </button>
+          <button type="button" className="secondary" onClick={() => void checkCloud()}>
+            Check against the cloud
           </button>
           <button type="button" onClick={onClose}>
             Done

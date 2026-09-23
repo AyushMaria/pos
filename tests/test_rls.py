@@ -2482,3 +2482,88 @@ def test_a_lockout_pushes_as_an_audit_row(pg: Any) -> None:
     assert row[0] == "pin.locked"
     assert str(row[1]) == SUPERVISOR_ID
     assert row[2] is None, "nobody authorised a lockout"
+
+
+# ── 0025: the day-close check ───────────────────────────────────────────────
+
+
+def _seed_a_closed_day(cur: Any, *, till_sales: int, cloud_sales: int) -> str:
+    """A session with `cloud_sales` ₹37 cash sales in the cloud, closed by a
+    till that counted `till_sales` of them. Seeded as the table owner, so RLS
+    is not what is being tested here — reading it back is."""
+    session_id = "019500aa-0000-7000-8000-00000000fa00"
+    cur.execute(
+        "insert into public.register_sessions (id, store_id, terminal_id, user_id, "
+        "opened_at) values (%s, %s, %s, %s, now())",
+        (session_id, STORE_ID, TERMINAL_UUID, CASHIER_ID),
+    )
+    for n in range(cloud_sales):
+        sale_id = f"019500aa-0000-7000-8000-00000000fb{n:02d}"
+        cur.execute(
+            "insert into public.sales (id, store_id, terminal_id, session_id, cashier_id, "
+            "status, grand_total, rounding_adjustment, client_created_at) "
+            "values (%s, %s, %s, %s, %s, 'completed', 3700, -40, now())",
+            (sale_id, STORE_ID, TERMINAL_UUID, session_id, CASHIER_ID),
+        )
+        cur.execute(
+            "insert into public.payments (id, sale_id, method, amount, status, "
+            "confirmation_method) values (gen_random_uuid(), %s, 'cash', 3700, "
+            "'approved', 'immediate')",
+            (sale_id,),
+        )
+    cur.execute(
+        "insert into public.cash_movements (id, session_id, direction, amount, reason, "
+        "actor_id, occurred_at) values (gen_random_uuid(), %s, 'out', 5000, 'tea', %s, now())",
+        (session_id, SUPERVISOR_ID),
+    )
+    cur.execute(
+        "insert into public.shift_closes (id, session_id, closed_at, closed_by, "
+        "counted_cash, expected_cash, variance, cash_sales, upi_attested, upi_verified, "
+        "cash_in, cash_out, rounding, under_review_count, under_review_total, sales_count) "
+        "values (gen_random_uuid(), %s, now() + interval '1 minute', %s, 0, 0, 0, %s, 0, 0, "
+        "0, 5000, %s, 0, 0, %s)",
+        (session_id, SUPERVISOR_ID, 3700 * till_sales, -40 * till_sales, till_sales),
+    )
+    return session_id
+
+
+def _check_as(cur: Any, jwt_claims: str, session_id: str) -> dict[str, tuple[int, int]]:
+    cur.execute("set local role authenticated")
+    cur.execute("select set_config('request.jwt.claims', %s, true)", (jwt_claims,))
+    cur.execute("select figure, till, cloud from public.day_close_check(%s)", (session_id,))
+    return {row[0]: (row[1], row[2]) for row in cur.fetchall()}
+
+
+def test_the_day_close_check_agrees_when_the_cloud_saw_the_same_day(pg: Any) -> None:
+    with pg.transaction(force_rollback=True):
+        cur = pg.cursor()
+        session_id = _seed_a_closed_day(cur, till_sales=3, cloud_sales=3)
+
+        check = _check_as(cur, claims(MANAGER_ID, perms.MANAGER), session_id)
+
+    assert len(check) == 9
+    assert all(till == cloud for till, cloud in check.values()), check
+    assert check["cash_sales"] == (11_100, 11_100)
+    assert check["rounding"] == (-120, -120)
+    assert check["cash_out"] == (5_000, 5_000)
+
+
+def test_the_day_close_check_names_a_sale_the_cloud_never_received(pg: Any) -> None:
+    """The quarantined-sale case: the till closed with three, the cloud has two."""
+    with pg.transaction(force_rollback=True):
+        cur = pg.cursor()
+        session_id = _seed_a_closed_day(cur, till_sales=3, cloud_sales=2)
+
+        check = _check_as(cur, claims(MANAGER_ID, perms.MANAGER), session_id)
+
+    assert check["sales_count"] == (3, 2)
+    assert check["cash_sales"] == (11_100, 7_400)
+
+
+def test_a_cashier_gets_no_day_close_check(pg: Any) -> None:
+    """SECURITY INVOKER: `shift_closes` is a manager's read, so the check is too."""
+    with pg.transaction(force_rollback=True):
+        cur = pg.cursor()
+        session_id = _seed_a_closed_day(cur, till_sales=1, cloud_sales=1)
+
+        assert _check_as(cur, _cashier_claims(), session_id) == {}

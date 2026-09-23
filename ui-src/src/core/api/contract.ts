@@ -134,6 +134,19 @@ export interface CashMovementResponse {
 export interface ChangeQuantityRequest {
   qty_milli: number;
 }
+export interface CheckLineOut {
+  figure: string;
+  till: number;
+  cloud: number;
+  agrees: boolean;
+}
+/** The till's figures beside the cloud's, and what the difference means. */
+export interface CloseCheckResponse {
+  session_id: string;
+  agrees: boolean;
+  lines: CheckLineOut[];
+  explanation: string;
+}
 export interface CloseShiftRequest {
   counted_cash_paise: number;
   note?: string | null;

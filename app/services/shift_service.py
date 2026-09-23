@@ -167,6 +167,10 @@ class ShiftService:
         """What the X-report lists: under review as of now."""
         return self.shifts.under_review_receipts(session_id, as_of=utcnow())
 
+    def undelivered_sales(self, session_id: str) -> tuple[int, int]:
+        """(waiting, quarantined) sales of this shift, from this till's outbox."""
+        return self.shifts.undelivered_sales(session_id)
+
     # ── The Z-report ────────────────────────────────────────────────────────
 
     def z_report(self, session_id: str) -> ZReport | None:
