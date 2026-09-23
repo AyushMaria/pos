@@ -53,6 +53,7 @@ Nothing here is optional and almost none of it is coding.
 - [x] Target OS and Python version floor (3.14+ gives stdlib `uuid7`) — Windows; **runs on 3.10+ in practice**. 3.14 was not available when phase 1 was built, so `domain/ids.py` carries an RFC 9562 `uuid7()` that the stdlib call simply replaces when the floor moves. CI runs 3.12 and 3.14.
 - [x] Receipt delivery: on-screen only, PDF, or share by link/WhatsApp — decides the renderer and whether customer contact details are captured — **on-screen, with PDF on demand.** Built in phase 3 from a single receipt document model.
   - WhatsApp sharing is wanted and is *not* built. It needs a customer phone number captured at the till, which is a separate decision about what the shop stores about its customers and where — not a rendering question. The PDF is the prerequisite for it either way, so none of the phase 3 work becomes rework.
+- [x] **Owner channel: WhatsApp.** Decided 23 September 2026. Everything that tells the owner something (the daily report, low-stock alerts, phase 11) goes over the WhatsApp Business API. The code calls one `notify(owner, message)` and never knows the channel behind it. Why WhatsApp: it is where the owner already is, and the customer ordering agent (`retail-agent`, currently on Discord) is headed there too, so one Meta business verification, one provider and one number serve both. Until the Meta business account exists, `notify` sends to Discord, the same stand-in the agent uses; switching is a change of adapter, not of callers. Messages the owner has not prompted need Meta-approved templates, so every automatic message is a template from the start. Email and SMS were rejected: owners of these shops do not read email, and 160 characters cannot carry a daily report.
 
 - [x] **Every product carries a barcode — no exceptions.** Decided after M1. A product with no code cannot be created and cannot be sold: the catalogue import assigns an internal `21…` code to anything the manufacturer did not code, and weighed goods get a generated `22…` code at the counter. This makes name search a fallback rather than a daily path, and it is the reason the no-barcode tail is no longer treated as a risk (§6, §9).
 
@@ -224,6 +225,27 @@ Reserved deliberately. Every deployment surfaces work you cannot predict from a 
 
 **Exit criteria:** to be written with the partner before the phase opens. Starting point: the owner receives one weekly message they act on without opening the app, and can say afterwards whether it was right.
 
+### Phase 12 — Customer ordering (added 23 September 2026)
+
+*Not in the original plan.* `retail-agent` (github.com/AyushMaria/retail-agent) is an ordering assistant for the shop's regular customers, built separately before the POS: Gemini with tool calling, running on Discord until a Meta business account exists, with WhatsApp as its final home. This phase brings it onto the POS's catalogue, money rules and RLS, and takes it to real customers.
+
+Placed after the pilot on purpose. Orders from customers nobody can see should only arrive once the till, stock and day close have held up in a real shop. It is kept apart from phase 11 because the audiences differ: phase 11 is the owner looking at his business, this is customers looking at the shop. The two share the WhatsApp account and the `notify` adapter (§2, owner channel), not their exit criteria.
+
+- Bring the agent onto the POS: the POS catalogue and `product_prices`, stock from `stock_ledger`, every total recomputed in paise from the database and never taken from the model, `customer_orders` tables with their own status flow, a narrow Postgres role for the agent, durable carts and conversations, a channel adapter, and an Orders tab on the till
+- An order is not a sale: it is rung up at the till when collected, so GST, rounding, stock and the Z-report stay in one place, and the order records the `sale_id` it became
+- Guardrails in code and a conversation test suite
+- Search the way customers ask: Hinglish synonyms, misspellings, brands and sizes, in one search function the till shares
+- "The usual": reorder the last order at today's prices
+- Order by a photo of a handwritten list or by voice note, always read back before confirming
+- Fulfilment: pickup or delivery, a ready time, status messages, substitutions, and payment through the till's existing cash and attested-UPI flow
+- Move from Discord to WhatsApp
+
+**Needs a decision first:** what the shop stores about its customers (a `customers` table keyed by phone, with consent). It is the same question WhatsApp receipt sharing has waited on since phase 0, and it is recorded in §2 when it is made.
+
+**Can start early.** Making the agent repo installable, the guardrails, the Discord-side integration and the better search touch nothing on the till's critical path; see §4.
+
+**Exit criteria:** a regular customer orders on WhatsApp, including "the usual" or a photo of a list. The order appears on the till with database prices, is packed and collected, is rung up as a normal sale, and the day's Z-report and stock ledger both reflect it. A prompt-injection attempt and a skipped checkout both fail to place an order in the test suite.
+
 ---
 
 ## 4. Parallel tracks
@@ -239,6 +261,8 @@ Dev B (JS): P1 shell ─────P3 UI ───P4 UI ──P6 UI ──P6 UI
 Dev B's idle-ish window is weeks 4–5 while the domain is being built headless. Use it for the design system, the register screen prototype against a mocked API, and the barcode entry field — which needs to handle very fast typed input, out-of-order key events and Enter-terminated codes without losing characters, and is worth isolating early.
 
 **Status: built and under test** (`useBarcodeCapture`, 17 Vitest cases covering the timing rules). One trap is worth knowing before anyone touches it again: the register's own barcode field must be **excluded** from the global capture hook, not included in it. That field is an ordinary input — the scanner types into it and Enter submits the form. If the global hook also fires there, every scan travels two paths at once, and which one wins depends on the order `preventDefault` happens to run in. The hook exists for the case the field *cannot* cover: a scan while focus is somewhere else, such as an open tender dialog.
+
+**Phase 12 groundwork runs alongside.** The `retail-agent` work that does not touch the till (making the repo installable, guardrails and conversation tests, the Discord-side integration against the POS catalogue, and the shared product search) can run in parallel with phases 8–10. The customer-facing launch still waits for the pilot.
 
 **Contract-first:** freeze the API shapes in phase 1 as Pydantic models and generate TypeScript types from the OpenAPI schema. Without this, the two tracks diverge and you lose a week reconciling them.
 
