@@ -754,6 +754,7 @@ Phases 1–4 give a sellable single-terminal till taking cash and UPI. Phase 5 i
 - **UPI VPA per terminal**, for settlement matching.
 - **Receipt delivery: on screen, with PDF on demand.** Both render from one document model. WhatsApp sharing is wanted but unbuilt — it needs a customer phone number captured at the till, which is a question about what the shop stores, not about rendering.
 - **Owner channel: WhatsApp**, behind one `notify(owner, message)` interface, with Discord standing in until the Meta business account exists. It shares the WhatsApp Business account with the customer ordering agent (`retail-agent`). Decided 23 September 2026; execution plan §2 has the reasoning.
+- **Customer data: phone number, name and WhatsApp conversations**, in a `customers` table keyed by phone under RLS, so the ordering agent can see order history. Decided 23 September 2026; execution plan §2.
 - **Windows**, running on Python 3.10+ (§7).
 - **The scanner is in scope** and in use; every other peripheral is deferred (§12).
 - **No customer-facing screen, and no QR rendering.** The counter already has a printed UPI QR, so the till confirms payments rather than presenting them (§13.3).
