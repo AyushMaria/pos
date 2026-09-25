@@ -187,7 +187,8 @@ A tick marks what exists today; the rest is the intended surface.
 | ✅ | `POST` | `/register/carts/{id}/payments` | Begin an attempt `{method, amount}` → QR payload once UPI exists |
 | ✅ | `POST` | `/register/carts/{id}/post` | Commit the sale once the balance is settled |
 | ✅ | `POST` | `/register/sales/{id}/receipt.pdf` | Render on demand; the file is written locally, not streamed |
-| ✅ | `GET` | `/reports/margin` `/reports/size` | Thin, and mainly there to prove RLS denies a cashier the margin columns |
+| ✅ | `GET` | `/reports/sales` `/reports/products` `/reports/stock` | The owner's reports, cloud-direct (`report.sales.store`); cost and margin columns only under `report.margin`, nulled by 0026 before they leave Postgres. Replaced the phase 1 `/reports/margin` placeholder |
+| ✅ | `POST` | `/reports/export` | One report as CSV under the data directory; the path comes back, as for the Z-report PDF |
 | | `POST` | `/register/carts/{id}/park` `/resume` | Suspend transaction |
 | ✅ | `GET` | `/register/payments/{attempt_id}` | Attempt state, including one that has quietly expired since the screen last looked |
 | ✅ | `POST` | `/register/payments/{attempt_id}/confirm` | Manual attestation with the amount that actually arrived (`payment.attest`) |

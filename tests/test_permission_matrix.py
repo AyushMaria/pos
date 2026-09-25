@@ -171,7 +171,6 @@ PROBES: dict[str, Probe] = {
     ),
     perms.PAYMENT_ATTEST: Probe("POST", "/register/payments/no-such-attempt/confirm"),
     perms.SALE_REVIEW_RESOLVE: Probe("GET", "/register/reviews"),
-    perms.REPORT_MARGIN: Probe("GET", "/reports/margin"),
     perms.REPORT_SALES_STORE: Probe("GET", "/sync/failures"),
     # Phase 8. Both act on the open shift, and the fixture app has none, so a
     # role that holds the key gets a 409 — admitted, then refused by the
@@ -184,6 +183,22 @@ PROBES: dict[str, Probe] = {
     # 503 on a terminal with no project configured. That counts as admitted:
     # the guard let it through to the part that had an opinion.
     perms.USER_MANAGE: Probe("GET", "/admin/audit"),
+}
+
+#: Permission keys that gate *columns* of a route rather than the route.
+#:
+#: `report.margin` gated `GET /reports/margin` from phase 1 until phase 8
+#: slice 4, and that route only ever answered 501. The plan's slice 4 made it
+#: what it was always meant to be: the cost columns of the owner's reports,
+#: null for a caller without the key and absent from their export. A key like
+#: that has no `require()` to discover, so it is listed here with the route
+#: whose columns it gates, and `test_fastapi_column_layer` asserts it role by
+#: role the way `test_fastapi_layer` asserts the route keys.
+#:
+#: Not a hole: the route is gated by its own key, and the column rule is
+#: enforced first in Postgres (0026, `tests/test_rls.py`).
+COLUMN_GATED: dict[str, Probe] = {
+    perms.REPORT_MARGIN: Probe("GET", "/reports/products?since=2026-09-24&until=2026-09-24"),
 }
 
 #: Permission keys with no route behind them yet.
@@ -306,6 +321,63 @@ def test_fastapi_layer(role: str, permission: str, sign_in_as: Any) -> None:
         )
 
 
+class CostlyCloud:
+    """A cloud that sends cost to everybody — the database misbehaving.
+
+    The FastAPI layer's job for a column-gated key is to withdraw the columns
+    *whatever* Postgres sent, so this fake sends them regardless of who asks.
+    If the route trusted the database alone, every role would see them here.
+    """
+
+    async def sales_by_product(self, *_: Any) -> list[Any]:
+        from app.domain.reports import ProductSales
+
+        return [
+            ProductSales(
+                product_id="p1", sku="SKU-1", name="Atta", uom="each",
+                qty_milli=2_000, sales_count=2, sales=55_000, tax=2_620,
+                discounts=0, cost=48_400, margin=6_600, uncosted_sales=0,
+            )
+        ]
+
+
+@pytest.mark.parametrize("permission", sorted(COLUMN_GATED))
+@pytest.mark.parametrize("role", perms.ROLES)
+def test_fastapi_column_layer(role: str, permission: str, sign_in_as: Any) -> None:
+    """The route admits by its own key; the columns follow this one.
+
+    Three outcomes, one per kind of role: refused the route entirely (403),
+    admitted without the columns (null cost, `margin_visible` false), and
+    admitted with them.
+    """
+    probe = COLUMN_GATED[permission]
+    client = sign_in_as(role)
+    client.app.state.admin_service = CostlyCloud()  # type: ignore[attr-defined]
+
+    response = client.request(probe.method, probe.path)
+
+    if role not in EXPECTED[perms.REPORT_SALES_STORE]:
+        assert response.status_code == 403, response.text
+        return
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    row = body["rows"][0]
+    if role in EXPECTED[permission]:
+        assert body["margin_visible"] is True
+        assert (row["cost"], row["margin"]) == (48_400, 6_600), role
+    else:
+        assert body["margin_visible"] is False
+        assert (row["cost"], row["margin"], row["margin_bp"]) == (None, None, None), (
+            f"fastapi layer: {role} does not hold {permission} but saw cost"
+        )
+
+
+def test_a_column_gated_key_gates_no_route(client: TestClient) -> None:
+    """If `report.margin` ever gates a route again, it belongs in PROBES."""
+    assert not set(COLUMN_GATED) & set(gated_operations(client).values())
+
+
 # ── The inventories that keep the layers honest ─────────────────────────────
 
 
@@ -328,7 +400,7 @@ def test_the_no_surface_list_is_exactly_the_keys_with_no_route(
 ) -> None:
     """`NO_API_SURFACE` describes the application, not a wish about it."""
     gated = set(gated_operations(client).values())
-    absent = set(perms.ALL_PERMISSIONS) - gated
+    absent = set(perms.ALL_PERMISSIONS) - gated - set(COLUMN_GATED)
 
     gained = sorted(NO_API_SURFACE - absent)
     assert not gained, (

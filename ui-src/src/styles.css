@@ -593,3 +593,24 @@ body:has(.done) {
 .close-shift .under-review ul {
   margin: 0.25rem 0 1rem;
 }
+
+/* Owner's reports — phase 8 slice 4. Figures right-aligned in tabular
+   digits so a column of rupees reads down the decimal point; the total row
+   is the one the owner compares with the Z-report. */
+.reports table.grid {
+  width: 100%;
+  border-collapse: collapse;
+}
+.reports table.grid th,
+.reports table.grid td {
+  padding: 0.25rem 0.5rem;
+  border-bottom: 1px solid var(--line);
+}
+.reports .num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.reports tr.total td {
+  font-weight: 700;
+  border-top: 2px solid var(--line);
+}

@@ -1394,6 +1394,187 @@
         "title": "ProductOut",
         "type": "object"
       },
+      "ProductReportResponse": {
+        "additionalProperties": false,
+        "description": "Best sellers first, by what they sold for.",
+        "properties": {
+          "margin_visible": {
+            "title": "Margin Visible",
+            "type": "boolean"
+          },
+          "rows": {
+            "items": {
+              "$ref": "#/components/schemas/ProductSalesOut"
+            },
+            "title": "Rows",
+            "type": "array"
+          },
+          "since": {
+            "title": "Since",
+            "type": "string"
+          },
+          "total": {
+            "$ref": "#/components/schemas/ProductSalesOut"
+          },
+          "until": {
+            "title": "Until",
+            "type": "string"
+          }
+        },
+        "required": [
+          "since",
+          "until",
+          "rows",
+          "total",
+          "margin_visible"
+        ],
+        "title": "ProductReportResponse",
+        "type": "object"
+      },
+      "ProductSalesOut": {
+        "additionalProperties": false,
+        "properties": {
+          "cost": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cost"
+          },
+          "discounts": {
+            "title": "Discounts",
+            "type": "integer"
+          },
+          "margin": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Margin"
+          },
+          "margin_bp": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Margin Bp"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "product_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Product Id"
+          },
+          "qty_milli": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Qty Milli"
+          },
+          "sales": {
+            "title": "Sales",
+            "type": "integer"
+          },
+          "sales_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sales Count"
+          },
+          "sku": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sku"
+          },
+          "tax": {
+            "title": "Tax",
+            "type": "integer"
+          },
+          "uncosted_sales": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Uncosted Sales"
+          },
+          "uom": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Uom"
+          }
+        },
+        "required": [
+          "product_id",
+          "sku",
+          "name",
+          "uom",
+          "qty_milli",
+          "sales_count",
+          "sales",
+          "tax",
+          "discounts",
+          "cost",
+          "margin",
+          "margin_bp",
+          "uncosted_sales"
+        ],
+        "title": "ProductSalesOut",
+        "type": "object"
+      },
       "ProductUpdateRequest": {
         "additionalProperties": false,
         "description": "Every field optional: a PATCH touches only what it names.",
@@ -1612,6 +1793,73 @@
         "title": "ReorderPointSetRequest",
         "type": "object"
       },
+      "ReportExportRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "report": {
+            "enum": [
+              "sales",
+              "products",
+              "stock"
+            ],
+            "title": "Report",
+            "type": "string"
+          },
+          "since": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Since"
+          },
+          "tz": {
+            "default": "Asia/Kolkata",
+            "title": "Tz",
+            "type": "string"
+          },
+          "until": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Until"
+          }
+        },
+        "required": [
+          "report"
+        ],
+        "title": "ReportExportRequest",
+        "type": "object"
+      },
+      "ReportExportResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "path": {
+            "title": "Path",
+            "type": "string"
+          },
+          "rows": {
+            "title": "Rows",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "path",
+          "rows"
+        ],
+        "title": "ReportExportResponse",
+        "type": "object"
+      },
       "ResolveReviewRequest": {
         "additionalProperties": false,
         "properties": {
@@ -1710,6 +1958,150 @@
           "items"
         ],
         "title": "ReviewQueueResponse",
+        "type": "object"
+      },
+      "SalesDayOut": {
+        "additionalProperties": false,
+        "properties": {
+          "cash": {
+            "title": "Cash",
+            "type": "integer"
+          },
+          "cost": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cost"
+          },
+          "day": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Day"
+          },
+          "discounts": {
+            "title": "Discounts",
+            "type": "integer"
+          },
+          "margin": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Margin"
+          },
+          "rounding": {
+            "title": "Rounding",
+            "type": "integer"
+          },
+          "sales_count": {
+            "title": "Sales Count",
+            "type": "integer"
+          },
+          "takings": {
+            "title": "Takings",
+            "type": "integer"
+          },
+          "tax": {
+            "title": "Tax",
+            "type": "integer"
+          },
+          "uncosted_sales": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Uncosted Sales"
+          },
+          "under_review_count": {
+            "title": "Under Review Count",
+            "type": "integer"
+          },
+          "under_review_total": {
+            "title": "Under Review Total",
+            "type": "integer"
+          },
+          "upi_attested": {
+            "title": "Upi Attested",
+            "type": "integer"
+          },
+          "upi_verified": {
+            "title": "Upi Verified",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "day",
+          "sales_count",
+          "takings",
+          "cash",
+          "upi_attested",
+          "upi_verified",
+          "tax",
+          "discounts",
+          "rounding",
+          "under_review_count",
+          "under_review_total",
+          "cost",
+          "margin",
+          "uncosted_sales"
+        ],
+        "title": "SalesDayOut",
+        "type": "object"
+      },
+      "SalesReportResponse": {
+        "additionalProperties": false,
+        "description": "One line per day in the range, the days nothing sold included.",
+        "properties": {
+          "days": {
+            "items": {
+              "$ref": "#/components/schemas/SalesDayOut"
+            },
+            "title": "Days",
+            "type": "array"
+          },
+          "margin_visible": {
+            "title": "Margin Visible",
+            "type": "boolean"
+          },
+          "since": {
+            "title": "Since",
+            "type": "string"
+          },
+          "total": {
+            "$ref": "#/components/schemas/SalesDayOut"
+          },
+          "until": {
+            "title": "Until",
+            "type": "string"
+          }
+        },
+        "required": [
+          "since",
+          "until",
+          "days",
+          "total",
+          "margin_visible"
+        ],
+        "title": "SalesReportResponse",
         "type": "object"
       },
       "SearchResponse": {
@@ -1975,6 +2367,162 @@
           "reorder_point"
         ],
         "title": "StockLevelOut",
+        "type": "object"
+      },
+      "StockPositionOut": {
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "on_hand": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "On Hand"
+          },
+          "price": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Price"
+          },
+          "product_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Product Id"
+          },
+          "reorder_point": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reorder Point"
+          },
+          "sku": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sku"
+          },
+          "unit_cost": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unit Cost"
+          },
+          "uom": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Uom"
+          },
+          "value_at_cost": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value At Cost"
+          },
+          "value_at_price": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value At Price"
+          }
+        },
+        "required": [
+          "product_id",
+          "sku",
+          "name",
+          "uom",
+          "on_hand",
+          "reorder_point",
+          "price",
+          "value_at_price",
+          "unit_cost",
+          "value_at_cost"
+        ],
+        "title": "StockPositionOut",
+        "type": "object"
+      },
+      "StockReportResponse": {
+        "additionalProperties": false,
+        "description": "What is on the shelves now. No range: it is a balance, not a flow.",
+        "properties": {
+          "margin_visible": {
+            "title": "Margin Visible",
+            "type": "boolean"
+          },
+          "rows": {
+            "items": {
+              "$ref": "#/components/schemas/StockPositionOut"
+            },
+            "title": "Rows",
+            "type": "array"
+          },
+          "total": {
+            "$ref": "#/components/schemas/StockPositionOut"
+          }
+        },
+        "required": [
+          "rows",
+          "total",
+          "margin_visible"
+        ],
+        "title": "StockReportResponse",
         "type": "object"
       },
       "SyncFailureOut": {
@@ -4681,20 +5229,193 @@
         ]
       }
     },
-    "/reports/margin": {
-      "get": {
-        "operationId": "margin_report_reports_margin_get",
+    "/reports/export": {
+      "post": {
+        "description": "Write one report as CSV under the data directory, and say where.\n\nThe same rows the screen shows, fetched again rather than sent up from\nthe page: the page is not trusted to say what a report contains, and a\nsupervisor's export must lack the cost columns because the *session*\nlacks the key, not because the screen left them out.",
+        "operationId": "export_report_reports_export_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReportExportRequest"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/ReportExportResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Export Report",
+        "tags": [
+          "reports"
+        ]
+      }
+    },
+    "/reports/products": {
+      "get": {
+        "description": "What sold, best first \u2014 and, under `report.margin`, what it made.",
+        "operationId": "products_report_reports_products_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "since",
+            "required": true,
+            "schema": {
+              "format": "date",
+              "title": "Since",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "until",
+            "required": true,
+            "schema": {
+              "format": "date",
+              "title": "Until",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "tz",
+            "required": false,
+            "schema": {
+              "default": "Asia/Kolkata",
+              "title": "Tz",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProductReportResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Products Report",
+        "tags": [
+          "reports"
+        ]
+      }
+    },
+    "/reports/sales": {
+      "get": {
+        "description": "Takings by day. The total ties to the Z-reports' Takings for the days.\n\n`since` and `until` are local days, inclusive, and `tz` the zone they are\nlocal to. The cloud turns them into instants, so a sale rung at five past\nmidnight is on the day the owner thinks it is on.",
+        "operationId": "sales_report_reports_sales_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "since",
+            "required": true,
+            "schema": {
+              "format": "date",
+              "title": "Since",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "until",
+            "required": true,
+            "schema": {
+              "format": "date",
+              "title": "Until",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "tz",
+            "required": false,
+            "schema": {
+              "default": "Asia/Kolkata",
+              "title": "Tz",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SalesReportResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Sales Report",
+        "tags": [
+          "reports"
+        ]
+      }
+    },
+    "/reports/stock": {
+      "get": {
+        "description": "Every stocked product, what is on hand, and what it is worth.",
+        "operationId": "stock_report_reports_stock_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StockReportResponse"
+                }
               }
             },
             "description": "Successful Response"
           }
         },
-        "summary": "Margin Report",
+        "summary": "Stock Report",
         "tags": [
           "reports"
         ]

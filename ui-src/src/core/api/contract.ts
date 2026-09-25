@@ -292,6 +292,29 @@ export interface ProductOut {
   pack_size?: number;
   barcode?: string | null;
 }
+/** Best sellers first, by what they sold for. */
+export interface ProductReportResponse {
+  since: string;
+  until: string;
+  rows: ProductSalesOut[];
+  total: ProductSalesOut;
+  margin_visible: boolean;
+}
+export interface ProductSalesOut {
+  product_id: string | null;
+  sku: string | null;
+  name: string | null;
+  uom: string | null;
+  qty_milli: number | null;
+  sales_count: number | null;
+  sales: number;
+  tax: number;
+  discounts: number;
+  cost: number | null;
+  margin: number | null;
+  margin_bp: number | null;
+  uncosted_sales: number | null;
+}
 /** Every field optional: a PATCH touches only what it names. */
 export interface ProductUpdateRequest {
   name?: string | null;
@@ -334,6 +357,16 @@ converts, exactly as the stockroom does. */
 export interface ReorderPointSetRequest {
   reorder_point: number;
 }
+export interface ReportExportRequest {
+  report: "sales" | "products" | "stock";
+  since?: string | null;
+  until?: string | null;
+  tz?: string;
+}
+export interface ReportExportResponse {
+  path: string;
+  rows: number;
+}
 export interface ResolveReviewRequest {
   /** 'paid' if the money was there after all, 'not_paid' if it never arrived. Never a bare 'resolved': a variance nobody can name is one nobody can act on at shift close. */
   outcome: string;
@@ -354,6 +387,30 @@ export interface ReviewItemOut {
 }
 export interface ReviewQueueResponse {
   items: ReviewItemOut[];
+}
+export interface SalesDayOut {
+  day: string | null;
+  sales_count: number;
+  takings: number;
+  cash: number;
+  upi_attested: number;
+  upi_verified: number;
+  tax: number;
+  discounts: number;
+  rounding: number;
+  under_review_count: number;
+  under_review_total: number;
+  cost: number | null;
+  margin: number | null;
+  uncosted_sales: number | null;
+}
+/** One line per day in the range, the days nothing sold included. */
+export interface SalesReportResponse {
+  since: string;
+  until: string;
+  days: SalesDayOut[];
+  total: SalesDayOut;
+  margin_visible: boolean;
 }
 export interface SearchResponse {
   query: string;
@@ -410,6 +467,24 @@ export interface StockLevelOut {
   store_id: string;
   on_hand: number;
   reorder_point: number;
+}
+export interface StockPositionOut {
+  product_id: string | null;
+  sku: string | null;
+  name: string | null;
+  uom: string | null;
+  on_hand: number | null;
+  reorder_point: number | null;
+  price: number | null;
+  value_at_price: number | null;
+  unit_cost: number | null;
+  value_at_cost: number | null;
+}
+/** What is on the shelves now. No range: it is a balance, not a flow. */
+export interface StockReportResponse {
+  rows: StockPositionOut[];
+  total: StockPositionOut;
+  margin_visible: boolean;
 }
 export interface SyncFailureOut {
   id: number;

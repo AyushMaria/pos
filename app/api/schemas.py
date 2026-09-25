@@ -10,7 +10,8 @@ never a float. The UI formats; it does not compute.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -755,3 +756,104 @@ class LowStockResponse(ApiModel):
     """At or under the reorder point. A query, not an alert."""
 
     rows: list[LowStockOut]
+
+
+# ── The owner's reports (phase 8 slice 4) ─────────────────────────────────
+#
+# Paise and thousandths throughout, like the rest of admin; the screen
+# converts. `cost`, `margin` and `uncosted_sales` are null for a caller
+# without `report.margin`, and `margin_visible` says which of the two a null
+# means: withheld, or not recorded.
+
+
+class SalesDayOut(ApiModel):
+    #: ISO date; null on the total line.
+    day: str | None
+    sales_count: int
+    takings: int
+    cash: int
+    upi_attested: int
+    upi_verified: int
+    tax: int
+    discounts: int
+    rounding: int
+    under_review_count: int
+    under_review_total: int
+    cost: int | None
+    margin: int | None
+    uncosted_sales: int | None
+
+
+class SalesReportResponse(ApiModel):
+    """One line per day in the range, the days nothing sold included."""
+
+    since: str
+    until: str
+    days: list[SalesDayOut]
+    total: SalesDayOut
+    margin_visible: bool
+
+
+class ProductSalesOut(ApiModel):
+    #: Null on the total line, with `sku`, `name`, `uom`, `qty_milli` and
+    #: `sales_count` — none of them add up across products.
+    product_id: str | None
+    sku: str | None
+    name: str | None
+    uom: str | None
+    qty_milli: int | None
+    sales_count: int | None
+    sales: int
+    tax: int
+    discounts: int
+    cost: int | None
+    margin: int | None
+    margin_bp: int | None
+    uncosted_sales: int | None
+
+
+class ProductReportResponse(ApiModel):
+    """Best sellers first, by what they sold for."""
+
+    since: str
+    until: str
+    rows: list[ProductSalesOut]
+    total: ProductSalesOut
+    margin_visible: bool
+
+
+class StockPositionOut(ApiModel):
+    product_id: str | None
+    sku: str | None
+    name: str | None
+    uom: str | None
+    on_hand: int | None
+    reorder_point: int | None
+    price: int | None
+    value_at_price: int | None
+    unit_cost: int | None
+    value_at_cost: int | None
+
+
+class StockReportResponse(ApiModel):
+    """What is on the shelves now. No range: it is a balance, not a flow."""
+
+    rows: list[StockPositionOut]
+    total: StockPositionOut
+    margin_visible: bool
+
+
+class ReportExportRequest(ApiModel):
+    report: Literal["sales", "products", "stock"]
+    #: Local days, inclusive. Required for `sales` and `products`; ignored
+    #: for `stock`, which is always now.
+    since: date | None = None
+    until: date | None = None
+    #: The IANA zone those days are local to. The screen sends its own.
+    tz: str = "Asia/Kolkata"
+
+
+class ReportExportResponse(ApiModel):
+    path: str
+    #: Lines written, the header and total not counted.
+    rows: int

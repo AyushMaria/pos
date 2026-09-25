@@ -142,22 +142,36 @@ def test_revoking_purges_the_snapshot(
 # ── The permission gate ─────────────────────────────────────────────────────
 
 
-def test_cashier_is_denied_the_margin_report(
+REPORT = "/reports/products?since=2026-09-24&until=2026-09-24"
+
+
+def test_cashier_is_denied_the_owners_reports(
     client: TestClient, seeded_cashier: dict
 ) -> None:
     client.post("/auth/login", json=seeded_cashier)
-    response = client.get("/reports/margin")
+    response = client.get(REPORT)
     assert response.status_code == 403
     assert response.json()["detail"] == "permission_denied"
 
 
-def test_manager_passes_the_margin_gate(
+def test_manager_passes_the_report_gate(
     client: TestClient, seeded_manager: dict
 ) -> None:
-    """501, not 403: the gate opens even though the report is phase 8 work."""
+    """503, not 403: the gate opens, and the report needs a cloud this test
+    client does not have. The 501 that stood here until phase 8 is gone."""
     client.post("/auth/login", json=seeded_manager)
-    assert client.get("/reports/margin").status_code == 501
+    response = client.get(REPORT)
+    assert response.status_code == 503
+    assert "internet" in response.json()["detail"]
 
 
-def test_margin_report_requires_a_login(client: TestClient) -> None:
-    assert client.get("/reports/margin").status_code == 401
+def test_the_margin_placeholder_is_gone(
+    client: TestClient, seeded_manager: dict
+) -> None:
+    """`report.margin` gates columns of `/reports/products` now, not a route."""
+    client.post("/auth/login", json=seeded_manager)
+    assert client.get("/reports/margin").status_code == 404
+
+
+def test_reports_require_a_login(client: TestClient) -> None:
+    assert client.get(REPORT).status_code == 401

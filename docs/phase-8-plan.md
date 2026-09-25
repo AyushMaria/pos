@@ -431,6 +431,61 @@ push and how many are in the failures queue. UPI verified after the close is
 reported as that, not as a discrepancy. The close screen has *Check against
 the cloud*.
 
+## Slice 4 — the owner's reports
+
+**Migration 0026: three functions, not three views.** `public.report_sales_by_day`,
+`report_sales_by_product` and `report_stock_position`, SECURITY DEFINER,
+each guarded the way `product_margin` is: no rows without
+`report.sales.store` for the store, and null cost columns without
+`report.margin`. Changed from the sketch above for two reasons: a view cannot
+take a date range (sales by product for a week aggregates *after* the
+filter), and `reports` is not a schema PostgREST exposes, while `public` RPC is
+the path `day_close_check` already proved. The helpers behind them live in
+`pos`, unexposed and unguarded, and `authenticated` cannot execute them.
+
+**The rules, decided on the way:**
+
+- **Days are the shop's.** The screen sends local days and its timezone;
+  0026 turns them into instants on `server_received_at`. A sale at 00:05 IST
+  is on the day the owner means, not the UTC day before.
+- **Takings are the Z-report's Takings**: approved payments of the sales
+  that count (`completed`, or reviewed `paid`). Under review is a count and a
+  sum beside them; `not_paid` is in nothing. `test_the_days_takings_tie_to_the_z_report`
+  asserts the report and the stored close agree to the paisa.
+- **Cost is the one known when the sale arrived** — the latest recorded cost
+  at or before `server_received_at`. Not the current price row's: `set_price`
+  opens a row without a cost, so after any reprice the current cost is null.
+  And not today's cost applied to last month's sales.
+- **Margin is over costed lines only, and says so.** Most of the migrated
+  catalogue has no cost and the unlisted item never will. A margin that went
+  null whenever one of those sold would be null every day, so the report
+  carries `uncosted_sales` beside the margin and the screen puts it in words.
+  Same convention as `product_margin`: GST-inclusive price less cost.
+- **Stock is now, not a range.** `stock_levels` is the balance; a position
+  "as of last Tuesday" is a ledger replay nobody has asked for.
+
+**`report.margin` gates columns, not a route.** `GET /reports/margin` and its
+501 are gone. The key is asserted at all three layers as a column set:
+`tests/test_rls.py` (a supervisor gets the same rows with null cost),
+`test_permission_matrix.py::test_fastapi_column_layer` (the route withdraws
+cost even from a fake cloud that sends it to everybody, mutation-checked) and
+`ReportsTab.test.tsx` (a supervisor sees no Cost or Margin heading).
+`COLUMN_GATED` is the matrix's new inventory for a key like this, so it did
+not have to join `NO_API_SURFACE` as a hole.
+
+**On the till.** `GET /reports/sales`, `/reports/products`, `/reports/stock`
+(`report.sales.store`, 503 offline with a sentence, at most 366 days), and
+`POST /reports/export`, which fetches the report again, writes CSV under
+`<data dir>/reports/` with a byte-order mark so Excel reads ₹ and Hindi
+names, and returns the path — the Z-report PDF's shape, because the webview
+cannot download a file. A supervisor's export has no cost columns at all,
+rather than empty ones. Admin → **Reports**: Sales by day, Products, Stock, a
+date range defaulting to today, and *Export to CSV*.
+
+**Still to prove live:** 0026 is not yet on the project. The plan's proof —
+a manager's CSV total matching the Z-report's Takings for the same day, a
+supervisor's export without cost columns — runs once it is.
+
 ---
 
 ## Before starting

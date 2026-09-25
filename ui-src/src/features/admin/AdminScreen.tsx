@@ -16,6 +16,8 @@ import type {
   UnknownScanOut,
 } from "../../core/api/contract";
 import { PermissionGate, useHasPermission } from "../../core/rbac/PermissionGate";
+import { ReportsTab } from "./ReportsTab";
+import { useCloudCall } from "./useCloudCall";
 
 /**
  * Catalogue admin — phase 6 slice 6.
@@ -43,9 +45,12 @@ const TABS: { id: Tab; label: string; permission: Permission }[] = [
   // since phase 5. This is the first time that sentence has pointed at a
   // screen. Same key as the route and as the indicator's Try again.
   { id: "failures", label: "Sync failures", permission: "report.sales.store" },
+  // Phase 8 slice 4. Same key as the three routes and the three 0026
+  // functions; the cost columns inside it are `report.margin`'s.
+  { id: "reports", label: "Reports", permission: "report.sales.store" },
 ];
 
-type Tab = "catalogue" | "queue" | "low" | "audit" | "failures";
+type Tab = "catalogue" | "queue" | "low" | "audit" | "failures" | "reports";
 
 const rupees = (paise: number) => (paise / 100).toFixed(2);
 const paise = (typed: string) => Math.round(Number(typed) * 100);
@@ -58,33 +63,6 @@ const paise = (typed: string) => Math.round(Number(typed) * 100);
 const UNIT = 1000;
 const units = (milli: number) => String(milli / UNIT);
 const milli = (typed: string) => Math.round(Number(typed) * UNIT);
-
-/** Offline is a different sentence from refused, and a different next step. */
-function useCloudCall() {
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [offline, setOffline] = useState(false);
-
-  const run = useCallback(async <T,>(work: () => Promise<T>): Promise<T | null> => {
-    setBusy(true);
-    setError(null);
-    setOffline(false);
-    try {
-      return await work();
-    } catch (cause) {
-      if (cause instanceof ApiError && cause.isUnavailable) {
-        setOffline(true);
-      } else {
-        setError(cause instanceof ApiError ? cause.message : "That did not work.");
-      }
-      return null;
-    } finally {
-      setBusy(false);
-    }
-  }, []);
-
-  return { busy, error, offline, run, clearError: () => setError(null) };
-}
 
 /**
  * The product form saves on a button; the barcode, price and reorder panels
@@ -200,6 +178,7 @@ export function AdminScreen({
       {tab === "low" && <LowStockTab />}
       {tab === "audit" && <AuditTab />}
       {tab === "failures" && <SyncFailuresTab />}
+      {tab === "reports" && <ReportsTab session={session} />}
     </div>
   );
 }

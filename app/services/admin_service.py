@@ -22,12 +22,14 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from datetime import date
 from typing import Any
 
 import httpx
 
 from app.domain.barcode import parse as parse_barcode
 from app.domain.close_check import CheckLine
+from app.domain.reports import ProductSales, SalesDay, StockPosition
 from app.services.auth_service import SessionStore
 
 log = logging.getLogger(__name__)
@@ -368,6 +370,87 @@ class AdminService:
         )
         return [
             CheckLine(str(row["figure"]), int(row["till"]), int(row["cloud"])) for row in rows
+        ]
+
+    # ── The owner's reports (phase 8 slice 4) ─────────────────────────────
+    #
+    # Three RPCs, each guarded inside Postgres (0026): no rows without
+    # `report.sales.store` for the store, and null cost columns without
+    # `report.margin`. So an empty answer here is either a quiet range or a
+    # refusal, and the router's `require()` is what tells the two apart.
+
+    async def sales_by_day(
+        self, store_id: str, since: date, until: date, tz: str
+    ) -> list[SalesDay]:
+        rows = await self._send(
+            "POST",
+            "rpc/report_sales_by_day",
+            json=_range(store_id, since, until, tz),
+        )
+        return [
+            SalesDay(
+                day=date.fromisoformat(row["day"]),
+                sales_count=int(row["sales_count"]),
+                takings=int(row["takings"]),
+                cash=int(row["cash"]),
+                upi_attested=int(row["upi_attested"]),
+                upi_verified=int(row["upi_verified"]),
+                tax=int(row["tax"]),
+                discounts=int(row["discounts"]),
+                rounding=int(row["rounding"]),
+                under_review_count=int(row["under_review_count"]),
+                under_review_total=int(row["under_review_total"]),
+                cost=_maybe_int(row.get("cost")),
+                margin=_maybe_int(row.get("margin")),
+                uncosted_sales=_maybe_int(row.get("uncosted_sales")),
+            )
+            for row in rows
+        ]
+
+    async def sales_by_product(
+        self, store_id: str, since: date, until: date, tz: str
+    ) -> list[ProductSales]:
+        rows = await self._send(
+            "POST",
+            "rpc/report_sales_by_product",
+            json=_range(store_id, since, until, tz),
+        )
+        return [
+            ProductSales(
+                product_id=str(row["product_id"]),
+                sku=row["sku"],
+                name=row["name"],
+                uom=row["uom"],
+                qty_milli=int(row["qty_milli"]),
+                sales_count=int(row["sales_count"]),
+                sales=int(row["sales"]),
+                tax=int(row["tax"]),
+                discounts=int(row["discounts"]),
+                cost=_maybe_int(row.get("cost")),
+                margin=_maybe_int(row.get("margin")),
+                uncosted_sales=_maybe_int(row.get("uncosted_sales")),
+            )
+            for row in rows
+        ]
+
+    async def stock_position(self, store_id: str) -> list[StockPosition]:
+        rows = await self._send(
+            "POST", "rpc/report_stock_position", json={"p_store_id": store_id}
+        )
+        return [
+            StockPosition(
+                product_id=str(row["product_id"]),
+                sku=row["sku"],
+                name=row["name"],
+                uom=row["uom"],
+                on_hand=int(row["on_hand"]),
+                reorder_point=int(row["reorder_point"]),
+                price=_maybe_int(row.get("price")),
+                value_at_price=_maybe_int(row.get("value_at_price")),
+                unit_cost=_maybe_int(row.get("unit_cost")),
+                value_at_cost=_maybe_int(row.get("value_at_cost")),
+            )
+            for row in rows
         ]
 
     # ── Products ──────────────────────────────────────────────────────────
@@ -802,6 +885,20 @@ class AdminService:
                 },
             )
         ]
+
+
+def _range(store_id: str, since: date, until: date, tz: str) -> dict[str, str]:
+    """Local days and the zone they are local to; 0026 finds the instants."""
+    return {
+        "p_store_id": store_id,
+        "p_from": since.isoformat(),
+        "p_to": until.isoformat(),
+        "p_tz": tz,
+    }
+
+
+def _maybe_int(value: Any) -> int | None:
+    return None if value is None else int(value)
 
 
 def _clean(fields: dict[str, Any]) -> dict[str, Any]:

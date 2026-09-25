@@ -132,8 +132,12 @@ def test_a_full_login_over_real_http(live_server: tuple[int, str, Settings]) -> 
     assert response.status_code == 200, response.text
     assert response.json()["full_name"] == "Anita Rao"
 
-    # And the register screen is denied margin, over the same connection.
-    denied = httpx.get(f"{base}/reports/margin", headers=headers, timeout=10.0)
+    # And the cashier is denied the owner's reports, over the same connection.
+    denied = httpx.get(
+        f"{base}/reports/products?since=2026-09-24&until=2026-09-24",
+        headers=headers,
+        timeout=10.0,
+    )
     assert denied.status_code == 403
 
 

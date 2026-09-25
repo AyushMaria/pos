@@ -20,6 +20,7 @@ import re
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
+from uuid import UUID
 
 import pytest
 
@@ -2567,3 +2568,327 @@ def test_a_cashier_gets_no_day_close_check(pg: Any) -> None:
         session_id = _seed_a_closed_day(cur, till_sales=1, cloud_sales=1)
 
         assert _check_as(cur, _cashier_claims(), session_id) == {}
+
+
+# ── 0026: the owner's reports ───────────────────────────────────────────────
+#
+# Three SECURITY DEFINER functions: the first place since 0005 that reads
+# `cost` for a caller who cannot. So the guard inside each is the security,
+# and these tests are what it is held to — the same three answers the margin
+# view gives (no rows, rows without cost, rows with it), plus the rules that
+# make the numbers true.
+
+ATTA = "018f0000-0000-7000-8000-000000001001"  # ₹275, cost ₹242 (seed)
+MILK = "018f0000-0000-7000-8000-000000001002"  # ₹33, cost ₹30
+
+REPORT_DAY = "2026-09-25"
+
+
+def _sold(
+    cur: Any,
+    n: int,
+    *,
+    lines: list[tuple[str, int, int]],
+    paid: list[tuple[str, int, bool]] | None = None,
+    status: str = "completed",
+    received: str = f"{REPORT_DAY} 06:00+05:30",
+    store_id: str = STORE_ID,
+) -> str:
+    """A sale the cloud received at `received`, seeded as the owner.
+
+    `lines` are (product, qty_milli, line_total); `paid` are (method, amount,
+    verified), defaulting to cash for the whole of it.
+    """
+    sale_id = f"019500bb-0000-7000-8000-0000000{n:05d}"
+    total = sum(line_total for _, _, line_total in lines)
+    cur.execute(
+        "insert into public.sales (id, store_id, terminal_id, cashier_id, status, "
+        "grand_total, tax_total, rounding_adjustment, client_created_at, "
+        "server_received_at) values (%s, %s, %s, %s, %s, %s, 100, -40, %s, %s)",
+        (sale_id, store_id, TERMINAL_UUID, CASHIER_ID, status, total, received, received),
+    )
+    for line_no, (product_id, qty, line_total) in enumerate(lines, start=1):
+        cur.execute(
+            "insert into public.sale_lines (id, sale_id, line_no, product_id, "
+            "description, qty_milli, unit_price, line_total, tax_amount) "
+            "values (gen_random_uuid(), %s, %s, %s, 'item', %s, %s, %s, 50)",
+            (sale_id, line_no, product_id, qty, line_total, line_total),
+        )
+    for method, amount, verified in paid or [("cash", total, False)]:
+        cur.execute(
+            "insert into public.payments (id, sale_id, method, amount, status, "
+            "confirmation_method, verified) values (gen_random_uuid(), %s, %s, %s, "
+            "'approved', 'immediate', %s)",
+            (sale_id, method, amount, verified),
+        )
+    return sale_id
+
+
+def _costs_known_since_2021(cur: Any) -> None:
+    """The seed's costs, recorded on a fixed date rather than when it ran.
+
+    The seed's price rows are stamped `now()` as the suite starts, and a cost
+    is only used for sales that arrived after it was recorded — so a test
+    selling on a fixed date would pass or fail by the wall clock. Closed the
+    next day, so they are never the current *price*.
+    """
+    cur.execute(
+        "insert into public.product_prices (product_id, store_id, price, cost, "
+        "valid_from, valid_to) values "
+        "(%s, %s, 27500, 24200, '2021-01-01', '2021-01-02'), "
+        "(%s, %s, 3300, 3000, '2021-01-01', '2021-01-02')",
+        (ATTA, STORE_ID, MILK, STORE_ID),
+    )
+
+
+def _reviewed(cur: Any, sale_id: str, outcome: str) -> None:
+    cur.execute(
+        "insert into public.sale_reviews (id, sale_id, outcome, resolved_by, resolved_at) "
+        "values (gen_random_uuid(), %s, %s, %s, now())",
+        (sale_id, outcome, SUPERVISOR_ID),
+    )
+
+
+def _report(
+    cur: Any, jwt_claims: str, sql: str, params: tuple = ()
+) -> list[dict[str, Any]]:
+    cur.execute("set local role authenticated")
+    cur.execute("select set_config('request.jwt.claims', %s, true)", (jwt_claims,))
+    cur.execute(sql, params)
+    names = [column.name for column in cur.description]
+    rows = [dict(zip(names, row, strict=True)) for row in cur.fetchall()]
+    cur.execute("reset role")
+    return rows
+
+
+def _days(cur: Any, jwt_claims: str, since: str = REPORT_DAY, until: str = REPORT_DAY) -> list:
+    return _report(
+        cur, jwt_claims,
+        "select * from public.report_sales_by_day(%s, %s, %s, 'Asia/Kolkata')",
+        (STORE_ID, since, until),
+    )
+
+
+def _products(cur: Any, jwt_claims: str) -> list[dict[str, Any]]:
+    return _report(
+        cur, jwt_claims,
+        "select * from public.report_sales_by_product(%s, %s, %s, 'Asia/Kolkata')",
+        (STORE_ID, REPORT_DAY, REPORT_DAY),
+    )
+
+
+def _a_basket(cur: Any) -> None:
+    """Two atta and a milk, ₹583, paid ₹500 cash and ₹83 UPI unverified."""
+    _costs_known_since_2021(cur)
+    _sold(
+        cur, 1,
+        lines=[(ATTA, 2_000, 55_000), (MILK, 1_000, 3_300)],
+        paid=[("cash", 50_000, False), ("upi", 8_300, False)],
+    )
+
+
+def test_a_manager_reads_the_day_with_cost_and_margin(pg: Any) -> None:
+    with pg.transaction(force_rollback=True):
+        cur = pg.cursor()
+        _a_basket(cur)
+        (day,) = _days(cur, claims(MANAGER_ID, perms.MANAGER))
+
+    assert day["sales_count"] == 1
+    assert day["takings"] == 58_300
+    assert (day["cash"], day["upi_attested"], day["upi_verified"]) == (50_000, 8_300, 0)
+    assert day["cost"] == 2 * 24_200 + 3_000
+    assert day["margin"] == 58_300 - (2 * 24_200 + 3_000)
+    assert day["uncosted_sales"] == 0
+
+
+def test_a_supervisor_reads_the_same_day_without_cost(pg: Any) -> None:
+    """`report.sales.store` is not `report.margin` — same rows, no cost."""
+    with pg.transaction(force_rollback=True):
+        cur = pg.cursor()
+        _a_basket(cur)
+        (day,) = _days(cur, claims(SUPERVISOR_ID, perms.SUPERVISOR))
+        (atta, _milk) = _products(cur, claims(SUPERVISOR_ID, perms.SUPERVISOR))
+
+    assert day["takings"] == 58_300
+    assert (day["cost"], day["margin"], day["uncosted_sales"]) == (None, None, None)
+    assert atta["sales"] == 55_000
+    assert (atta["cost"], atta["margin"]) == (None, None)
+
+
+def test_a_cashier_gets_no_report_at_all(pg: Any) -> None:
+    """Not their own sales, either: a cashier's own-row read on `sales` does
+    not make them a reader of the shop's takings."""
+    with pg.transaction(force_rollback=True):
+        cur = pg.cursor()
+        _a_basket(cur)
+        cur.execute(
+            "insert into public.stock_levels (store_id, product_id, on_hand) "
+            "values (%s, %s, 5000)",
+            (STORE_ID, ATTA),
+        )
+        assert _days(cur, _cashier_claims()) == []
+        assert _products(cur, _cashier_claims()) == []
+        assert _report(
+            cur, _cashier_claims(),
+            "select * from public.report_stock_position(%s)", (STORE_ID,),
+        ) == []
+
+
+def test_a_manager_of_another_store_gets_nothing_for_this_one(pg: Any) -> None:
+    with pg.transaction(force_rollback=True):
+        cur = pg.cursor()
+        _a_basket(cur)
+        elsewhere = claims(MANAGER_ID, perms.MANAGER, store_ids=[OTHER_STORE_ID])
+        assert _days(cur, elsewhere) == []
+        assert _products(cur, elsewhere) == []
+
+
+def test_the_day_is_the_shops_day_not_utcs(pg: Any) -> None:
+    """00:05 IST on the 25th is 18:35 UTC on the 24th. The owner means the 25th."""
+    with pg.transaction(force_rollback=True):
+        cur = pg.cursor()
+        _sold(cur, 1, lines=[(MILK, 1_000, 3_300)], received="2026-09-24 18:35+00")
+        _sold(cur, 2, lines=[(MILK, 1_000, 3_300)], received="2026-09-24 18:25+00")
+        days = _days(cur, claims(MANAGER_ID, perms.MANAGER), "2026-09-24", REPORT_DAY)
+
+    by_day = {str(d["day"]): d["sales_count"] for d in days}
+    assert by_day == {"2026-09-24": 1, REPORT_DAY: 1}
+
+
+def test_a_day_with_no_sales_is_a_line_of_zeros(pg: Any) -> None:
+    """A closed Sunday says so, rather than the week looking six days long."""
+    with pg.transaction(force_rollback=True):
+        cur = pg.cursor()
+        days = _days(cur, claims(MANAGER_ID, perms.MANAGER), "2026-09-21", "2026-09-27")
+
+    assert len(days) == 7
+    assert all(d["takings"] == 0 and d["cost"] == 0 for d in days)
+
+
+def test_a_sale_under_review_is_beside_the_takings_not_in_them(pg: Any) -> None:
+    """The Z-report's rule. `paid` counts; `not_paid` is in no figure; an
+    unresolved review is a count and a sum on its own."""
+    with pg.transaction(force_rollback=True):
+        cur = pg.cursor()
+        _sold(cur, 1, lines=[(MILK, 1_000, 3_300)])
+        open_review = _sold(cur, 2, lines=[(MILK, 1_000, 3_700)], status="requires_review")
+        paid = _sold(cur, 3, lines=[(MILK, 1_000, 3_300)], status="requires_review")
+        unpaid = _sold(cur, 4, lines=[(ATTA, 1_000, 27_500)], status="requires_review")
+        _reviewed(cur, paid, "paid")
+        _reviewed(cur, unpaid, "not_paid")
+        (day,) = _days(cur, claims(MANAGER_ID, perms.MANAGER))
+        products = _products(cur, claims(MANAGER_ID, perms.MANAGER))
+
+    assert open_review
+    assert day["sales_count"] == 2
+    assert day["takings"] == 6_600
+    assert (day["under_review_count"], day["under_review_total"]) == (1, 3_700)
+    # The atta was never paid for: it is not a best seller.
+    assert [str(p["product_id"]) for p in products] == [MILK]
+    assert products[0]["qty_milli"] == 2_000
+
+
+def test_cost_is_the_one_known_when_the_sale_arrived(pg: Any) -> None:
+    """Two things the current price row would have got wrong.
+
+    A reprice after the cost was recorded opens a row with no cost (phase 6's
+    `set_price` sends only the price); the margin must keep using the last
+    known one. And a sale from before any cost was recorded is uncosted, not
+    costed retroactively at today's figure.
+    """
+    with pg.transaction(force_rollback=True):
+        cur = pg.cursor()
+        _costs_known_since_2021(cur)
+        cur.execute(
+            "insert into public.product_prices (product_id, store_id, price, cost, "
+            "valid_from) values (%s, %s, 3500, null, '2026-01-01')",
+            (MILK, STORE_ID),
+        )
+        _sold(cur, 1, lines=[(MILK, 1_000, 3_500)], received=f"{REPORT_DAY} 23:00+05:30")
+        _sold(cur, 2, lines=[(MILK, 1_000, 3_300)], received="2020-01-01 10:00+05:30")
+        (today,) = _days(cur, claims(MANAGER_ID, perms.MANAGER))
+        (then,) = _days(cur, claims(MANAGER_ID, perms.MANAGER), "2020-01-01", "2020-01-01")
+
+    assert (today["cost"], today["margin"], today["uncosted_sales"]) == (3_000, 500, 0)
+    assert (then["cost"], then["margin"], then["uncosted_sales"]) == (0, 0, 3_300)
+
+
+def test_a_margin_percentage_covers_the_costed_lines_only(pg: Any) -> None:
+    """The unlisted placeholder has no cost and never will. Its sales must
+    not take the whole day's margin down with them."""
+    with pg.transaction(force_rollback=True):
+        cur = pg.cursor()
+        _costs_known_since_2021(cur)
+        _sold(cur, 1, lines=[(MILK, 1_000, 3_300), (UNLISTED_PRODUCT_ID, 1_000, 10_000)])
+        (day,) = _days(cur, claims(MANAGER_ID, perms.MANAGER))
+
+    assert day["margin"] == 300
+    assert day["uncosted_sales"] == 10_000
+
+
+def test_the_days_takings_tie_to_the_z_report(pg: Any) -> None:
+    """The plan's proof in miniature: the report's takings for the day are
+    the stored close's cash + UPI for the same sales, to the paisa."""
+    with pg.transaction(force_rollback=True):
+        cur = pg.cursor()
+        session_id = _seed_a_closed_day(cur, till_sales=3, cloud_sales=3)
+        cur.execute(
+            "select cash_sales + upi_attested + upi_verified, "
+            "(now() at time zone 'Asia/Kolkata')::date::text "
+            "from public.shift_closes where session_id = %s",
+            (session_id,),
+        )
+        z_takings, today = cur.fetchone()
+        (day,) = _days(cur, claims(MANAGER_ID, perms.MANAGER), today, today)
+
+    assert day["takings"] == z_takings == 11_100
+
+
+def test_the_stock_position_values_the_shelf(pg: Any) -> None:
+    with pg.transaction(force_rollback=True):
+        cur = pg.cursor()
+        cur.execute(
+            "insert into public.stock_levels (store_id, product_id, on_hand, "
+            "reorder_point) values (%s, %s, 12000, 4000), (%s, %s, 1500, 0)",
+            (STORE_ID, ATTA, STORE_ID, MILK),
+        )
+        rows = _report(
+            cur, claims(MANAGER_ID, perms.MANAGER),
+            "select * from public.report_stock_position(%s)", (STORE_ID,),
+        )
+        bare = _report(
+            cur, claims(SUPERVISOR_ID, perms.SUPERVISOR),
+            "select * from public.report_stock_position(%s)", (STORE_ID,),
+        )
+
+    atta = next(r for r in rows if r["product_id"] == UUID(ATTA))
+    milk = next(r for r in rows if r["product_id"] == UUID(MILK))
+    assert (atta["value_at_price"], atta["value_at_cost"]) == (12 * 27_500, 12 * 24_200)
+    assert milk["value_at_price"] == 4_950  # one and a half at ₹33
+    assert all(r["unit_cost"] is None and r["value_at_cost"] is None for r in bare)
+    assert [r["value_at_price"] for r in bare] == [r["value_at_price"] for r in rows]
+
+
+def test_nobody_reaches_the_reports_without_signing_in(pg: Any) -> None:
+    """The shim has no Supabase default privileges, so this holds the PUBLIC
+    revoke; 0026 names `anon` as well for the project, where it is granted
+    EXECUTE on new functions in `public` directly."""
+    with pg.transaction(force_rollback=True):
+        cur = pg.cursor()
+        cur.execute("set local role anon")
+        with pytest.raises(psycopg.errors.InsufficientPrivilege):
+            cur.execute(
+                "select * from public.report_sales_by_day(%s, %s, %s)",
+                (STORE_ID, REPORT_DAY, REPORT_DAY),
+            )
+
+
+def test_the_unguarded_helpers_are_not_callable_directly(pg: Any) -> None:
+    """`pos.report_sales` carries no guard of its own; only the definer
+    functions may run it."""
+    with pytest.raises(Denied):
+        run_as(
+            pg, claims(MANAGER_ID, perms.MANAGER),
+            "select * from pos.report_lines(%s, %s, %s, 'Asia/Kolkata')",
+            (STORE_ID, REPORT_DAY, REPORT_DAY),
+        )
